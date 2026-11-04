@@ -7,6 +7,7 @@ import pytest
 
 from face_matching.detection_video import VideoControl, analyze_video
 from face_matching.person_vehicle import ObjectDetection
+from face_matching.vision.io import read_image
 
 
 @pytest.fixture
@@ -56,6 +57,31 @@ def test_cancel_removes_partial_video_and_emits_no_success_path(video, tmp_path)
     assert report.cancelled and report.output is None and report.frames == 1
     assert not output.exists()
     assert not list(tmp_path.glob(".detection-*"))
+
+
+def test_target_screenshots_use_original_frames_even_when_previews_are_throttled(video, tmp_path, monkeypatch):
+    monkeypatch.setattr("face_matching.detection_video.time.monotonic", lambda: 1.0)
+    detector = CountingDetector()
+    events = []
+    report = analyze_video(video, detector, on_frame=lambda *args: events.append(args[2]),
+                           screenshot_parent=tmp_path)
+    assert events == [1, 12]
+    assert report.screenshots == 12
+    files = sorted(report.screenshot_directory.glob("*.png"))
+    assert len(files) == 12
+    assert files[-1].name == "第000000012帧-人-001.png"
+    pixels = read_image(files[-1])
+    assert pixels.shape == (20, 20, 3)
+    assert (pixels == 130).all()
+    assert not list(tmp_path.glob(".截图-*"))
+
+
+def test_cancel_removes_unfinished_target_screenshots(video, tmp_path):
+    control = VideoControl()
+    report = analyze_video(video, CountingDetector(), on_frame=lambda *args: control.stopped.set(),
+                           control=control, screenshot_parent=tmp_path)
+    assert report.cancelled and report.screenshots == 0 and report.screenshot_directory is None
+    assert list(tmp_path.iterdir()) == [video]
 
 
 def test_failure_removes_partial_video(video, tmp_path):

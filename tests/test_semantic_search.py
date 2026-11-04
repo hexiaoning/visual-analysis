@@ -13,6 +13,7 @@ from face_matching.gui.semantic_search import SemanticSearchWidget, SourceVideoD
 from face_matching.image_enhancement import encode_png
 from face_matching.semantic_model import ChineseTokenizer, normalized_feature
 from face_matching.semantic_search import COLORS, QueryScorer, SemanticIndex, object_colors, parse_query, sample_frames
+from face_matching.vision.io import read_image
 from face_matching.visual_search import SearchHit, read_hit_frame
 
 
@@ -166,7 +167,9 @@ def test_cancel_rolls_back_incomplete_source_and_errors_are_reported(tmp_path):
 def test_semantic_widget_worker_export_metadata_and_video_seek(qt_runtime, tmp_path, monkeypatch):
     monkeypatch.setenv('FACE_MATCHING_HOME', str(tmp_path / 'home'))
     monkeypatch.setattr('face_matching.gui.semantic_search.SemanticEncoder', Encoder)
-    monkeypatch.setattr('face_matching.gui.semantic_search.load_person_vehicle_detector', lambda *a, **kw: detector())
+    target = SimpleNamespace(bbox=(10, 15, 50, 45), is_person=False)
+    monkeypatch.setattr('face_matching.gui.semantic_search.load_person_vehicle_detector',
+                        lambda *a, **kw: SimpleNamespace(detect=lambda frame: [target]))
     video = tmp_path / 'white.avi'
     make_video(video)
     tool = SemanticSearchWidget(AppConfig())
@@ -200,6 +203,17 @@ def test_semantic_widget_worker_export_metadata_and_video_seek(qt_runtime, tmp_p
             player.done(0)
             assert not player.capture.isOpened()
             player.deleteLater()
+        monkeypatch.setattr('face_matching.gui.semantic_search.QFileDialog.getExistingDirectory',
+                            lambda *args: str(tmp_path))
+        assert tool.screenshot_button.isEnabled()
+        tool.screenshot_button.click()
+        deadline = time.monotonic() + 10
+        while tool.is_busy() and time.monotonic() < deadline:
+            qt_runtime.processEvents()
+            QTest.qWait(5)
+        assert not tool.is_busy() and '已保存 3 张' in tool.status.text()
+        screenshot, = tmp_path.glob('语义截图-*/*-车辆-white-第000000003帧.png')
+        np.testing.assert_array_equal(read_image(screenshot), read_hit_frame(hit)[15:45, 10:50])
     finally:
         tool.stop()
         if tool.worker:

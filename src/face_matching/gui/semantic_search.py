@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import json
 import math
 from pathlib import Path
+import tempfile
 import threading
 
 import cv2
@@ -15,8 +16,9 @@ from PySide6.QtWidgets import (
     QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
+from ..image_enhancement import save_new_png
 from ..models import SEMANTIC_MODEL_ID
-from ..person_vehicle import load_person_vehicle_detector
+from ..person_vehicle import crop_object, load_person_vehicle_detector
 from ..semantic_model import SemanticEncoder
 from ..semantic_search import SemanticIndex, parse_query
 from ..visual_search import SearchHit, collect_sources, read_hit_frame
@@ -142,11 +144,69 @@ class SemanticSearchWorker(QThread):
                 index.close()
 
 
+class ScreenshotExportWorker(QThread):
+    progress = Signal(str)
+    result = Signal(str)
+
+    def __init__(self, parent_directory: Path, hits: list[SearchHit], category: str,
+                 parent: QWidget) -> None:
+        super().__init__(parent)
+        self.parent_directory = parent_directory
+        self.hits = list(hits)
+        self.category = category
+        self.stopped = threading.Event()
+
+    def run(self) -> None:
+        directory = None
+        saved = failed = 0
+        first_error = ''
+        category = '人物' if self.category == 'person' else '车辆'
+        # Keep one decoded frame at a time and reuse it for hits at the same position.
+        frame = None
+        frame_key = None
+        ordered = sorted(enumerate(self.hits, 1), key=lambda item: (item[1].source, item[1].frame_index))
+        try:
+            for processed, (rank, hit) in enumerate(ordered, 1):
+                if self.stopped.is_set():
+                    break
+                try:
+                    key = (hit.source, hit.frame_index)
+                    if key != frame_key:
+                        frame = read_hit_frame(hit)
+                        frame_key = key
+                    crop = crop_object(frame, hit.bbox)
+                    if not crop.size:
+                        raise ValueError('目标坐标超出来源画面')
+                except (OSError, ValueError, cv2.error) as exc:
+                    failed += 1
+                    if not first_error:
+                        first_error = f'{hit.source} · {exc}'
+                    continue
+                if directory is None:
+                    directory = Path(tempfile.mkdtemp(prefix='语义截图-', dir=self.parent_directory))
+                stem = Path(hit.source).stem[:40]
+                position = '图片' if hit.seconds is None else f'第{hit.frame_index + 1:09d}帧'
+                name = f'{rank:03d}-{category}-{stem}-{position}.png'
+                save_new_png(directory / name, crop)
+                saved += 1
+                self.progress.emit(f'正在导出目标截图 · {processed}/{len(ordered)}')
+        except (OSError, cv2.error) as exc:
+            state = f'截图导出中断 · {exc}'
+        else:
+            state = '截图导出已停止' if self.stopped.is_set() else '截图导出完成'
+        summary = f'{state} · 已保存 {saved} 张 · 读取失败 {failed} 项'
+        if directory is not None:
+            summary += f' · {directory}'
+        if first_error:
+            summary += f'\n{first_error}'
+        self.result.emit(summary)
+
+
 class SemanticSearchWidget(QWidget):
     def __init__(self, config, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.config = config
-        self.worker: SemanticSearchWorker | None = None
+        self.worker: SemanticSearchWorker | ScreenshotExportWorker | None = None
         self.paths: list[Path] = []
         self.hits: list[SearchHit] = []
         self.failures: list[str] = []
@@ -192,6 +252,8 @@ class SemanticSearchWidget(QWidget):
         self.play_button.clicked.connect(self.open_video)
         self.export_button = QPushButton('导出搜索记录 JSON…')
         self.export_button.clicked.connect(self.export)
+        self.screenshot_button = QPushButton('批量导出目标截图…')
+        self.screenshot_button.clicked.connect(self.export_screenshots)
         self.status = QLabel('添加本地素材，输入中文描述后搜索。首次分析建立索引，后续相同抽帧设置可复用。')
         self.status.setWordWrap(True)
         layout = QVBoxLayout(self)
@@ -218,6 +280,7 @@ class SemanticSearchWidget(QWidget):
         footer = QHBoxLayout()
         footer.addWidget(self.play_button)
         footer.addStretch()
+        footer.addWidget(self.screenshot_button)
         footer.addWidget(self.export_button)
         layout.addLayout(footer)
         layout.addWidget(self.status)
@@ -237,6 +300,7 @@ class SemanticSearchWidget(QWidget):
         self.play_button.setEnabled(not busy and 0 <= row < len(self.hits)
                                     and self.hits[row].seconds is not None)
         self.export_button.setEnabled(not busy and self.search_info is not None)
+        self.screenshot_button.setEnabled(not busy and bool(self.hits))
 
     def set_paths(self, paths: list[Path]) -> None:
         if self.is_busy():
@@ -283,7 +347,10 @@ class SemanticSearchWidget(QWidget):
     def stop(self) -> None:
         if self.worker:
             self.worker.stopped.set()
-            self.status.setText('正在停止，等待当前模型推理完成…')
+            if isinstance(self.worker, ScreenshotExportWorker):
+                self.status.setText('正在停止导出目标截图…')
+            else:
+                self.status.setText('正在停止，等待当前模型推理完成…')
 
     def _completed(self, hits, failures, stats) -> None:
         self.hits, self.failures = hits, failures
@@ -349,3 +416,22 @@ class SemanticSearchWidget(QWidget):
                            'failures': self.failures}, stream, ensure_ascii=False, indent=2)
         except (OSError, ValueError) as exc:
             QMessageBox.warning(self, '无法导出', str(exc))
+
+    def export_screenshots(self) -> None:
+        if self.is_busy() or not self.hits:
+            return
+        path = QFileDialog.getExistingDirectory(self, '选择目标截图保存目录')
+        if not path:
+            return
+        self.worker = ScreenshotExportWorker(Path(path), self.hits, self.search_info['category'], self)
+        self.worker.progress.connect(self.status.setText)
+        self.worker.result.connect(self.status.setText)
+        self.worker.finished.connect(self._screenshots_finished)
+        self.status.setText('正在导出目标截图…')
+        self.worker.start()
+        self.update_buttons()
+
+    def _screenshots_finished(self) -> None:
+        worker, self.worker = self.worker, None
+        worker.deleteLater()
+        self.update_buttons()

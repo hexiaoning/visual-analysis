@@ -12,7 +12,8 @@ from typing import Callable
 import cv2
 import numpy as np
 
-from .person_vehicle import ObjectDetection, annotate_objects
+from .image_enhancement import save_new_png
+from .person_vehicle import ObjectDetection, annotate_objects, crop_object
 
 
 class VideoControl:
@@ -32,6 +33,8 @@ class DetectionVideoReport:
     fps: float
     cancelled: bool
     output: Path | None
+    screenshot_directory: Path | None = None
+    screenshots: int = 0
 
 
 FrameCallback = Callable[[np.ndarray, list[ObjectDetection], int, int, float], None]
@@ -41,6 +44,8 @@ def analyze_video(
     source: Path, detector: object, output: Path | None = None,
     on_frame: FrameCallback | None = None, control: VideoControl | None = None,
     realtime: bool = False,
+    *,
+    screenshot_parent: Path | None = None,
 ) -> DetectionVideoReport:
     """Detect every decoded frame. Preview throttling never skips inference/export.
 
@@ -48,11 +53,16 @@ def analyze_video(
     or cancelled work removes temporary video; existing destinations are safe.
     """
     control = control or VideoControl()
+    if output is not None and screenshot_parent is not None:
+        raise ValueError("请分别导出标注视频和目标截图。")
     if output is not None and output.exists():
         raise FileExistsError("输出文件已存在，请换一个新文件名；不会覆盖原视频或已有结果。")
     capture = cv2.VideoCapture(str(source))
     writer = None
     temporary: Path | None = None
+    screenshot_stage = None
+    screenshot_directory = None
+    screenshots = 0
     frames, last_preview = 0, 0
     last_emit = -math.inf
     try:
@@ -77,6 +87,18 @@ def analyze_video(
             if control.stopped.is_set():
                 break
             detections = next_detections
+            if screenshot_parent is not None:
+                for number, detection in enumerate(detections, 1):
+                    if control.stopped.is_set():
+                        break
+                    crop = crop_object(frame, detection.bbox)
+                    if not crop.size:
+                        continue
+                    if screenshot_stage is None:
+                        screenshot_stage = tempfile.TemporaryDirectory(prefix=".截图-", dir=screenshot_parent)
+                    name = f"第{frames + 1:09d}帧-{detection.label}-{number:03d}.png"
+                    save_new_png(Path(screenshot_stage.name) / name, crop)
+                    screenshots += 1
             annotated = annotate_objects(frame, detections)
             if output is not None:
                 if writer is None:
@@ -126,10 +148,20 @@ def analyze_video(
                     destination.close()
                     output.unlink(missing_ok=True)
                     raise
-        return DetectionVideoReport(frames, fps, cancelled, output if not cancelled else None)
+        if screenshot_stage is not None and not cancelled:
+            staged = Path(screenshot_stage.name)
+            suffix = staged.name.removeprefix(".截图-")
+            name = f"{source.stem[:40]}-人车截图-{suffix}"
+            screenshot_directory = staged.rename(staged.with_name(name))
+        return DetectionVideoReport(
+            frames, fps, cancelled, output if not cancelled else None,
+            screenshot_directory, screenshots if screenshot_directory else 0,
+        )
     finally:
         capture.release()
         if writer is not None:
             writer.release()
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+        if screenshot_stage is not None:
+            screenshot_stage.cleanup()

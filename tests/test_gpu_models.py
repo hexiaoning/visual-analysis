@@ -9,15 +9,20 @@ from face_matching import gpu
 from face_matching.errors import GPUUnavailableError
 from face_matching import models
 from face_matching.models import ModelFile, ModelProfile, file_sha256, is_valid_model
+from face_matching.person_vehicle import load_person_vehicle_detector
 
 
 class FakeOptions:
     def __init__(self):
         self.log_severity_level = None
         self.entries = {}
+        self.dimension_overrides = {}
 
     def add_session_config_entry(self, name, value):
         self.entries[name] = value
+
+    def add_free_dimension_override_by_name(self, name, value):
+        self.dimension_overrides[name] = value
 
 
 class FakeOrt:
@@ -98,6 +103,7 @@ def test_session_allows_cpu_shape_helpers_and_requires_cuda_inference(monkeypatc
     assert runtime.enable_fallback is False
     assert runtime.fallback_disabled
     assert not runtime.profile.exists()
+    assert not runtime.options.dimension_overrides
     assert runtime.providers == [
         (
             "CUDAExecutionProvider",
@@ -112,11 +118,25 @@ def test_session_allows_cpu_shape_helpers_and_requires_cuda_inference(monkeypatc
     ]
 
 
+def test_rtdetr_specializes_cuda_input_before_profiling(monkeypatch, tmp_path):
+    runtime = FakeOrt()
+    monkeypatch.setattr(gpu, "_load_ort", lambda: runtime)
+    monkeypatch.setattr(gpu, "assert_cuda_available", lambda: "CUDA test")
+    monkeypatch.setattr(models, "required_person_vehicle_model", lambda: tmp_path / "rtdetr.onnx")
+
+    detector = load_person_vehicle_detector(backend="cuda")
+
+    assert detector.session is runtime
+    assert runtime.options.dimension_overrides == {"batch_size": 1, "height": 640, "width": 640}
+    assert runtime.fallback_disabled
+
+
 @pytest.mark.parametrize("event", [
     kernel("Conv", "CPUExecutionProvider"),
     kernel("MatMul", "CPUExecutionProvider"),
     kernel("Gather", "CPUExecutionProvider", inputs=[{"float": [1, 4]}], outputs=[{"float": [1, 4]}]),
     kernel("Gather", "CPUExecutionProvider", inputs=[{"int64": [128]}], outputs=[{"int64": [128]}]),
+    kernel("Cast", "CPUExecutionProvider", inputs=[{"int64": []}], outputs=[{"float": []}]),
     kernel("Gather", "CPUExecutionProvider"),
     kernel("Conv", "OtherProvider"),
     kernel("Conv", None),

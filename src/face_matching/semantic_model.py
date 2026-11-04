@@ -86,16 +86,20 @@ class SemanticEncoder:
             tokens = {name: value for name, value in self.tokenizer.encode(text).items()
                       if name in ('input_ids', 'attention_mask')}
             if self._text is None:
-                self._text = create_gpu_session(self.text_path, self.device_id, self.backend,
-                                               sample_inputs=tokens)
+                self._text = create_gpu_session(
+                    self.text_path, self.device_id, self.backend,
+                    sample_inputs=tokens, cuda_dimension_overrides={'batch': 1},
+                )
             feed = {item.name: tokens[item.name] for item in self._text.get_inputs()}
             self._texts[text] = normalized_feature(self._text.run(None, feed)[0])
         return self._texts[text]
 
     def image(self, image: np.ndarray) -> np.ndarray:
         if self._vision is None:
-            self._vision = create_gpu_session(self.vision_path, self.device_id, self.backend,
-                                             input_shape=(1, 3, 224, 224))
+            self._vision = create_gpu_session(
+                self.vision_path, self.device_id, self.backend,
+                input_shape=(1, 3, 224, 224), cuda_dimension_overrides={'batch': 1},
+            )
         rgb = cv2.cvtColor(cv2.resize(image, (224, 224), interpolation=cv2.INTER_CUBIC), cv2.COLOR_BGR2RGB)
         value = rgb.astype(np.float32) / 255
         value = (value - np.asarray([.48145466, .4578275, .40821073], np.float32)) / np.asarray(

@@ -145,4 +145,9 @@ def test_detector_requests_static_gpu_input_shape(monkeypatch, tmp_path):
         captured.append((args, kwargs)) or FakeSession()
     ))
     load_person_vehicle_detector("openvino", device_id=2)
-    assert captured == [((path,), {"device_id": 2, "backend": "openvino", "input_shape": (1, 3, 640, 640)})]
+    assert captured == [((path,), {
+        "device_id": 2,
+        "backend": "openvino",
+        "input_shape": (1, 3, 640, 640),
+        "cuda_dimension_overrides": {"batch_size": 1, "height": 640, "width": 640},
+    })]

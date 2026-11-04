@@ -51,11 +51,12 @@ class VideoDetectionWorker(QThread):
 
     def __init__(self, source: Path, backend: str, device_id: int, threshold: float,
                  people: bool, vehicles: bool, output: Path | None = None,
-                 parent: QWidget | None = None) -> None:
+                 parent: QWidget | None = None, *, screenshot_parent: Path | None = None) -> None:
         super().__init__(parent)
         self.source, self.backend, self.device_id = source, backend, device_id
         self.threshold, self.people, self.vehicles = threshold, people, vehicles
         self.output = output
+        self.screenshot_parent = screenshot_parent
         self.control = VideoControl()
         self.report = None
 
@@ -80,6 +81,7 @@ class VideoDetectionWorker(QThread):
             self.report = analyze_video(
                 self.source, detector, output=self.output, on_frame=self.frame_ready.emit,
                 control=self.control, realtime=self.output is None,
+                screenshot_parent=self.screenshot_parent,
             )
         except Exception as exc:
             self.failed.emit(str(exc))
@@ -102,6 +104,8 @@ class VideoDetectionWidget(QWidget):
         self.stop_button = QPushButton("停止")
         self.export_button = QPushButton("导出完整标注视频（无音轨）…")
         self.snapshot_button = QPushButton("保存当前帧…")
+        self.save_screenshots = QCheckBox("检测时保存目标截图")
+        self.save_screenshots.setToolTip("点击开始检测后选择目录。每帧每个检测目标保存一张裁剪图。")
         self.open_button.clicked.connect(self._open)
         self.start_button.clicked.connect(lambda: self.start())
         self.pause_button.clicked.connect(self._pause)
@@ -148,6 +152,7 @@ class VideoDetectionWidget(QWidget):
         footer = QHBoxLayout()
         footer.addWidget(self.counts)
         footer.addStretch()
+        footer.addWidget(self.save_screenshots)
         footer.addWidget(self.snapshot_button)
         footer.addWidget(self.export_button)
         layout = QVBoxLayout(self)
@@ -171,7 +176,7 @@ class VideoDetectionWidget(QWidget):
         self.snapshot_button.setEnabled(self.last_frame is not None and not busy)
         self.pause_button.setEnabled(busy)
         self.stop_button.setEnabled(busy)
-        for control in (self.threshold, self.people, self.vehicles, self.backend):
+        for control in (self.threshold, self.people, self.vehicles, self.backend, self.save_screenshots):
             control.setEnabled(not busy)
 
     def _open(self) -> None:
@@ -211,9 +216,16 @@ class VideoDetectionWidget(QWidget):
         if output is not None and output.exists():
             QMessageBox.warning(self, "文件已存在", "请换一个新文件名，不会覆盖原视频或已有结果。")
             return
+        screenshot_parent = None
+        if output is None and self.save_screenshots.isChecked():
+            directory = QFileDialog.getExistingDirectory(self, "选择目标截图保存目录", str(self.source.parent))
+            if not directory:
+                return
+            screenshot_parent = Path(directory)
         self.worker = VideoDetectionWorker(
             self.source, self.backend.currentData(), self.device_id, self.threshold.value(),
             self.people.isChecked(), self.vehicles.isChecked(), output, self,
+            screenshot_parent=screenshot_parent,
         )
         self.worker.frame_ready.connect(self._frame)
         self.worker.backend_ready.connect(lambda value: self.status.setText(f"GPU：{value} · 正在逐帧检测…"))
@@ -268,7 +280,12 @@ class VideoDetectionWidget(QWidget):
             elif report.output:
                 self.status.setText(f"已导出完整标注视频（无音轨）：{report.output} · {report.frames} 帧 · {report.fps:g} FPS")
             else:
-                self.status.setText(f"检测完成 · 共 {report.frames} 帧 · {report.frames / report.fps:.2f} 秒")
+                status = f"检测完成 · 共 {report.frames} 帧 · {report.frames / report.fps:.2f} 秒"
+                if worker.screenshot_parent is not None:
+                    status += f" · 已保存 {report.screenshots} 张目标截图"
+                    if report.screenshot_directory is not None:
+                        status += f" · {report.screenshot_directory}"
+                self.status.setText(status)
         self.progress.setRange(0, 1000)
         self._update_buttons()
         worker.deleteLater()

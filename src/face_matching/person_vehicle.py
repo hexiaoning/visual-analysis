@@ -6,12 +6,14 @@ and normalized center/width/height boxes. No minimum target size is imposed.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 import cv2
 import numpy as np
 
 
 MODEL_TITLE = "RT-DETRv2-R50"
+_INPUT_SIZE = 640
 CLASS_NAMES = {
     0: ("person", "人"), 1: ("bicycle", "自行车"), 2: ("car", "汽车"),
     3: ("motorcycle", "摩托车"), 5: ("bus", "公交车"),
@@ -57,7 +59,7 @@ class PersonVehicleDetector:
         if image is None or not image.size:
             return []
         height, width = image.shape[:2]
-        rgb = cv2.cvtColor(cv2.resize(image, (640, 640)), cv2.COLOR_BGR2RGB)
+        rgb = cv2.cvtColor(cv2.resize(image, (_INPUT_SIZE, _INPUT_SIZE)), cv2.COLOR_BGR2RGB)
         tensor = np.ascontiguousarray(rgb.transpose(2, 0, 1)[None], dtype=np.float32) / 255
         outputs = self.session.run(self.output_names, {self.input_name: tensor})
         if (len(outputs) != 2 or np.asarray(outputs[0]).shape != (1, 300, 80)
@@ -95,11 +97,22 @@ def load_person_vehicle_detector(backend: str = "auto", device_id: int = 0,
     from .gpu import create_gpu_session
     from .models import required_person_vehicle_model
 
-    return PersonVehicleDetector(
-        create_gpu_session(required_person_vehicle_model(), device_id=device_id,
-                           backend=backend, input_shape=(1, 3, 640, 640)),
-        threshold, people, vehicles,
+    # Specializing the exported shape lets ORT fold size-dependent decoder
+    # calculations before CUDA assigns the remaining nodes to providers.
+    session = create_gpu_session(
+        required_person_vehicle_model(), device_id=device_id, backend=backend,
+        input_shape=(1, 3, _INPUT_SIZE, _INPUT_SIZE),
+        cuda_dimension_overrides={"batch_size": 1, "height": _INPUT_SIZE, "width": _INPUT_SIZE},
     )
+    return PersonVehicleDetector(session, threshold, people, vehicles)
+
+
+def crop_object(frame: np.ndarray, bbox: tuple[float, float, float, float]) -> np.ndarray:
+    height, width = frame.shape[:2]
+    x1, y1, x2, y2 = bbox
+    left, right = max(0, math.floor(x1)), max(0, min(width, math.ceil(x2)))
+    top, bottom = max(0, math.floor(y1)), max(0, min(height, math.ceil(y2)))
+    return frame[top:bottom, left:right]
 
 
 def annotate_objects(frame: np.ndarray, detections: list[ObjectDetection]) -> np.ndarray:

@@ -1,6 +1,10 @@
 # Face Matching 离线综合分析
 
-## v2.9.0 离线中文语义搜索
+## v2.9.1 离线中文语义搜索
+
+v2.9.1 修复了 NVIDIA CUDA 环境中 RT-DETRv2 因动态尺寸计算触发 GPU 校验、导致语义搜索失败的问题。
+
+- **目标截图**：在“语义搜索”完成后点击“批量导出目标截图”。在人车检测开始前勾选“检测时保存目标截图”，点击“开始检测”后选择保存目录。两处都从原始画面裁剪目标框内的像素并保存为 PNG。视频按帧保存，同一目标出现在多帧时会有多张截图。
 
 一个应用、一个启动入口、一个完整离线 ZIP，统一提供人脸检索、人车检测、图像增强、以图搜索、语义搜索、分类人像库、标注库与设置。旧 `video-analysis` 命令也打开同一个完整应用。
 
@@ -23,7 +27,7 @@
 .\scripts\build_offline_bundle.ps1 -AcceptResearchWeights -RunGpuSmoke
 ```
 
-输出 `dist\FaceMatching-v2.9.0-windows-x64.zip`，包含应用、Python、Qt、OpenCV、CUDA/OpenVINO运行库、SCRFD、所选人脸模型和RT-DETRv2，以及ZIP与逐文件SHA-256。可通过 `-Profiles auraface` 仅选宽松许可的人脸模型。已有构建环境可使用 `-Python <python.exe> -SkipDependencyInstall`。构建执行测试、模型校验、完整功能与DLL审计、打包后所有页面渲染和编解码自检，`-RunGpuSmoke`额外验证全部模型的真实GPU推理。只发布完整离线ZIP，不生成增量包或EXE安装程序。
+输出 `dist\FaceMatching-v2.9.1-windows-x64.zip`，包含应用、Python、Qt、OpenCV、CUDA/OpenVINO运行库、SCRFD、所选人脸模型和RT-DETRv2，以及ZIP与逐文件SHA-256。可通过 `-Profiles auraface` 仅选宽松许可的人脸模型。已有构建环境可使用 `-Python <python.exe> -SkipDependencyInstall`。构建执行测试、模型校验、完整功能与DLL审计、打包后所有页面渲染和编解码自检，`-RunGpuSmoke`额外验证全部模型的真实GPU推理。只发布完整离线ZIP，不生成增量包或EXE安装程序。
 
 以下是已有功能的使用说明。
 
@@ -65,7 +69,7 @@ CUDA 启动时执行真实推理并检查节点执行记录，要求存在 CUDA 
 .\scripts\build_offline_bundle.ps1 -Clean -AcceptResearchWeights
 ```
 
-构建脚本会先跑测试，下载并校验固定 SHA-256 的模型，然后把 Python、PySide6、OpenCV、CUDA/OpenVINO GPU 运行库和两套模型一并打入 `dist\FaceMatching-v2.9.0-windows-x64.zip`。目标机不需要 Python、CUDA Toolkit、OpenVINO Toolkit 或互联网；只需预装对应显卡驱动。
+构建脚本会先跑测试，下载并校验固定 SHA-256 的模型，然后把 Python、PySide6、OpenCV、CUDA/OpenVINO GPU 运行库和两套模型一并打入 `dist\FaceMatching-v2.9.1-windows-x64.zip`。目标机不需要 Python、CUDA Toolkit、OpenVINO Toolkit 或互联网；只需预装对应显卡驱动。
 
 目标机解压完整离线 ZIP 后双击 `启动综合分析.cmd`，全部功能在同一窗口内使用。运维自检可运行 `FaceMatching.exe --check-runtime --diagnose --report diagnostics.json`。目标机不会调用 `winget` 或 `pip`。发布仅提供完整离线 ZIP。
 

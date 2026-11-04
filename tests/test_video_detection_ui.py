@@ -95,6 +95,26 @@ def test_model_failure_restores_controls_without_starting_download(app, video, t
     tools.close()
 
 
+def test_start_detection_saves_person_and_vehicle_screenshots(app, video, tmp_path, monkeypatch):
+    detector = SimpleNamespace(
+        session=SimpleNamespace(get_providers=lambda: ["test-GPU"]),
+        detect=lambda frame: [ObjectDetection(0, 0.91, (10, 20, 30, 50)),
+                              ObjectDetection(2, 0.82, (40, 20, 80, 50))],
+    )
+    monkeypatch.setattr("face_matching.gui.video_detection.load_person_vehicle_detector", lambda *args: detector)
+    monkeypatch.setattr("face_matching.gui.video_detection.QFileDialog.getExistingDirectory",
+                        lambda *args: str(tmp_path))
+    tools = VideoDetectionWidget()
+    tools.load_video(video)
+    tools.save_screenshots.setChecked(True)
+    tools.start_button.click()
+    wait_for_worker(app, tools)
+    assert "已保存 12 张目标截图" in tools.status.text()
+    folder, = tmp_path.glob("source-人车截图-*")
+    assert len(list(folder.glob("*-人-*.png"))) == 6
+    assert len(list(folder.glob("*-汽车-*.png"))) == 6
+
+
 def test_escape_requests_stop_and_cannot_destroy_active_worker(app, monkeypatch):
     dialog = VideoDetectionDialog()
     dialog.show()

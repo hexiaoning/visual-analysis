@@ -329,11 +329,14 @@ def _verify_cuda_execution(session: Any, sample_inputs: dict[str, np.ndarray] | 
 
 
 def _create_cuda_session(model_path: Path, device_id: int = 0,
-                         sample_inputs: dict[str, np.ndarray] | None = None) -> Any:
+                         sample_inputs: dict[str, np.ndarray] | None = None, *,
+                         dimension_overrides: dict[str, int] | None = None) -> Any:
     assert_cuda_available()
     ort = _load_ort()
     options = ort.SessionOptions()
     options.log_severity_level = 3
+    for name, size in (dimension_overrides or {}).items():
+        options.add_free_dimension_override_by_name(name, size)
     # ORT deliberately places shape subgraphs on CPU. Rejecting every CPU node
     # prevents SCRFD from loading even when its neural network uses CUDA.
     # Audit an actual inference below instead of accepting CPU model execution.
@@ -378,10 +381,13 @@ def create_gpu_session(
     model_path: Path, device_id: int = 0, backend: str = "auto",
     input_shape: tuple[int, int, int, int] | None = None,
     sample_inputs: dict[str, np.ndarray] | None = None,
+    *,
+    cuda_dimension_overrides: dict[str, int] | None = None,
 ) -> Any:
     selected = resolve_gpu_backend(backend, device_id)
     if selected == "cuda":
-        return _create_cuda_session(model_path, device_id, sample_inputs)
+        return _create_cuda_session(model_path, device_id, sample_inputs,
+                                    dimension_overrides=cuda_dimension_overrides)
     if sample_inputs is not None:
         return OpenVINOInferenceSession(model_path, device_id,
                                        input_shapes={name: array.shape for name, array in sample_inputs.items()})
