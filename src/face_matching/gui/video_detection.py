@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 from ..detection_video import VideoControl, analyze_video
 from ..image_enhancement import save_new_png
 from ..person_vehicle import MODEL_TITLE, load_person_vehicle_detector
+from .workspace_style import workspace_panel
 
 
 class VideoCanvas(QLabel):
@@ -23,7 +24,7 @@ class VideoCanvas(QLabel):
         self.image = QImage()
         self.setAlignment(Qt.AlignCenter)
         self.setMinimumSize(480, 300)
-        self.setStyleSheet("background:#111820;color:#b4c4d4;")
+        self.setStyleSheet("background:#111b2b;color:#b3c3db;")
 
     def set_frame(self, pixels: np.ndarray) -> None:
         height, width = pixels.shape[:2]
@@ -100,6 +101,7 @@ class VideoDetectionWidget(QWidget):
         self.source_edit.setPlaceholderText("选择待检测的视频")
         self.open_button = QPushButton("打开视频…")
         self.start_button = QPushButton("开始检测")
+        self.start_button.setProperty("workspacePrimary", True)
         self.pause_button = QPushButton("暂停")
         self.stop_button = QPushButton("停止")
         self.export_button = QPushButton("导出完整标注视频（无音轨）…")
@@ -135,19 +137,20 @@ class VideoDetectionWidget(QWidget):
         controls.addStretch()
         self.preview = VideoCanvas()
         self.table = QTableWidget(0, 3)
+        self.table.setAlternatingRowColors(True)
         self.table.setHorizontalHeaderLabels(["类别", "置信分值", "位置 x1,y1,x2,y2"])
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.setMaximumWidth(400)
         body = QHBoxLayout()
-        body.addWidget(self.preview, 1)
-        body.addWidget(self.table)
+        body.addWidget(workspace_panel("视频画面", self.preview), 3)
+        body.addWidget(workspace_panel("当前帧检测结果", self.table), 2)
         self.progress = QProgressBar()
         self.progress.setRange(0, 1000)
         self.progress.setValue(0)
         self.status = QLabel("打开视频开始。检测模型随离线包携带，运行时不下载。")
         self.status.setWordWrap(True)
+        self.status.setProperty("workspaceNote", True)
         self.counts = QLabel("当前帧：人 0 · 车 0")
         footer = QHBoxLayout()
         footer.addWidget(self.counts)

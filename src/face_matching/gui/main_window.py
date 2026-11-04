@@ -60,6 +60,7 @@ from .video_detection import VideoDetectionWidget
 from .portrait_libraries import LibrariesDialog, LibrarySelection, PersonFilterWidget
 from .visual_search import VisualSearchWidget
 from .semantic_search import SemanticSearchWidget
+from .workspace_style import WORKSPACE_STYLE, workspace_header, workspace_panel
 
 
 def _rate_limit_due(last_emitted_at: float | None, now: float, interval: float) -> bool:
@@ -373,8 +374,16 @@ class MainWindow(QMainWindow):
         self.people_filter = PersonFilter()
         self.setWindowTitle(f"Face Matching v{__version__} · 离线综合分析")
         self.resize(1420, 880)
+        workspace = QWidget()
+        workspace.setObjectName("workspace")
+        layout = QVBoxLayout(workspace)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(workspace_header(__version__))
         self.tabs = QTabWidget()
-        self.setCentralWidget(self.tabs)
+        self.tabs.setObjectName("workspaceTabs")
+        layout.addWidget(self.tabs, 1)
+        self.setCentralWidget(workspace)
         self._build_video_tab()
         self.video_detection = VideoDetectionWidget(self.config.gpu_backend, self.config.gpu_device_id, self)
         self.tabs.addTab(self.video_detection, "人车检测")
@@ -389,6 +398,7 @@ class MainWindow(QMainWindow):
         self._build_annotations_tab()
         self._build_settings_tab()
         self.setStatusBar(QStatusBar())
+        self.setStyleSheet(WORKSPACE_STYLE)
         self.refresh_people()
         self._set_video_enabled(True)
         self.statusBar().showMessage("已就绪 · 首次检索或录入人员时初始化人脸模型；人车检测和图像增强可直接使用")
@@ -490,6 +500,7 @@ class MainWindow(QMainWindow):
         browse = self.browse_button
         camera = QPushButton("摄像头 0")
         self.start_button = QPushButton("开始识别")
+        self.start_button.setProperty("workspacePrimary", True)
         self.stop_button = QPushButton("停止")
         browse.clicked.connect(self._browse_video)
         camera.clicked.connect(self._start_camera)
@@ -505,6 +516,7 @@ class MainWindow(QMainWindow):
         self.video_label = FacePreview()
         self.video_label.track_context_requested.connect(self._track_menu)
         self.events = QTableWidget(0, 9)
+        self.events.setAlternatingRowColors(True)
         self.events.setHorizontalHeaderLabels([
             "时间", "轨迹", "姓名", "身份证号", "相似度", "质量", "标注", "操作", "来源"
         ])
@@ -518,20 +530,24 @@ class MainWindow(QMainWindow):
         self.events.setEditTriggers(QTableWidget.NoEditTriggers)
         self.events.setToolTip("每行可标注“是他”或“不是他”；再次点击已选按钮可撤销。待确认是相似候选，需人工核实。")
         body = QHBoxLayout()
-        body.addWidget(self.video_label, 3)
-        body.addWidget(self.events, 2)
+        body.addWidget(workspace_panel("来源画面", self.video_label), 2)
+        body.addWidget(workspace_panel("人脸检索结果", self.events), 3)
         layout = QVBoxLayout(tab)
         self.query_filters = PersonFilterWidget(self.database)
+        self.query_filters.layout().setContentsMargins(8, 6, 8, 6)
         self.query_filters.apply.clicked.connect(self.apply_query_filter)
-        layout.addWidget(self.query_filters)
+        layout.addWidget(workspace_panel("检索条件", self.query_filters))
         layout.addLayout(source_row)
         self.queue_label = QLabel("支持多选图片和视频；选择或输入后自动比对，处理中可继续添加。")
         self.queue_label.setWordWrap(True)
+        self.queue_label.setProperty("workspaceNote", True)
         layout.addWidget(self.queue_label)
         layout.addLayout(body, 1)
         hint = QHBoxLayout()
-        hint.addWidget(QLabel("待确认为相似候选；右侧标注“是他”或“不是他”，再点已选项可撤销；右键人脸框可关联人员。"))
-        hint.addStretch()
+        hint_label = QLabel("待确认为相似候选；右侧标注“是他”或“不是他”，再点已选项可撤销；右键人脸框可关联人员。")
+        hint_label.setWordWrap(True)
+        hint_label.setProperty("workspaceNote", True)
+        hint.addWidget(hint_label, 1)
         self.export_button = QPushButton("导出标注库…")
         self.export_button.clicked.connect(self.export_annotations)
         hint.addWidget(self.export_button)

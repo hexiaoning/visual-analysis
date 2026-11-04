@@ -65,6 +65,8 @@ class VisualSearchWidget(QWidget):
         self.search_error = None
         self.worker: SearchWorker | None = None
         self.query_view, self.preview = ImagePane(selectable=True), ImagePane()
+        for pane in (self.query_view, self.preview):
+            pane.setMinimumHeight(200)
         self.query_view.region_selected.connect(self.select_region)
         self.mode = QComboBox()
         self.mode.addItem("搜索物体 / 人物外观", 'object')
@@ -99,7 +101,7 @@ class VisualSearchWidget(QWidget):
         self.sources.setMinimumHeight(55)
         self.sources.setMaximumHeight(80)
         self.table = QTableWidget(0, 5)
-        self.table.setMinimumHeight(160)
+        self.table.setMinimumHeight(132)
         self.table.setHorizontalHeaderLabels(["来源", "帧 / 时间", "相似分值", "原图坐标", "匹配方式"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)

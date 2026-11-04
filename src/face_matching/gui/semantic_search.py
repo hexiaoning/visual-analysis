@@ -10,6 +10,7 @@ import threading
 
 import cv2
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QHBoxLayout, QHeaderView,
     QLabel, QLineEdit, QListWidget, QMessageBox, QPushButton, QSlider,
@@ -24,6 +25,7 @@ from ..semantic_search import SemanticIndex, parse_query
 from ..visual_search import SearchHit, collect_sources, read_hit_frame
 from ..vision.io import IMAGE_EXTENSIONS
 from .image_tools import ImagePane
+from .workspace_style import workspace_panel
 
 
 def time_label(seconds: float) -> str:
@@ -234,11 +236,13 @@ class SemanticSearchWidget(QWidget):
         self.clear_sources = QPushButton('清空范围')
         self.clear_sources.clicked.connect(lambda: self.set_paths([]))
         self.start_button, self.stop_button = QPushButton('搜索'), QPushButton('停止')
+        self.start_button.setProperty('workspacePrimary', True)
         self.start_button.clicked.connect(self.start)
         self.stop_button.clicked.connect(self.stop)
         self.sources = QListWidget()
         self.sources.setMaximumHeight(75)
         self.table = QTableWidget(0, 4)
+        self.table.setAlternatingRowColors(True)
         self.table.setHorizontalHeaderLabels(['来源', '原视频时间 / 帧号', '相关分值', '目标坐标'])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
@@ -248,6 +252,7 @@ class SemanticSearchWidget(QWidget):
         self.table.itemSelectionChanged.connect(self.show_selected)
         self.table.cellDoubleClicked.connect(lambda *_: self.open_video())
         self.preview = ImagePane()
+        self.preview.setBackgroundBrush(QColor('#111b2b'))
         self.play_button = QPushButton('从命中位置播放原视频…')
         self.play_button.clicked.connect(self.open_video)
         self.export_button = QPushButton('导出搜索记录 JSON…')
@@ -256,10 +261,12 @@ class SemanticSearchWidget(QWidget):
         self.screenshot_button.clicked.connect(self.export_screenshots)
         self.status = QLabel('添加本地素材，输入中文描述后搜索。首次分析建立索引，后续相同抽帧设置可复用。')
         self.status.setWordWrap(True)
+        self.status.setProperty('workspaceNote', True)
         layout = QVBoxLayout(self)
         note = QLabel('完全离线 · 支持人物衣着、车辆颜色。组合条件在同一目标内匹配，结果为待核实候选。'
                       '夜间黑白、模糊、遮挡会影响颜色判断；不支持行为和身份推断。抽帧可能漏过短暂目标，逐帧分析请选择1帧。')
         note.setWordWrap(True)
+        note.setProperty('workspaceNote', True)
         layout.addWidget(note)
         query_row = QHBoxLayout()
         query_row.addWidget(self.query, 1)
@@ -272,10 +279,10 @@ class SemanticSearchWidget(QWidget):
             scope.addWidget(widget)
         scope.addStretch()
         layout.addLayout(scope)
-        layout.addWidget(self.sources)
+        layout.addWidget(workspace_panel('搜索范围', self.sources))
         content = QHBoxLayout()
-        content.addWidget(self.table, 3)
-        content.addWidget(self.preview, 2)
+        content.addWidget(workspace_panel('命中画面', self.preview), 2)
+        content.addWidget(workspace_panel('候选结果', self.table), 3)
         layout.addLayout(content, 1)
         footer = QHBoxLayout()
         footer.addWidget(self.play_button)
