@@ -117,10 +117,16 @@ class FaceEngine:
         return detection
 
     def enrollment_feature(self, image: np.ndarray) -> EnrollmentFeature:
+        return self._photo_feature(image, self.config.enrollment_min_quality)
+
+    def photo_feature(self, image: np.ndarray) -> EnrollmentFeature:
+        return self._photo_feature(image, self.config.min_quality)
+
+    def _photo_feature(self, image: np.ndarray, min_quality: float) -> EnrollmentFeature:
         detection = self._primary_enrollment_detection(image)
         aligned = align_face(image, detection.landmarks)
         quality = assess_quality(aligned, detection)
-        if quality.total < self.config.enrollment_min_quality:
+        if quality.total < min_quality:
             raise EnrollmentError(
                 f"照片质量过低（{quality.total:.2f}），请换用更清晰或更正面的照片"
             )

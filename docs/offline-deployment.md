@@ -1,6 +1,6 @@
 # 完全离线部署
 
-`v2.9.2` 的正式交付物是 PyInstaller `onedir` 便携包。联网构建机负责下载和固定哈希校验；目标机不运行 `pip`、不下载模型，也不要求预装 Python、CUDA Toolkit、cuDNN 或 OpenVINO Toolkit。
+`v2.10.0` 的正式交付物是 PyInstaller `onedir` 便携包。联网构建机负责下载和固定哈希校验；目标机不运行 `pip`、不下载模型，也不要求预装 Python、CUDA Toolkit、cuDNN 或 OpenVINO Toolkit。
 
 ## 构建机
 
@@ -16,7 +16,7 @@
 .\scripts\build_offline_bundle.ps1 -Clean -Profiles auraface
 ```
 
-输出位于 `dist\FaceMatching-v2.9.2-windows-x64.zip`，旁边的 `.sha256` 文件校验整个压缩包；包内 `SHA256SUMS.txt` 校验每个文件。包中包含：
+输出位于 `dist\FaceMatching-v2.10.0-windows-x64.zip`，旁边的 `.sha256` 文件校验整个压缩包；包内 `SHA256SUMS.txt` 校验每个文件。包中包含：
 
 - Python 3.12 运行时和应用代码；
 - PySide6、OpenCV、NumPy；

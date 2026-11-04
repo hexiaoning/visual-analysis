@@ -86,6 +86,20 @@ QPushButton[workspacePrimary="true"]:hover {
 QPushButton[workspacePrimary="true"]:pressed {
     background: #0d3989;
 }
+QPushButton[workspaceMode="true"]:checked {
+    color: white;
+    background: #1857c5;
+    border-color: #1857c5;
+    font-weight: bold;
+}
+QLabel[workspaceScore="true"] {
+    color: white;
+    background: #1857c5;
+    border-radius: 8px;
+    font-size: 17px;
+    font-weight: bold;
+    padding: 10px 8px;
+}
 QPushButton:disabled, QPushButton[workspacePrimary="true"]:disabled {
     color: #6f8096;
     background: #e8eef6;

@@ -42,7 +42,7 @@ class FacePreview(QLabel):
     def __init__(self) -> None:
         super().__init__("选择图片、视频，或输入流地址、摄像头编号")
         self.setAlignment(Qt.AlignCenter)
-        self.setMinimumSize(420, 350)
+        self.setMinimumSize(420, 330)
         self.setStyleSheet("background:#111b2b;color:#b3c3db;")
         self.setToolTip("右键点击人脸框，可关联已录入人员")
         self.image = QImage()

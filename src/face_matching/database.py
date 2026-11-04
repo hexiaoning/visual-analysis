@@ -44,6 +44,7 @@ class GallerySample:
     embedding: np.ndarray
     quality: float
     library_ids: tuple[str, ...] = ()
+    image_path: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -320,17 +321,21 @@ class FaceDatabase:
                 raise KeyError("人员不存在")
         return paths
 
-    def list_gallery(self, model_id: str) -> list[GallerySample]:
+    def list_gallery(self, model_id: str, *, library_id: str | None = None) -> list[GallerySample]:
         with self._connect() as connection:
             memberships: dict[str, list[str]] = {}
             for member in connection.execute("SELECT person_id, library_id FROM person_libraries"):
                 memberships.setdefault(member['person_id'], []).append(member['library_id'])
             rows = connection.execute(
                 """SELECT p.id AS person_id, p.name, p.id_card,
-                          s.embedding, s.embedding_dim, s.quality
+                          s.embedding, s.embedding_dim, s.quality, s.image_path
                    FROM face_samples s JOIN persons p ON p.id=s.person_id
-                   WHERE s.model_id=? ORDER BY p.id, s.quality DESC""",
-                (model_id,),
+                   WHERE s.model_id=? AND (? IS NULL OR EXISTS (
+                       SELECT 1 FROM person_libraries l
+                       WHERE l.person_id=p.id AND l.library_id=?
+                   ))
+                   ORDER BY p.id, s.quality DESC""",
+                (model_id, library_id, library_id),
             ).fetchall()
         result: list[GallerySample] = []
         for row in rows:
@@ -345,6 +350,7 @@ class FaceDatabase:
                     embedding=embedding,
                     quality=float(row["quality"]),
                     library_ids=tuple(memberships.get(row['person_id'], [])),
+                    image_path=row["image_path"],
                 )
             )
         return result

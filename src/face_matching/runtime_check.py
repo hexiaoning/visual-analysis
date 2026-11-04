@@ -55,6 +55,12 @@ def check_runtime(config: AppConfig, *, diagnose: bool = False) -> dict:
             application.processEvents()
             if window.grab().isNull():
                 raise RuntimeError("GUI 渲染检查失败")
+        window.tabs.setCurrentIndex(0)
+        for page in (window.photo_compare, window.identity_check):
+            window.face_pages.setCurrentWidget(page)
+            application.processEvents()
+            if page.grab().isNull():
+                raise RuntimeError("照片比对页面渲染检查失败")
         report = {
             "ok": True, "application": "FaceMatching", "version": __version__,
             "tabs": [window.tabs.tabText(index) for index in range(window.tabs.count())],

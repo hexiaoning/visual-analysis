@@ -11,6 +11,7 @@ from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -29,6 +30,7 @@ from PySide6.QtWidgets import (
     QProgressDialog,
     QPushButton,
     QSpinBox,
+    QStackedWidget,
     QStatusBar,
     QTabWidget,
     QTableWidget,
@@ -54,6 +56,7 @@ from ..vision.io import is_image_source, is_image_data_uri, read_image, store_im
 from .preview import FacePreview, draw_tracks
 from .export_dialog import AnnotationExportDialog, AnnotationExportWorker
 from .person_photos import PersonPhotosDialog
+from .photo_identity import PhotoIdentityWidget
 from .annotation_compare import AnnotationCompareDialog
 from .image_tools import ImageToolsWidget
 from .video_detection import VideoDetectionWidget
@@ -487,6 +490,34 @@ class MainWindow(QMainWindow):
     def _build_video_tab(self) -> None:
         tab = QWidget()
         self.tabs.addTab(tab, "人脸检索")
+        self.face_pages = QStackedWidget()
+        source_page = QWidget()
+        self.photo_compare = PhotoIdentityWidget(self._prepare_search_engine)
+        self.identity_check = PhotoIdentityWidget(self._prepare_search_engine, self.database)
+        modes = QButtonGroup(tab)
+        mode_row = QHBoxLayout()
+        for title, page in (
+            ("来源检索", source_page),
+            ("一对一比对", self.photo_compare),
+            ("身份核查", self.identity_check),
+        ):
+            index = self.face_pages.addWidget(page)
+            button = QPushButton(title)
+            button.setCheckable(True)
+            button.setProperty("workspaceMode", True)
+            button.setChecked(index == 0)
+            modes.addButton(button, index)
+            mode_row.addWidget(button)
+        modes.idClicked.connect(self.face_pages.setCurrentIndex)
+        self.face_pages.currentChanged.connect(
+            lambda index: self.identity_check.refresh_libraries()
+            if self.face_pages.widget(index) is self.identity_check else None
+        )
+        mode_row.addStretch()
+        tab_layout = QVBoxLayout(tab)
+        tab_layout.setContentsMargins(9, 9, 9, 0)
+        tab_layout.addLayout(mode_row)
+        tab_layout.addWidget(self.face_pages, 1)
         self.source_edit = QLineEdit()
         self.source_edit.setMaxLength(16 * 1024 * 1024)
         self.source_edit.setPlaceholderText("图片 / 视频文件、RTSP/RTMP 地址，或摄像头编号（例如 0）")
@@ -532,7 +563,8 @@ class MainWindow(QMainWindow):
         body = QHBoxLayout()
         body.addWidget(workspace_panel("来源画面", self.video_label), 2)
         body.addWidget(workspace_panel("人脸检索结果", self.events), 3)
-        layout = QVBoxLayout(tab)
+        layout = QVBoxLayout(source_page)
+        layout.setContentsMargins(0, 0, 0, 9)
         self.query_filters = PersonFilterWidget(self.database)
         self.query_filters.layout().setContentsMargins(8, 6, 8, 6)
         self.query_filters.apply.clicked.connect(self.apply_query_filter)
@@ -815,6 +847,9 @@ class MainWindow(QMainWindow):
         self._submit_sources(sources)
 
     def _submit_sources(self, sources: list[str]) -> None:
+        if self._photo_task_busy():
+            QMessageBox.information(self, "照片比对进行中", "请等待照片比对或身份核查完成。")
+            return
         if self.visual_search.is_busy() and self.visual_search.worker.mode == 'face':
             QMessageBox.information(self, "人脸搜索进行中", "请先停止以图搜索中的人脸搜索。")
             return
@@ -1229,6 +1264,9 @@ class MainWindow(QMainWindow):
         PersonPhotosDialog(person, samples, self).exec()
 
     def _require_idle(self) -> bool:
+        if self._photo_task_busy():
+            QMessageBox.information(self, "照片比对进行中", "请等待照片比对或身份核查完成后再修改人员库。")
+            return False
         if self.visual_search.is_busy() and self.visual_search.worker.mode == 'face':
             QMessageBox.information(self, "人脸搜索进行中", "请先停止人脸搜索再修改人员库。")
             return False
@@ -1386,12 +1424,13 @@ class MainWindow(QMainWindow):
         return True
 
     def manage_libraries(self) -> None:
-        if self.worker and self.worker.isRunning():
+        if self._photo_task_busy() or (self.worker and self.worker.isRunning()):
             QMessageBox.information(self, "检索进行中", "请先停止检索再修改人像库。")
             return
         LibrariesDialog(self.database, self).exec()
         for filters in (self.people_filters, self.query_filters):
             filters.refresh_libraries()
+        self.identity_check.refresh_libraries()
         self.apply_people_filter()
         self.apply_query_filter()
 
@@ -1400,7 +1439,7 @@ class MainWindow(QMainWindow):
         if person is None:
             QMessageBox.information(self, "请选择人员", "请先选择需要分类的人员。")
             return
-        if self.worker and self.worker.isRunning():
+        if self._photo_task_busy() or (self.worker and self.worker.isRunning()):
             QMessageBox.information(self, "检索进行中", "请先停止检索再修改人员所属库。")
             return
         dialog = QDialog(self)
@@ -1420,6 +1459,9 @@ class MainWindow(QMainWindow):
                 self.engine.refresh_gallery()
 
     def save_settings(self) -> None:
+        if self._photo_task_busy():
+            QMessageBox.information(self, "照片比对进行中", "请等待照片比对或身份核查完成后再修改推理设置。")
+            return
         if self.visual_search.is_busy() and self.visual_search.worker.mode == 'face':
             QMessageBox.information(self, "人脸搜索进行中", "请停止人脸搜索后再修改推理设置。")
             return
@@ -1465,6 +1507,10 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "设置无效", str(exc))
 
     def closeEvent(self, event: object) -> None:
+        if self._photo_task_busy():
+            QMessageBox.information(self, "照片比对进行中", "请等待照片比对或身份核查完成后再关闭。")
+            event.ignore()
+            return
         if self.semantic_search.is_busy():
             self.semantic_search.stop()
             event.ignore()
@@ -1490,8 +1536,14 @@ class MainWindow(QMainWindow):
         else:
             event.ignore()
 
+    def _photo_task_busy(self) -> bool:
+        return self.photo_compare.is_busy() or self.identity_check.is_busy()
+
     def _prepare_search_engine(self):
-        if self.worker and self.worker.isRunning():
+        if self._photo_task_busy() or (self.visual_search.is_busy() and self.visual_search.worker.mode == "face"):
+            QMessageBox.information(self, "人脸比对进行中", "请等待当前人脸比对任务完成。")
+            return None
+        if self.worker is not None or self.pending_sources:
             QMessageBox.information(self, "人脸检索进行中", "请先停止当前人脸检索。")
             return None
         return self.engine if self.initialize() else None
