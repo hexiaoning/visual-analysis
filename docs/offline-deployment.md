@@ -64,3 +64,5 @@
 手动重传命令会保留本地文件。开放平台接入方也可单独使用 `upload_baidu_release.py`，向可写的 `/apps/<应用名>` 目录上传。此方式依赖 `BAIDU_NETDISK_RELEASE_DIR` 和有效的 `BAIDU_NETDISK_ACCESS_TOKEN`。
 
 [百度网盘官方 CLI](https://github.com/baidu-netdisk/bdpan-storage) · [百度网盘官方上传接口示例](https://github.com/baidu-netdisk/baidu-drive-sdk-go#上传与下载)
+
+上传过程每 5 秒更新 %LOCALAPPDATA%\VisualAnalysis\release-progress.json。confirmed_bytes 是百度确认收到的文件字节数。estimated_current_file_bytes 和 estimated_remaining_seconds 是基于进程读取量的估算，只有百度确认后才计入 confirmed_bytes。

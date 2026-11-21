@@ -139,6 +139,20 @@ if (-not $status.authenticated -or -not $status.has_valid_token) {
 
 $versionDirectory = "$version-$($hash.Substring(0, 12))"
 $destination = "$root/$versionDirectory"
+$recordDirectory = Join-Path $env:LOCALAPPDATA "VisualAnalysis"
+$null = New-Item -ItemType Directory -Path $recordDirectory -Force
+$progressPath = Join-Path $recordDirectory "release-progress.json"
+$progress = [ordered]@{
+    version = $version; netdisk_directory = $destination; phase = "preparing";
+    total_bytes = $zip.Length + $checksum.Length; confirmed_bytes = 0;
+    estimate_basis = "process_read_bytes_minus_first_file_pass"
+}
+. (Join-Path $PSScriptRoot "baidu_upload_progress.ps1")
+trap {
+    Write-ReleaseProgress "failed" @{ error = $_.Exception.Message }
+    throw $_
+}
+Write-ReleaseProgress "preparing"
 Ensure-NetdiskFolder "." $root
 $previous = @()
 if ($PrunePrevious) {
@@ -154,12 +168,17 @@ if ($PrunePrevious) {
 Ensure-NetdiskFolder $root $versionDirectory
 foreach ($file in @($zip, $checksum)) {
     Write-Host "Uploading $($file.Name) to Baidu Netdisk..."
-    $reply = Invoke-Netdisk -Arguments @("upload", $file.FullName, "$destination/$($file.Name)")
+    $reply = Invoke-NetdiskUpload $file "$destination/$($file.Name)"
     if ($reply.data.action -notin @("created", "unchanged")) {
         throw "Baidu Netdisk did not confirm the requested path for $($file.Name)."
     }
+    Write-ReleaseProgress "upload_confirmed" @{
+        confirmed_bytes = $progress.confirmed_bytes + $file.Length;
+        estimated_current_file_bytes = $null; estimated_remaining_seconds = $null
+    }
 }
 
+Write-ReleaseProgress "verifying"
 $listing = @(Invoke-Netdisk -Arguments @("ls", $destination))
 foreach ($file in @($zip, $checksum)) {
     $remote = $listing | Where-Object {
@@ -169,5 +188,10 @@ foreach ($file in @($zip, $checksum)) {
     Write-Host "Baidu Netdisk verified: $($remote.path)"
 }
 
+Write-ReleaseProgress "sharing"
 Save-NetdiskShare $destination $version $hash $zip.Name
-if ($PrunePrevious) { Remove-PreviousNetdiskRelease $previous }
+if ($PrunePrevious) {
+    Write-ReleaseProgress "pruning_previous"
+    Remove-PreviousNetdiskRelease $previous
+}
+Write-ReleaseProgress "published" @{ file = $null }

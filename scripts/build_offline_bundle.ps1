@@ -193,6 +193,13 @@ foreach ($Item in $ReleaseItems) {
         throw "Refusing to clean a release item outside the expected local directory: $($Item.FullName)"
     }
 }
+$progressPath = Join-Path $env:LOCALAPPDATA "VisualAnalysis\release-progress.json"
+$savedProgress = Get-Content -LiteralPath $progressPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$progress = [ordered]@{}
+foreach ($entry in $savedProgress.PSObject.Properties) { $progress[$entry.Name] = $entry.Value }
+. (Join-Path $PSScriptRoot "baidu_upload_progress.ps1")
+Write-ReleaseProgress "cleaning_local"
 Remove-Item -LiteralPath $ReleaseDirectory -Recurse -Force
 Remove-Item -LiteralPath $Archive, ($Archive + ".sha256") -Force
+Write-ReleaseProgress "completed" @{ local_artifacts_removed = $true }
 Write-Host "Baidu Netdisk release verified. Removed this build's local packaging outputs." -ForegroundColor Green
