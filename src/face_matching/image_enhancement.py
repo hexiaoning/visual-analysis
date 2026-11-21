@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -132,17 +133,21 @@ def export_enhancement(
         "settings": asdict(settings), "region_xyxy": region,
         "processing_region_xyxy": processing_region,
         "notice": "仅作像素调整；清晰化不等于恢复真实细节，无法确认缺失的人脸细节或车牌字符。",
-        "sha256": {name: hashlib.sha256(payload).hexdigest() for name, payload in files.items()},
     }
+    write_enhancement_archive(destination, files.items(), manifest)
+
+
+def write_enhancement_archive(destination: Path, files: Iterable[tuple[str, bytes]], manifest: dict) -> None:
+    hashes = {}
     # Opening in exclusive mode also protects against a save-dialog overwrite.
     destination = local_path(destination)
-    with destination.open("xb") as stream:
-        try:
-            with ZipFile(stream, "w", compression=ZIP_DEFLATED) as archive:
-                for name, payload in files.items():
-                    archive.writestr(name, payload)
-                archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
-        except BaseException:
-            stream.close()
-            destination.unlink(missing_ok=True)
-            raise
+    stream = destination.open("xb")
+    try:
+        with stream, ZipFile(stream, "w", compression=ZIP_DEFLATED) as archive:
+            for name, payload in files:
+                archive.writestr(name, payload)
+                hashes[name] = hashlib.sha256(payload).hexdigest()
+            archive.writestr("manifest.json", json.dumps(dict(manifest, sha256=hashes), ensure_ascii=False, indent=2))
+    except BaseException:
+        destination.unlink(missing_ok=True)
+        raise

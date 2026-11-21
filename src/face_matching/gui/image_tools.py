@@ -48,6 +48,13 @@ class ImagePane(QGraphicsView):
         self.set_region(self.region)
         self.fit_image()
 
+    def clear_image(self) -> None:
+        self.set_region(None)
+        self.scene().clear()
+        self.scene().setSceneRect(QRectF())
+        self.image = QImage()
+        self.origin = None
+
     def set_region(self, region: tuple[int, int, int, int] | None) -> None:
         self.region = region
         if self.region_item is not None:
@@ -176,6 +183,7 @@ class ImageToolsWidget(QWidget):
         super().__init__(parent)
         self.config = config or AppConfig()
         self.face_video_worker: FaceVideoWorker | None = None
+        self.plate_video_dialog: QDialog | None = None
         self.source_name = ""
         self.source_bytes = b""
         self.original: np.ndarray | None = None
@@ -196,6 +204,8 @@ class ImageToolsWidget(QWidget):
         self.open_button.clicked.connect(self._open)
         self.open_face_video = QPushButton("视频人脸增强…")
         self.open_face_video.clicked.connect(self._start_face_video)
+        self.open_plate_video = QPushButton("视频车牌清晰化…")
+        self.open_plate_video.clicked.connect(self._open_plate_video)
         self.stop_face_video = QPushButton("停止视频处理")
         self.stop_face_video.clicked.connect(self.stop_video_enhancement)
         self.apply_button = QPushButton("应用参数")
@@ -211,6 +221,7 @@ class ImageToolsWidget(QWidget):
         top.addWidget(self.open_button)
         top.addWidget(self.open_face_video)
         top.addWidget(self.stop_face_video)
+        top.addWidget(self.open_plate_video)
         top.addWidget(QLabel("参数预设："))
         top.addWidget(self.preset)
         top.addWidget(self.apply_button)
@@ -275,7 +286,8 @@ class ImageToolsWidget(QWidget):
     def is_busy(self) -> bool:
         return bool((self.worker and self.worker.isRunning())
                     or (self.export_worker and self.export_worker.isRunning())
-                    or (self.face_video_worker and self.face_video_worker.isRunning()))
+                    or (self.face_video_worker and self.face_video_worker.isRunning())
+                    or self.plate_video_dialog)
 
     def settings(self) -> EnhancementSettings:
         return EnhancementSettings(**{name: control.value() for name, control in self.controls.items()})
@@ -286,6 +298,7 @@ class ImageToolsWidget(QWidget):
         self.original_view.setEnabled(not busy)
         self.open_button.setEnabled(not busy)
         self.open_face_video.setEnabled(not busy)
+        self.open_plate_video.setEnabled(not busy)
         self.stop_face_video.setEnabled(bool(self.face_video_worker and self.face_video_worker.isRunning()
                                              and not self.face_video_worker.stopped.is_set()))
         self.apply_button.setEnabled(self.original is not None and not busy
@@ -310,6 +323,21 @@ class ImageToolsWidget(QWidget):
     def _preset_changed(self, name: str) -> None:
         for field, value in asdict(PRESETS[name]).items():
             self.controls[field].setValue(value)
+
+    def _open_plate_video(self) -> None:
+        if self.is_busy():
+            return
+        from .plate_video import PlateVideoDialog
+
+        self.plate_video_dialog = PlateVideoDialog(self)
+        self.plate_video_dialog.finished.connect(self._plate_video_finished)
+        self.plate_video_dialog.open()
+        self._update_buttons()
+
+    def _plate_video_finished(self) -> None:
+        dialog, self.plate_video_dialog = self.plate_video_dialog, None
+        dialog.deleteLater()
+        self._update_buttons()
 
     def _start_face_video(self) -> None:
         if self.is_busy():
