@@ -168,3 +168,8 @@ Write-Host "[5/5] Creating a Zip64 archive and SHA-256 manifests..." -Foreground
 Invoke-CheckedPython -Arguments @((Join-Path $ProjectRoot "scripts\create_release_archive.py"), $ReleaseDirectory, $Archive)
 Write-Host "Offline package ready: $Archive" -ForegroundColor Green
 Write-Host "The target machine needs Windows 11 x64 and either a compatible NVIDIA or Intel GPU display driver." -ForegroundColor Green
+
+if (-not [string]::IsNullOrWhiteSpace($env:BAIDU_NETDISK_RELEASE_DIR)) {
+    Write-Host "Uploading the verified ZIP and checksum to Baidu Netdisk..." -ForegroundColor Cyan
+    Invoke-CheckedPython -Arguments @((Join-Path $ProjectRoot "scripts\upload_baidu_release.py"), $Archive)
+}

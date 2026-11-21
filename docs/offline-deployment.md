@@ -48,3 +48,20 @@
 - `verify_offline.ps1` 发现的所有 profile 均返回 `"ok": true`。
 - 使用目标摄像头的正负样本校准阈值，记录 FAR/TAR，而不是把余弦分数当概率。
 - 对数据目录启用 BitLocker/EFS、最小权限、审计和保留期策略。
+
+## 发布到百度网盘
+
+构建完成并生成校验文件后，可以由构建机直接调用百度网盘上传接口。先在百度网盘开放平台完成应用接入和账号 OAuth 授权，再在构建进程中配置：
+
+- `BAIDU_NETDISK_RELEASE_DIR`，授权应用下已有的网盘目录，例如 `/apps/实际应用名/Visual-Analysis`。网盘客户端中对应「我的应用数据/实际应用名/Visual-Analysis」。
+- `BAIDU_NETDISK_ACCESS_TOKEN`，上述账号的有效访问令牌。通过本机或发布环境的凭据存储注入，令牌过期后更新。项目不保管令牌或刷新令牌。
+
+配置目录后，常规打包命令自动上传 ZIP 和 `.zip.sha256`。上传流程重新校验 ZIP，以 4 MiB 分片传输，单文件上限 4 GiB。上传失败会保留本地压缩包和校验文件，命令返回失败。若要上传已生成的包，可单独运行：
+
+```powershell
+python .\scripts\upload_baidu_release.py .\dist\FaceMatching-v2.11.0-windows-x64.zip
+```
+
+如百度返回同名冲突，检查是否已有完整的 ZIP 和校验文件，或选择另一个授权目录重试。上传脚本使用不重命名策略，避免自动覆盖。目标机无需配置百度网盘。
+
+[百度网盘官方上传接口示例](https://github.com/baidu-netdisk/baidu-drive-sdk-go#上传与下载) · [百度网盘开放平台上传限制](https://help.baidu.com/question?class=800&id=1002121&prod_id=257)
