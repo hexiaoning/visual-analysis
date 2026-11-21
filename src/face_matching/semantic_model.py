@@ -74,9 +74,11 @@ def normalized_feature(output: np.ndarray) -> np.ndarray:
 class SemanticEncoder:
     model_id = SEMANTIC_MODEL_ID
 
-    def __init__(self, backend: str = 'auto', device_id: int = 0, root: Path | None = None) -> None:
+    def __init__(self, backend: str = 'auto', device_id: int = 0, root: Path | None = None,
+                 *, session_factory=None) -> None:
         self.vision_path, self.text_path, vocab = required_semantic_models(root)
         self.backend, self.device_id = backend, device_id
+        self._create_session = session_factory or create_gpu_session
         self.tokenizer = ChineseTokenizer(vocab)
         self._text = self._vision = None
         self._texts: dict[str, np.ndarray] = {}
@@ -86,7 +88,7 @@ class SemanticEncoder:
             tokens = {name: value for name, value in self.tokenizer.encode(text).items()
                       if name in ('input_ids', 'attention_mask')}
             if self._text is None:
-                self._text = create_gpu_session(
+                self._text = self._create_session(
                     self.text_path, self.device_id, self.backend,
                     sample_inputs=tokens, cuda_dimension_overrides={'batch': 1},
                 )
@@ -96,7 +98,7 @@ class SemanticEncoder:
 
     def image(self, image: np.ndarray) -> np.ndarray:
         if self._vision is None:
-            self._vision = create_gpu_session(
+            self._vision = self._create_session(
                 self.vision_path, self.device_id, self.backend,
                 input_shape=(1, 3, 224, 224), cuda_dimension_overrides={'batch': 1},
             )

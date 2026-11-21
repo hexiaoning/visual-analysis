@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import Callable
 import threading
@@ -10,8 +11,7 @@ import cv2
 import numpy as np
 
 from .vision.io import IMAGE_EXTENSIONS, read_image
-
-VIDEO_EXTENSIONS = {'.mp4', '.avi', '.mkv', '.mov', '.m4v', '.wmv', '.webm'}
+from .vision.local_media import VIDEO_EXTENSIONS, local_path, open_local_video
 
 
 @dataclass(frozen=True)
@@ -24,13 +24,36 @@ class SearchHit:
     method: str
 
 
+def _can_walk(path: Path) -> bool:
+    try:
+        return local_path(path).is_dir()
+    except (OSError, ValueError):
+        return False
+
+
 def collect_sources(paths: list[Path]) -> list[Path]:
     sources: dict[str, Path] = {}
     for path in paths:
-        candidates = sorted(path.rglob('*')) if path.is_dir() else [path]
-        for item in candidates:
-            if item.is_file() and item.suffix.lower() in IMAGE_EXTENSIONS | VIDEO_EXTENSIONS:
-                sources.setdefault(str(item.resolve()).casefold(), item.resolve())
+        try:
+            path = local_path(path)
+        except (OSError, ValueError):
+            continue
+        candidates = []
+        if path.is_dir():
+            for base, directories, files in os.walk(path, followlinks=False):
+                directories[:] = [name for name in directories if _can_walk(Path(base) / name)]
+                candidates.extend(Path(base) / name for name in files)
+        else:
+            candidates.append(path)
+        for item in sorted(candidates):
+            if item.suffix.lower() not in IMAGE_EXTENSIONS | VIDEO_EXTENSIONS:
+                continue
+            try:
+                item = local_path(item)
+            except (OSError, ValueError):
+                continue
+            if item.is_file():
+                sources.setdefault(str(item).casefold(), item)
     return list(sources.values())
 
 
@@ -165,7 +188,7 @@ def search_sources(sources: list[Path], matcher: object, *, frame_step: int = 1,
                     raise ValueError("无法解码图片")
                 inspect(image, source, 0, None)
                 continue
-            capture = cv2.VideoCapture(str(source))
+            capture = open_local_video(source)
             try:
                 if not capture.isOpened():
                     raise ValueError("无法打开视频")
@@ -196,7 +219,7 @@ def read_hit_frame(hit: SearchHit) -> np.ndarray:
     if Path(hit.source).suffix.lower() in IMAGE_EXTENSIONS:
         frame = read_image(hit.source)
     else:
-        capture = cv2.VideoCapture(hit.source)
+        capture = open_local_video(hit.source)
         try:
             capture.set(cv2.CAP_PROP_POS_FRAMES, hit.frame_index)
             ok, frame = capture.read()

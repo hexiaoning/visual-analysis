@@ -8,7 +8,7 @@ from pathlib import Path
 from . import __version__
 from .config import AppConfig
 from .gpu import assert_gpu_available
-from .models import PROFILES, available_profiles, download_profile, required_paths
+from .models import PROFILES, available_profiles, required_paths
 from .paths import is_frozen_app
 
 
@@ -21,8 +21,14 @@ def _write_report(path: Path | None, payload: dict[str, object]) -> None:
         print(value)
 
 
+def _reject_outbound(event: str, args: tuple) -> None:
+    if event in {"socket.connect", "socket.sendto", "socket.sendmsg",
+                 "socket.getaddrinfo", "socket.gethostbyname", "socket.gethostbyaddr", "socket.getnameinfo"}:
+        raise PermissionError("视觉分析主进程仅使用本机资源")
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="离线综合分析：人脸检索、人车检测、图像增强、人员与标注管理")
+    parser = argparse.ArgumentParser(description="Visual Analysis：离线视觉分析与车型联网核验")
     parser.add_argument("--version", action="store_true", help="显示应用版本并退出")
     parser.add_argument("--check-gpu", action="store_true", help="检查 CUDA/OpenVINO GPU 并退出")
     parser.add_argument("--download-models", action="store_true", help="下载模型并退出")
@@ -33,12 +39,14 @@ def main(argv: list[str] | None = None) -> int:
     page.add_argument("--image-tools", action="store_true", help="打开综合分析窗口并选中图像增强")
     page.add_argument("--video-detection", action="store_true", help="打开综合分析窗口并选中人车检测")
     page.add_argument("--semantic-search", action="store_true", help="打开综合分析窗口并选中语义搜索")
+    page.add_argument("--vehicle-analysis", action="store_true", help="打开综合分析窗口并选中车型识别")
     parser.add_argument("--backend", choices=("auto", "cuda", "openvino"), help="覆盖 GPU 后端")
     parser.add_argument("--device-id", type=int, help="覆盖 GPU 编号")
     parser.add_argument("--check-runtime", action="store_true", help="检查完整应用、运行库及全部已打包模型")
     parser.add_argument("--report", type=Path, help="把诊断 JSON 写入指定文件")
     parser.add_argument("--profile", choices=sorted(PROFILES), help="覆盖配置中的模型档")
     args = parser.parse_args(argv)
+    sys.addaudithook(_reject_outbound)
     if args.version:
         _write_report(args.report, {"application": "FaceMatching", "version": __version__})
         return 0
@@ -54,12 +62,8 @@ def main(argv: list[str] | None = None) -> int:
         if bundled and config.model_profile not in bundled:
             config.model_profile = "lvface-b" if "lvface-b" in bundled else bundled[0]
     if args.download_models:
-        if is_frozen_app():
-            print("离线便携版不允许联网下载模型；请重新生成包含所需模型的安装包。", file=sys.stderr)
-            return 2
-        download_profile(config.model_profile)
-        print(f"模型 {config.model_profile} 已就绪")
-        return 0
+        print("请在构建环境准备模型，再使用完整离线包。", file=sys.stderr)
+        return 2
     if args.verify_models:
         try:
             paths = required_paths(config.model_profile, verify_hash=True)
@@ -138,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
     from .gui.main_window import MainWindow
 
     application = QApplication.instance() or QApplication(sys.argv[:1])
-    application.setApplicationName("Face Matching")
+    application.setApplicationName("Visual Analysis")
     application.setApplicationVersion(__version__)
     application.setStyle("Fusion")
     window = MainWindow(config)
@@ -148,6 +152,8 @@ def main(argv: list[str] | None = None) -> int:
         window.tabs.setCurrentWidget(window.video_detection)
     elif args.semantic_search:
         window.tabs.setCurrentWidget(window.semantic_search)
+    elif args.vehicle_analysis:
+        window.tabs.setCurrentWidget(window.vehicle_analysis)
     try:
         window.show()
         return application.exec()

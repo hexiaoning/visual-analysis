@@ -17,6 +17,7 @@ from .models import PERSON_VEHICLE_MODEL, SEMANTIC_MODEL_ID
 from .paths import data_dir
 from .visual_search import SearchHit
 from .vision.io import IMAGE_EXTENSIONS, read_image
+from .vision.local_media import local_path, open_local_video
 
 
 COLORS = ('黑色', '白色', '灰色', '蓝色', '红色', '绿色', '黄色', '棕色', '紫色', '粉色', '橙色')
@@ -147,6 +148,7 @@ def object_colors(crop: np.ndarray, person: bool) -> np.ndarray:
 
 
 def source_signature(path: Path) -> str:
+    path = local_path(path)
     info = path.stat()
     return f'{info.st_size}:{info.st_mtime_ns}:{getattr(info, "st_ino", 0)}'
 
@@ -158,7 +160,7 @@ def sample_frames(path: Path, step: int, stopped: threading.Event):
             raise ValueError('无法解码图片')
         yield 0, None, frame
         return
-    capture = cv2.VideoCapture(str(path))
+    capture = open_local_video(path)
     try:
         if not capture.isOpened():
             raise ValueError('无法打开视频')

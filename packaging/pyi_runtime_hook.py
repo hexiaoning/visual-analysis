@@ -13,6 +13,7 @@ os.environ.setdefault("FACE_MATCHING_BUNDLED_MODELS", str(bundle_root / "models"
 if os.name == "nt":
     candidates = (
         bundle_root / "nvidia" / "cuda_runtime" / "bin",
+        bundle_root / "nvidia" / "cuda_nvrtc" / "bin",
         bundle_root / "nvidia" / "cublas" / "bin",
         bundle_root / "nvidia" / "cudnn" / "bin",
         bundle_root / "nvidia" / "cufft" / "bin",

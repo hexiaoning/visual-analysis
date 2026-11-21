@@ -12,6 +12,8 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import cv2
 import numpy as np
 
+from .vision.local_media import local_path
+
 
 @dataclass(frozen=True)
 class EnhancementSettings:
@@ -89,6 +91,7 @@ def enhance_region(image: np.ndarray, settings: EnhancementSettings,
 
 def save_new_png(destination: Path, image: np.ndarray) -> None:
     payload = encode_png(image)
+    destination = local_path(destination)
     with destination.open("xb") as stream:
         try:
             stream.write(payload)
@@ -132,6 +135,7 @@ def export_enhancement(
         "sha256": {name: hashlib.sha256(payload).hexdigest() for name, payload in files.items()},
     }
     # Opening in exclusive mode also protects against a save-dialog overwrite.
+    destination = local_path(destination)
     with destination.open("xb") as stream:
         try:
             with ZipFile(stream, "w", compression=ZIP_DEFLATED) as archive:

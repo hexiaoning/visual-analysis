@@ -1,6 +1,6 @@
-# 完全离线部署
+# Visual Analysis 部署
 
-`v2.10.0` 的正式交付物是 PyInstaller `onedir` 便携包。联网构建机负责下载和固定哈希校验；目标机不运行 `pip`、不下载模型，也不要求预装 Python、CUDA Toolkit、cuDNN 或 OpenVINO Toolkit。
+`v2.11.0` 的正式交付物是 PyInstaller `onedir` 便携包。联网构建机负责下载和固定哈希校验；目标机不运行 `pip`、不下载模型，也不要求预装 Python、CUDA Toolkit、cuDNN 或 OpenVINO Toolkit。
 
 ## 构建机
 
@@ -16,15 +16,15 @@
 .\scripts\build_offline_bundle.ps1 -Clean -Profiles auraface
 ```
 
-输出位于 `dist\FaceMatching-v2.10.0-windows-x64.zip`，旁边的 `.sha256` 文件校验整个压缩包；包内 `SHA256SUMS.txt` 校验每个文件。包中包含：
+输出位于 `dist\FaceMatching-v2.11.0-windows-x64.zip`，旁边的 `.sha256` 文件校验整个压缩包；包内 `SHA256SUMS.txt` 校验每个文件。包中包含：
 
 - Python 3.12 运行时和应用代码；
-- PySide6、OpenCV、NumPy；
+- PySide6、OpenCV、PyAV 与其 FFmpeg 编解码组件、NumPy；
 - `onnxruntime-gpu` 及其 CUDA 12/cuDNN/cuBLAS 运行 DLL；
 - OpenVINO Intel GPU 运行库；
 - 构建时选择且经过 SHA-256 校验的 SCRFD/LVFace/AuraFace ONNX 模型；
 - Chinese-CLIP ViT-B/16 FP32 图像/文本编码器、匹配的中文BERT词表及MIT许可；
-- 离线自检脚本和第三方许可说明。
+- 车型核验子进程、离线自检脚本和第三方许可说明。
 
 仅交付完整离线 ZIP，不生成增量包或 EXE 安装程序。全部功能打入同一应用，包含 SCRFD、人脸识别模型、RT-DETRv2 及离线地区参考数据。
 
@@ -33,8 +33,10 @@
 目标机要求 Windows 11 x64，以及 NVIDIA RTX 或 Intel UHD/Iris/Arc GPU 和对应显卡驱动。
 
 1. 解压完整 ZIP，双击 `启动综合分析.cmd`。
-2. 在同一窗口内使用人脸检索、人车检测、图像增强、以图搜索、语义搜索、人员库、标注库和设置。各模型按需初始化，初始化失败不会阻止其它页面使用。
+2. 在同一窗口内使用人脸检索、人车检测、车型识别、图像增强、以图搜索、语义搜索、人员库、标注库和设置。各模型按需初始化，初始化失败不会阻止其它页面使用。
 3. 运维完整自检运行 `FaceMatching.exe --check-runtime --diagnose --report diagnostics.json`，验证全部人脸、人车及中文图文模型GPU推理；`verify_offline.ps1`也调用完整自检。
+
+主应用仅处理本机媒体。车型识别在用户发起时启动独立的 VehicleCatalogueWorker.exe 查询授权接口。断网仍可做本地初判。见 [车型联网核验](vehicle-catalogues.md)。
 
 人员数据库和录入照片默认写入 `%LOCALAPPDATA%\FaceMatching`，应用升级不会覆盖。需要把数据放到加密盘时，在启动前设置 `FACE_MATCHING_HOME`。
 

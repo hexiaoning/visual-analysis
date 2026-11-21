@@ -34,6 +34,7 @@ datas = [
     (str(project_root / "packaging" / "licenses" / "RT-DETR-LICENSE.txt"), "licenses"),
     (str(project_root / "packaging" / "licenses" / "Chinese-CLIP-LICENSE.txt"), "licenses"),
     (str(project_root / "docs" / "offline-deployment.md"), "docs"),
+    (str(project_root / "docs" / "vehicle-catalogues.md"), "docs"),
     (str(project_root / "packaging" / "verify_offline.ps1"), "."),
 ]
 binaries = []
@@ -53,6 +54,7 @@ for module_name in (
     "onnxruntime",
     "openvino",
     "nvidia.cuda_runtime",
+    "nvidia.cuda_nvrtc",
     "nvidia.cublas",
     "nvidia.cudnn",
     "nvidia.cufft",
@@ -69,11 +71,13 @@ for distribution in (
     "face-matching",
     "numpy",
     "opencv-python-headless",
+    "av",
     "PySide6",
     "shiboken6",
     "onnxruntime-gpu",
     "openvino",
     "nvidia-cuda-runtime-cu12",
+    "nvidia-cuda-nvrtc-cu12",
     "nvidia-cublas-cu12",
     "nvidia-cudnn-cu12",
     "nvidia-cufft-cu12",
@@ -126,8 +130,8 @@ version_info = VSVersionInfo(
     ffi=FixedFileInfo(filevers=parts, prodvers=parts, mask=0x3F, flags=0,
                       OS=0x40004, fileType=1, subtype=0, date=(0, 0)),
     kids=[StringFileInfo([StringTable("040904B0", [
-        StringStruct("FileDescription", "Offline Unified Analysis"),
-        StringStruct("FileVersion", version), StringStruct("ProductName", "FaceMatching"),
+        StringStruct("FileDescription", "Visual Analysis"),
+        StringStruct("FileVersion", version), StringStruct("ProductName", "Visual Analysis"),
         StringStruct("ProductVersion", version), StringStruct("OriginalFilename", "FaceMatching.exe"),
     ])]), VarFileInfo([VarStruct("Translation", [1033, 1200])])],
 )
@@ -149,10 +153,27 @@ exe = EXE(
     target_arch="x86_64",
 )
 
+worker = Analysis(
+    [str(project_root / "packaging" / "vehicle_catalogue_worker.py")],
+    pathex=[str(project_root / "src")],
+    excludes=["PySide6", "cv2", "numpy", "onnxruntime", "openvino", "tkinter"],
+)
+worker_exe = EXE(
+    PYZ(worker.pure),
+    worker.scripts,
+    [],
+    exclude_binaries=True,
+    name="VehicleCatalogueWorker",
+    upx=False,
+    console=False,
+    target_arch="x86_64",
+)
+
 coll = COLLECT(
     exe,
-    a.binaries,
-    a.datas,
+    worker_exe,
+    TOC(a.binaries + worker.binaries),
+    TOC(a.datas + worker.datas),
     strip=False,
     upx=False,
     upx_exclude=[],

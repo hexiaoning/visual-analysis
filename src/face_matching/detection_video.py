@@ -14,6 +14,7 @@ import numpy as np
 
 from .image_enhancement import save_new_png
 from .person_vehicle import ObjectDetection, annotate_objects, crop_object
+from .vision.local_media import local_path, open_local_video
 
 
 class VideoControl:
@@ -55,9 +56,13 @@ def analyze_video(
     control = control or VideoControl()
     if output is not None and screenshot_parent is not None:
         raise ValueError("请分别导出标注视频和目标截图。")
+    if output is not None:
+        output = local_path(output)
+    if screenshot_parent is not None:
+        screenshot_parent = local_path(screenshot_parent)
     if output is not None and output.exists():
         raise FileExistsError("输出文件已存在，请换一个新文件名；不会覆盖原视频或已有结果。")
-    capture = cv2.VideoCapture(str(source))
+    capture = open_local_video(source)
     writer = None
     temporary: Path | None = None
     screenshot_stage = None
@@ -130,7 +135,7 @@ def analyze_video(
         if output is not None and not cancelled:
             if temporary is None:
                 raise ValueError("未生成可导出的视频")
-            check = cv2.VideoCapture(str(temporary))
+            check = open_local_video(temporary)
             try:
                 if not check.isOpened() or int(check.get(cv2.CAP_PROP_FRAME_COUNT)) != frames:
                     raise OSError("导出视频校验失败，可能磁盘空间不足")

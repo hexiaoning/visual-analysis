@@ -24,6 +24,7 @@ from ..semantic_model import SemanticEncoder
 from ..semantic_search import SemanticIndex, parse_query
 from ..visual_search import SearchHit, collect_sources, read_hit_frame
 from ..vision.io import IMAGE_EXTENSIONS
+from ..vision.local_media import local_path, open_local_video
 from .image_tools import ImagePane
 from .workspace_style import workspace_panel
 
@@ -43,7 +44,7 @@ class SourceVideoDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(f'原视频 · {Path(hit.source).name} · {time_label(hit.seconds or 0)}')
         self.resize(1000, 720)
-        self.capture = cv2.VideoCapture(hit.source)
+        self.capture = open_local_video(hit.source)
         if not self.capture.isOpened():
             self.capture.release()
             raise ValueError('无法打开原视频，文件可能已被移动。')
@@ -185,7 +186,7 @@ class ScreenshotExportWorker(QThread):
                         first_error = f'{hit.source} · {exc}'
                     continue
                 if directory is None:
-                    directory = Path(tempfile.mkdtemp(prefix='语义截图-', dir=self.parent_directory))
+                    directory = Path(tempfile.mkdtemp(prefix='语义截图-', dir=local_path(self.parent_directory)))
                 stem = Path(hit.source).stem[:40]
                 position = '图片' if hit.seconds is None else f'第{hit.frame_index + 1:09d}帧'
                 name = f'{rank:03d}-{category}-{stem}-{position}.png'
@@ -418,7 +419,7 @@ class SemanticSearchWidget(QWidget):
         if not path or self.search_info is None:
             return
         try:
-            with Path(path).open('x', encoding='utf-8') as stream:
+            with local_path(path).open('x', encoding='utf-8') as stream:
                 json.dump({'search': self.search_info, 'hits': [asdict(hit) for hit in self.hits],
                            'failures': self.failures}, stream, ensure_ascii=False, indent=2)
         except (OSError, ValueError) as exc:

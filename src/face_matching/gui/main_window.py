@@ -46,13 +46,14 @@ from ..config import AppConfig
 from ..database import FaceDatabase, PersonRecord
 from ..engine import FaceEngine, FrameResult, TrackView
 from ..enrollment import EnrollmentService
-from ..errors import FaceMatchingError, ModelMissingError
+from ..errors import FaceMatchingError
 from ..gpu import assert_gpu_available
 from ..identity_filters import PersonFilter, parse_identity, china_today
-from ..models import PROFILES, available_profiles, download_profile, profile_spec, required_paths
+from ..models import PROFILES, available_profiles, profile_spec, required_paths
 from ..paths import is_frozen_app
 from ..results import VideoMatch, VideoMatchList
 from ..vision.io import is_image_source, is_image_data_uri, read_image, store_image_data_uri
+from ..vision.local_media import local_path, open_local_video
 from .preview import FacePreview, draw_tracks
 from .export_dialog import AnnotationExportDialog, AnnotationExportWorker
 from .person_photos import PersonPhotosDialog
@@ -60,6 +61,7 @@ from .photo_identity import PhotoIdentityWidget
 from .annotation_compare import AnnotationCompareDialog
 from .image_tools import ImageToolsWidget
 from .video_detection import VideoDetectionWidget
+from .vehicle_analysis import VehicleAnalysisWidget
 from .portrait_libraries import LibrariesDialog, LibrarySelection, PersonFilterWidget
 from .visual_search import VisualSearchWidget
 from .semantic_search import SemanticSearchWidget
@@ -289,17 +291,14 @@ class VideoWorker(QThread):
             except Exception as exc:
                 self._fail(str(exc))
             return
-        capture_source: str | int = self.source
-        if self.source.isdigit() and not Path(self.source).exists():
-            capture_source = int(self.source)
-        capture = cv2.VideoCapture()
-        # FFmpeg-backed network streams can otherwise block shutdown forever.
-        # Unsupported backends simply ignore these properties.
-        if hasattr(cv2, "CAP_PROP_OPEN_TIMEOUT_MSEC"):
-            capture.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 8_000)
-        if hasattr(cv2, "CAP_PROP_READ_TIMEOUT_MSEC"):
-            capture.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 3_000)
-        capture.open(capture_source)
+        try:
+            if self.source.isdigit() and not local_path(self.source).is_file():
+                capture = cv2.VideoCapture(int(self.source))
+            else:
+                capture = open_local_video(self.source)
+        except (OSError, ValueError, cv2.error) as exc:
+            self._fail(str(exc))
+            return
         capture.set(cv2.CAP_PROP_BUFFERSIZE, 2)
         if not capture.isOpened():
             capture.release()
@@ -375,7 +374,7 @@ class MainWindow(QMainWindow):
         self._last_submitted_text = ""
         self.query_filter = PersonFilter()
         self.people_filter = PersonFilter()
-        self.setWindowTitle(f"Face Matching v{__version__} · 离线综合分析")
+        self.setWindowTitle(f"Visual Analysis v{__version__}")
         self.resize(1420, 880)
         workspace = QWidget()
         workspace.setObjectName("workspace")
@@ -390,7 +389,9 @@ class MainWindow(QMainWindow):
         self._build_video_tab()
         self.video_detection = VideoDetectionWidget(self.config.gpu_backend, self.config.gpu_device_id, self)
         self.tabs.addTab(self.video_detection, "人车检测")
-        self.image_tools = ImageToolsWidget(self)
+        self.vehicle_analysis = VehicleAnalysisWidget(self.config, self)
+        self.tabs.addTab(self.vehicle_analysis, "车型识别")
+        self.image_tools = ImageToolsWidget(self, config=self.config)
         self.tabs.addTab(self.image_tools, "图像增强")
         self.visual_search = VisualSearchWidget(self._prepare_search_engine, self)
         self.visual_search.enhance_requested.connect(self._enhance_search_result)
@@ -418,25 +419,7 @@ class MainWindow(QMainWindow):
             gpu_status = assert_gpu_available(
                 self.config.gpu_backend, self.config.gpu_device_id
             )
-            try:
-                required_paths(self.config.model_profile)
-            except ModelMissingError:
-                if is_frozen_app():
-                    raise ModelMissingError(
-                        "离线便携包缺少当前模型。请使用完整离线包，"
-                        "或在联网构建机上重新打包；目标机不会尝试联网下载。"
-                    )
-                profile = profile_spec(self.config.model_profile)
-                answer = QMessageBox.question(
-                    self,
-                    "需要下载模型",
-                    f"尚未安装 {profile.title}（约 {(profile.detector.size + profile.recognizer.size) / 1e6:.0f} MB）。\n\n"
-                    f"{profile.note}\n\n现在下载吗？",
-                    QMessageBox.Yes | QMessageBox.No,
-                )
-                if answer != QMessageBox.Yes:
-                    return False
-                self._download_models()
+            required_paths(self.config.model_profile)
             self.engine = FaceEngine(self.config, self.database)
             self.enrollment = EnrollmentService(self.database, self.engine)
             self.statusBar().showMessage(f"{gpu_status} · 神经网络使用 GPU 推理")
@@ -468,24 +451,6 @@ class MainWindow(QMainWindow):
         finally:
             self._initializing = False
             QApplication.restoreOverrideCursor()
-
-    def _download_models(self) -> None:
-        progress = QProgressDialog("准备下载…", "取消", 0, 100, self)
-        progress.setWindowTitle("下载模型")
-        progress.setWindowModality(Qt.WindowModal)
-        progress.setMinimumDuration(0)
-
-        def update(name: str, done: int, total: int) -> None:
-            progress.setLabelText(f"正在下载 {name}\n{done / 1e6:.1f} / {total / 1e6:.1f} MB")
-            progress.setValue(int(done * 100 / max(total, 1)))
-            QApplication.processEvents()
-
-        download_profile(
-            self.config.model_profile,
-            progress=update,
-            cancelled=progress.wasCanceled,
-        )
-        progress.setValue(100)
 
     def _build_video_tab(self) -> None:
         tab = QWidget()
@@ -520,7 +485,7 @@ class MainWindow(QMainWindow):
         tab_layout.addWidget(self.face_pages, 1)
         self.source_edit = QLineEdit()
         self.source_edit.setMaxLength(16 * 1024 * 1024)
-        self.source_edit.setPlaceholderText("图片 / 视频文件、RTSP/RTMP 地址，或摄像头编号（例如 0）")
+        self.source_edit.setPlaceholderText("本机图片 / 视频文件或摄像头编号（例如 0）")
         self.source_timer = QTimer(self)
         self.source_timer.setSingleShot(True)
         self.source_timer.setInterval(700)
@@ -821,8 +786,14 @@ class MainWindow(QMainWindow):
         text = text.strip()
         if not text:
             return []
-        if is_image_data_uri(text) or "://" in text or Path(text).is_file():
+        if is_image_data_uri(text):
             return [text]
+        try:
+            if local_path(text).is_file():
+                return [text]
+        except (OSError, ValueError):
+            if ";" not in text and "\n" not in text:
+                return [text]
         return [part.strip().strip('"') for part in text.replace("\n", ";").split(";")
                 if part.strip().strip('"')]
 
@@ -831,9 +802,12 @@ class MainWindow(QMainWindow):
         if text == self._last_submitted_text:
             return
         sources = self._parse_sources(text)
-        if sources and all(is_image_data_uri(source) or source.isdigit() or "://" in source
-                           or Path(source).is_file() for source in sources):
-            self._submit_sources(sources)
+        try:
+            if sources and all(is_image_data_uri(source) or source.isdigit() or local_path(source).is_file()
+                               for source in sources):
+                self._submit_sources(sources)
+        except (OSError, ValueError) as exc:
+            self.statusBar().showMessage(str(exc))
 
     def _start_camera(self) -> None:
         self.source_edit.setText("0")
@@ -842,7 +816,7 @@ class MainWindow(QMainWindow):
     def start_video(self) -> None:
         sources = self._parse_sources(self.source_edit.text())
         if not sources:
-            QMessageBox.warning(self, "缺少检索来源", "请选择图片、视频，或输入流地址、摄像头编号。")
+            QMessageBox.warning(self, "缺少检索来源", "请选择本机图片、视频，或输入摄像头编号。")
             return
         self._submit_sources(sources)
 
@@ -853,8 +827,6 @@ class MainWindow(QMainWindow):
         if self.visual_search.is_busy() and self.visual_search.worker.mode == 'face':
             QMessageBox.information(self, "人脸搜索进行中", "请先停止以图搜索中的人脸搜索。")
             return
-        if not self.initialize():
-            return
         self.source_timer.stop()
         normalized = []
         try:
@@ -863,14 +835,15 @@ class MainWindow(QMainWindow):
                     source = str(store_image_data_uri(
                         source, self.database.path.parent / "query_images"
                     ).resolve())
-                if Path(source).is_file():
-                    source = str(Path(source).resolve())
+                path = local_path(source)
+                if path.is_file():
+                    source = str(path)
                 if source not in normalized:
                     normalized.append(source)
         except (ValueError, OSError, cv2.error) as exc:
             QMessageBox.warning(self, "检索来源无效", str(exc))
             return
-        if not normalized:
+        if not normalized or not self.initialize():
             return
         self.source_edit.setText("; ".join(normalized))
         ongoing = self.worker is not None and (
@@ -1494,7 +1467,7 @@ class MainWindow(QMainWindow):
             if self.engine and self.config.detector_size != self.engine.detector.input_size[0]:
                 message += "\n\n检测输入尺寸将在重启后生效。"
             if changed_model:
-                message += "\n\n模型将在重启后生效；首次启动会下载权重。"
+                message += "\n\n模型将在重启后生效。"
             if changed_backend or changed_gpu_device:
                 message += "\n\nGPU 后端/编号将在重启后生效。"
             if changed_tta:
@@ -1507,6 +1480,10 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "设置无效", str(exc))
 
     def closeEvent(self, event: object) -> None:
+        if self.vehicle_analysis.is_busy():
+            self.vehicle_analysis.stop()
+            event.ignore()
+            return
         if self._photo_task_busy():
             QMessageBox.information(self, "照片比对进行中", "请等待照片比对或身份核查完成后再关闭。")
             event.ignore()
@@ -1521,6 +1498,10 @@ class MainWindow(QMainWindow):
             return
         if self.video_detection.is_busy():
             self.video_detection.stop()
+            event.ignore()
+            return
+        if self.image_tools.face_video_worker is not None:
+            self.image_tools.stop_video_enhancement()
             event.ignore()
             return
         if self.image_tools.is_busy():

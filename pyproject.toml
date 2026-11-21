@@ -4,13 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "face-matching"
-version = "2.10.0"
-description = "Offline face matching, Chinese semantic search, person/vehicle detection and image enhancement for Windows"
+version = "2.11.0"
+description = "Offline visual analysis and live vehicle catalogue verification for Windows"
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
 dependencies = [
   "numpy>=1.26,<3",
   "opencv-python-headless>=4.10,<5",
+  "av>=17.1,<18",
   "PySide6>=6.8,<7",
   "onnxruntime-gpu[cuda,cudnn]>=1.24,<1.27",
   "openvino>=2025.3,<2027",

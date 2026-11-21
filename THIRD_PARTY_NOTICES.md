@@ -8,6 +8,7 @@
 | OpenVINO | Intel GPU 推理 | Apache-2.0 |
 | PySide6 / Qt | 桌面 GUI | LGPLv3/GPLv3/商业许可；交付前按所选 Qt 许可履行义务 |
 | OpenCV | 视频与图像处理 | Apache-2.0 |
+| PyAV / FFmpeg wheels | 视频人脸增强与音轨封装 | PyAV BSD-3-Clause。FFmpeg 及编解码库的发行条款取决于随包构建，参见 https://ffmpeg.org/legal.html |
 | RT-DETRv2-R50 / ONNX Community 导出 | 人和车辆的类别、位置及置信度检测 | 作者 lyuwenyu / PekingU，Apache-2.0；ONNX 导出固定版本 1699ea019e5570bb7283d80ee9a9e42d6245436f；许可证随包保存在 licenses/RT-DETR-LICENSE.txt |
 | NumPy | 数值计算 | BSD-3-Clause |
 | Chinese-CLIP ViT-B/16 | 中文衣着与车辆颜色语义检索 | OFA-Sys，MIT；FP32 ONNX转换来自 felixdu/chinese-clip-vit-base-patch16-onnx，固定版本47080d16c631d8416d2e6b155c59f8fd2c322e98；匹配词表来自Xenova固定版本f26904860903e70e050b8f48255e5f48401816e9。两编码器及词表均固定SHA-256，许可证随包保存在licenses/Chinese-CLIP-LICENSE.txt。 |

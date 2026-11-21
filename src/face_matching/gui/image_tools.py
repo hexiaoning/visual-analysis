@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
+from threading import Event
 
 import cv2
 import numpy as np
@@ -12,6 +13,9 @@ from PySide6.QtWidgets import (
     QGraphicsView, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget,
 )
 
+from ..config import AppConfig
+from ..face_video_enhancement import create_face_detector, enhance_face_video
+from ..vision.local_media import local_path
 from ..image_enhancement import (
     PRESETS, EnhancementSettings, enhance_image, enhance_region, export_enhancement, save_new_png,
 )
@@ -144,9 +148,34 @@ class EnhancementExportWorker(QThread):
             self.failed.emit(str(exc))
 
 
-class ImageToolsWidget(QWidget):
-    def __init__(self, parent: QWidget | None = None) -> None:
+class FaceVideoWorker(QThread):
+    progress = Signal(int, int)
+    complete = Signal(int, int)
+    failed = Signal(str)
+
+    def __init__(self, source: Path, destination: Path, config: AppConfig, parent: QWidget) -> None:
         super().__init__(parent)
+        self.source = source
+        self.destination = destination
+        self.config = config
+        self.stopped = Event()
+
+    def run(self) -> None:
+        try:
+            detector = create_face_detector(self.config)
+            self.complete.emit(*enhance_face_video(
+                self.source, self.destination, detector, self.config.min_face_size,
+                self.stopped, self.progress.emit,
+            ))
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
+class ImageToolsWidget(QWidget):
+    def __init__(self, parent: QWidget | None = None, *, config: AppConfig | None = None) -> None:
+        super().__init__(parent)
+        self.config = config or AppConfig()
+        self.face_video_worker: FaceVideoWorker | None = None
         self.source_name = ""
         self.source_bytes = b""
         self.original: np.ndarray | None = None
@@ -165,6 +194,10 @@ class ImageToolsWidget(QWidget):
         self.original_view.region_selected.connect(self._select_region)
         self.open_button = QPushButton("打开图片…")
         self.open_button.clicked.connect(self._open)
+        self.open_face_video = QPushButton("视频人脸增强…")
+        self.open_face_video.clicked.connect(self._start_face_video)
+        self.stop_face_video = QPushButton("停止视频处理")
+        self.stop_face_video.clicked.connect(self.stop_video_enhancement)
         self.apply_button = QPushButton("应用参数")
         self.apply_button.clicked.connect(self._apply)
         self.png_button = QPushButton("另存处理图 PNG…")
@@ -176,6 +209,8 @@ class ImageToolsWidget(QWidget):
         self.preset.currentTextChanged.connect(self._preset_changed)
         top = QHBoxLayout()
         top.addWidget(self.open_button)
+        top.addWidget(self.open_face_video)
+        top.addWidget(self.stop_face_video)
         top.addWidget(QLabel("参数预设："))
         top.addWidget(self.preset)
         top.addWidget(self.apply_button)
@@ -239,7 +274,8 @@ class ImageToolsWidget(QWidget):
 
     def is_busy(self) -> bool:
         return bool((self.worker and self.worker.isRunning())
-                    or (self.export_worker and self.export_worker.isRunning()))
+                    or (self.export_worker and self.export_worker.isRunning())
+                    or (self.face_video_worker and self.face_video_worker.isRunning()))
 
     def settings(self) -> EnhancementSettings:
         return EnhancementSettings(**{name: control.value() for name, control in self.controls.items()})
@@ -249,6 +285,9 @@ class ImageToolsWidget(QWidget):
         self.region_only.setEnabled(not busy)
         self.original_view.setEnabled(not busy)
         self.open_button.setEnabled(not busy)
+        self.open_face_video.setEnabled(not busy)
+        self.stop_face_video.setEnabled(bool(self.face_video_worker and self.face_video_worker.isRunning()
+                                             and not self.face_video_worker.stopped.is_set()))
         self.apply_button.setEnabled(self.original is not None and not busy
                                     and (not self.region_only.isChecked() or self.region is not None))
         current = self._is_current()
@@ -272,6 +311,50 @@ class ImageToolsWidget(QWidget):
         for field, value in asdict(PRESETS[name]).items():
             self.controls[field].setValue(value)
 
+    def _start_face_video(self) -> None:
+        if self.is_busy():
+            return
+        source, _ = QFileDialog.getOpenFileName(
+            self, "选择本机视频", "", "视频 (*.mp4 *.avi *.mkv *.mov *.wmv *.m4v *.webm)",
+        )
+        if not source:
+            return
+        destination, _ = QFileDialog.getSaveFileName(
+            self, "保存保守人脸增强视频", f"{Path(source).stem}-人脸增强.mkv", "MKV (*.mkv)",
+        )
+        if not destination:
+            return
+        target = Path(destination)
+        if not target.suffix:
+            target = target.with_suffix(".mkv")
+        self.face_video_worker = FaceVideoWorker(Path(source), target, replace(self.config), self)
+        self.face_video_worker.progress.connect(
+            lambda frames, faces: self.status.setText(f"正在处理 · {frames} 帧，{faces} 个人脸区域")
+        )
+        self.face_video_worker.complete.connect(self._face_video_complete)
+        self.face_video_worker.failed.connect(lambda error: self.status.setText(f"视频增强失败：{error}"))
+        self.face_video_worker.finished.connect(self._face_video_finished)
+        self.status.setText("正在准备本机人脸检测和视频编解码。")
+        self.face_video_worker.start()
+        self._update_buttons()
+
+    def stop_video_enhancement(self) -> None:
+        if self.face_video_worker and self.face_video_worker.isRunning():
+            self.face_video_worker.stopped.set()
+            self.status.setText("正在停止视频人脸增强。")
+            self._update_buttons()
+
+    def _face_video_complete(self, frames: int, faces: int) -> None:
+        if frames:
+            self.status.setText(f"已增强 {frames} 帧中的 {faces} 个人脸区域 · {self.face_video_worker.destination}")
+        else:
+            self.status.setText("已停止视频人脸增强。")
+
+    def _face_video_finished(self) -> None:
+        worker, self.face_video_worker = self.face_video_worker, None
+        self._update_buttons()
+        worker.deleteLater()
+
     def _open(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, "打开图片", "", "图片 (*.jpg *.jpeg *.png *.bmp *.webp *.tif *.tiff)"
@@ -284,7 +367,7 @@ class ImageToolsWidget(QWidget):
             return False
         try:
             # Keep bytes from the time of opening, even if the source is later moved.
-            source_bytes = path.read_bytes()
+            source_bytes = local_path(path).read_bytes()
             image = cv2.imdecode(np.frombuffer(source_bytes, np.uint8), cv2.IMREAD_COLOR)
             if image is None or not image.size:
                 raise ValueError("无法解码图片，请检查文件格式")

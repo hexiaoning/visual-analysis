@@ -50,7 +50,7 @@ def test_face_search_page_has_separate_photo_flows_and_exact_library_photo(qt_ru
 
     window.engine = SimpleNamespace(database=window.database, model_id="current", photo_feature=feature)
     try:
-        assert window.tabs.count() == 8
+        assert window.tabs.count() == 9
         buttons = {button.text(): button for button in window.tabs.widget(0).findChildren(QPushButton)}
         buttons["一对一比对"].click()
         compare = window.photo_compare

@@ -18,6 +18,9 @@ def audit(root: Path, profiles: list[str]) -> dict:
     if {path.name for path in model_root.iterdir()} != {model.name for model in models}:
         raise RuntimeError('Model payload does not match the selected full application profiles')
     modules = CArchiveReader(str(root / 'FaceMatching.exe')).open_embedded_archive('PYZ.pyz').toc
+    worker_modules = CArchiveReader(str(root / 'VehicleCatalogueWorker.exe')).open_embedded_archive('PYZ.pyz').toc
+    if 'face_matching.vehicle_provider' not in worker_modules:
+        raise RuntimeError('Missing live vehicle catalogue worker')
     required_modules = {
         'face_matching.__main__', 'face_matching.engine', 'face_matching.database',
         'face_matching.enrollment', 'face_matching.matching', 'face_matching.gui.main_window',
@@ -26,6 +29,8 @@ def audit(root: Path, profiles: list[str]) -> dict:
         'face_matching.gui.semantic_search', 'face_matching.semantic_search', 'face_matching.semantic_model',
         'face_matching.identity_filters', 'face_matching.visual_search', 'face_matching.runtime_check',
         'face_matching.annotation_export', 'face_matching.gui.annotation_compare',
+        'face_matching.gui.vehicle_analysis', 'face_matching.vehicle_analysis', 'face_matching.vision.local_media',
+        'face_matching.face_video_enhancement',
     }
     if missing := sorted(required_modules - modules.keys()):
         raise RuntimeError(f'Missing application features: {missing}')

@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 
 from ..database import PersonRecord, StoredSample
 from ..vision.io import is_image_source, read_image
+from ..vision.local_media import local_path, open_local_video
 
 
 class ImagePane(QLabel):
@@ -45,14 +46,14 @@ class ImagePane(QLabel):
 
 def source_frame(record: dict) -> QImage:
     """Fallback for older records without a saved frame; never open live streams."""
-    source = Path(record["source"])
-    if not source.is_file():
-        return QImage()
     try:
+        source = local_path(record["source"])
+        if not source.is_file():
+            return QImage()
         if is_image_source(str(source)):
             frame = read_image(source)
         else:
-            capture = cv2.VideoCapture(str(source))
+            capture = open_local_video(source)
             try:
                 anchor = max(0, record["frame_index"] - 1)
                 if not capture.isOpened() or (anchor and not capture.set(cv2.CAP_PROP_POS_FRAMES, anchor)):

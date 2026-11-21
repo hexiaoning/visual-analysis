@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 
 from ..detection_video import VideoControl, analyze_video
 from ..image_enhancement import save_new_png
+from ..vision.local_media import open_local_video
 from ..person_vehicle import MODEL_TITLE, load_person_vehicle_detector
 from .workspace_style import workspace_panel
 
@@ -190,7 +191,11 @@ class VideoDetectionWidget(QWidget):
     def load_video(self, path: Path) -> bool:
         if self.is_busy():
             return False
-        capture = cv2.VideoCapture(str(path))
+        try:
+            capture = open_local_video(path)
+        except (OSError, ValueError, cv2.error) as exc:
+            QMessageBox.warning(self, "无法打开视频", str(exc))
+            return False
         try:
             ok, frame = capture.read()
             if not ok:

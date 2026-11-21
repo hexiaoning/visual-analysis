@@ -13,6 +13,7 @@ import cv2
 
 from .database import FaceDatabase
 from .annotations import annotation_states
+from .vision.local_media import local_path, open_local_video
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,7 +36,7 @@ def write_video_clip(
     source: Path, destination: Path, frame_index: int, before: int, after: int
 ) -> dict:
     """Export a local, silent MP4 with offsets relative to the original video."""
-    capture = cv2.VideoCapture(str(source))
+    capture = open_local_video(source)
     writer = None
     try:
         if not capture.isOpened():
@@ -79,6 +80,14 @@ def write_video_clip(
             writer.release()
 
 
+def _available_local_file(value: str) -> Path | None:
+    try:
+        path = local_path(value)
+        return path if path.is_file() else None
+    except (OSError, ValueError):
+        return None
+
+
 def export_annotation_library(
     database: FaceDatabase,
     destination: Path,
@@ -102,7 +111,7 @@ def export_annotation_library(
         annotations = [item for item in annotations if item["id"] in annotation_ids]
     if not annotations:
         raise ValueError("没有可导出的标注")
-    destination = Path(destination)
+    destination = local_path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
     issues: list[str] = []
     image_extensions = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
@@ -122,16 +131,16 @@ def export_annotation_library(
                     progress(f"导出标注 {len(records) + 1}/{len(annotations)}")
                 if options.include_media:
                     for column, label in (("snapshot_path", "snapshot"), ("face_path", "face")):
-                        path = Path(item[column]) if item[column] else None
-                        if path:
-                            if path.is_file():
+                        if item[column]:
+                            path = _available_local_file(item[column])
+                            if path is not None:
                                 name = f"annotations/{item['id']}-{label}{path.suffix.lower()}"
                                 output.write(path, name)
                                 record[label] = name
                             else:
                                 issues.append(f"标注 {item['id']}：标注画面文件缺失")
-                    source = Path(item["source"])
-                    if source.is_file():
+                    source = _available_local_file(item["source"])
+                    if source is not None:
                         image = source.suffix.lower() in image_extensions
                         key = (str(source.resolve()), None if image or options.full_video
                                else item["frame_index"])
@@ -174,8 +183,8 @@ def export_annotation_library(
                     for photo_index, sample in enumerate(
                         (sample for sample in samples if sample.person_id == person_id), 1
                     ):
-                        path = Path(sample.image_path)
-                        if path.is_file():
+                        path = _available_local_file(sample.image_path)
+                        if path is not None:
                             name = f"people/{index}/portraits/{photo_index}{path.suffix.lower()}"
                             output.write(path, name)
                             entry["portraits"].append(name)

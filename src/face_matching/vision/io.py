@@ -9,6 +9,8 @@ from urllib.parse import unquote_to_bytes
 import cv2
 import numpy as np
 
+from .local_media import local_path
+
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 
@@ -43,7 +45,7 @@ def store_image_data_uri(source: str, directory: Path) -> Path:
     if image is None:
         raise ValueError("无法解码图片数据，请重新复制图片或选择图片文件")
     # Store as PNG to keep the decoded pixels and support any input image MIME type.
-    destination = directory / f"粘贴图片-{hashlib.sha256(payload).hexdigest()[:20]}.png"
+    destination = local_path(directory / f"粘贴图片-{hashlib.sha256(payload).hexdigest()[:20]}.png")
     if not destination.is_file():
         directory.mkdir(parents=True, exist_ok=True)
         ok, encoded = cv2.imencode(".png", image)
@@ -58,7 +60,7 @@ def read_image(path: str | Path) -> np.ndarray | None:
     try:
         source = str(path)
         payload = (np.frombuffer(image_data_payload(source), dtype=np.uint8)
-                   if is_image_data_uri(source) else np.fromfile(source, dtype=np.uint8))
+                   if is_image_data_uri(source) else np.fromfile(local_path(source), dtype=np.uint8))
     except (OSError, ValueError):
         return None
     if payload.size == 0:
@@ -70,7 +72,7 @@ def read_image(path: str | Path) -> np.ndarray | None:
 
 
 def write_jpeg(path: str | Path, image: np.ndarray, quality: int = 95) -> None:
-    destination = Path(path)
+    destination = local_path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     ok, payload = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, int(quality)])
     if not ok:

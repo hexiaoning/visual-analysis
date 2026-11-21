@@ -4,15 +4,17 @@ import os
 import sys
 from pathlib import Path
 
+from .vision.local_media import local_path
+
 
 def app_home() -> Path:
     override = os.environ.get("FACE_MATCHING_HOME")
     if override:
-        return Path(override).expanduser().resolve()
+        return local_path(Path(override).expanduser())
     base = os.environ.get("LOCALAPPDATA")
     if base:
-        return Path(base) / "FaceMatching"
-    return Path.home() / ".face-matching"
+        return local_path(Path(base) / "FaceMatching")
+    return local_path(Path.home() / ".face-matching")
 
 
 def ensure_app_dirs() -> Path:
@@ -34,7 +36,7 @@ def packaged_models_dir() -> Path | None:
     """Return the read-only model directory embedded in a portable build."""
     override = os.environ.get("FACE_MATCHING_BUNDLED_MODELS")
     if override:
-        return Path(override).expanduser().resolve()
+        return local_path(Path(override).expanduser())
     bundle_root = getattr(sys, "_MEIPASS", None)
     if bundle_root:
         return Path(bundle_root) / "models"

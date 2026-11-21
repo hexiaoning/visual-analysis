@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import tempfile
 
+import av
 import cv2
 import numpy as np
 from PySide6.QtCore import QCoreApplication, QEvent
@@ -16,6 +17,8 @@ from .config import AppConfig
 from .gui.main_window import MainWindow
 from .image_enhancement import PRESETS, encode_png, enhance_image
 from .models import available_profiles, file_sha256, required_paths, required_person_vehicle_model, required_semantic_models
+from .vehicle_analysis import VehicleCandidate, _query_worker
+from .vision.local_media import open_local_video
 
 
 def check_runtime(config: AppConfig, *, diagnose: bool = False) -> dict:
@@ -43,7 +46,10 @@ def check_runtime(config: AppConfig, *, diagnose: bool = False) -> dict:
                 writer.write(cv2.resize(result, (96, 64)))
             finally:
                 writer.release()
-            reader = cv2.VideoCapture(str(video_path))
+            with av.open(str(video_path), options={"protocol_whitelist": "file"}) as reader:
+                if next(reader.decode(video=0), None) is None:
+                    raise RuntimeError("PyAV 视频解码自检失败")
+            reader = open_local_video(video_path)
             try:
                 ok, decoded = reader.read()
                 if not ok or decoded.shape[:2] != (64, 96):
@@ -61,14 +67,18 @@ def check_runtime(config: AppConfig, *, diagnose: bool = False) -> dict:
             application.processEvents()
             if page.grab().isNull():
                 raise RuntimeError("照片比对页面渲染检查失败")
+        sources = _query_worker({}, [VehicleCandidate("自检", "自检")])
+        if [entry["status"] for entry in sources] != ["not_configured", "not_configured"]:
+            raise RuntimeError("车型核验子进程自检失败")
         report = {
+            "vehicle_worker": True,
             "ok": True, "application": "FaceMatching", "version": __version__,
             "tabs": [window.tabs.tabText(index) for index in range(window.tabs.count())],
             "profiles": profiles, "video_codec": "mp4v",
             "models": [{"name": model.name, "size": model.stat().st_size, "sha256": file_sha256(model)}
                        for model in sorted(models)],
             "runtime": {name: importlib.metadata.version(name) for name in (
-                "numpy", "opencv-python-headless", "PySide6", "onnxruntime-gpu", "openvino",
+                "numpy", "opencv-python-headless", "av", "PySide6", "onnxruntime-gpu", "openvino",
             )},
         }
         if diagnose:
