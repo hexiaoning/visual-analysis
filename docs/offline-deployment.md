@@ -51,17 +51,16 @@
 
 ## 发布到百度网盘
 
-构建完成并生成校验文件后，可以由构建机直接调用百度网盘上传接口。先在百度网盘开放平台完成应用接入和账号 OAuth 授权，再在构建进程中配置：
+默认以百度官方 Windows 命令行工具 `bdpan` 上传。扫码登录后，在构建机设置 `BAIDU_NETDISK_CREDENTIALS_FILE`，指向包含 `baidu_netdisk` 配置项的 JSON 文件。配置项 `executable`、`config_path` 和 `release_directory` 分别指向 CLI、CLI 管理的本机授权文件和网盘发布目录。账号授权由 `bdpan` 保存和续期。
 
-- `BAIDU_NETDISK_RELEASE_DIR`，授权应用下已有的网盘目录，例如 `/apps/实际应用名/Visual-Analysis`。网盘客户端中对应「我的应用数据/实际应用名/Visual-Analysis」。
-- `BAIDU_NETDISK_ACCESS_TOKEN`，上述账号的有效访问令牌。通过本机或发布环境的凭据存储注入，令牌过期后更新。项目不保管令牌或刷新令牌。
+打包会把校验通过的 ZIP 和 `.zip.sha256` 上传到「我的应用数据/bdpan/Visual-Analysis」下以版本和 ZIP 哈希前缀命名的子目录。核对网盘上的两个文件后，打包脚本删除上一版，再清理本次本地产物。上传或核对失败时会保留本地文件和上一版。明确只需本地包时，打包加 `-SkipBaiduUpload`。
 
-配置目录后，常规打包命令自动上传 ZIP 和 `.zip.sha256`。上传流程重新校验 ZIP，以 4 MiB 分片传输，单文件上限 4 GiB。上传失败会保留本地压缩包和校验文件，命令返回失败。若要上传已生成的包，可单独运行：
+如需从已经生成的 ZIP 重新上传，可运行：
 
 ```powershell
-python .\scripts\upload_baidu_release.py .\dist\FaceMatching-v2.11.0-windows-x64.zip
+.\scripts\upload_bdpan_release.ps1 -Archive .\dist\FaceMatching-v2.11.0-windows-x64.zip -CredentialsFile $env:BAIDU_NETDISK_CREDENTIALS_FILE -PrunePrevious
 ```
 
-如百度返回同名冲突，检查是否已有完整的 ZIP 和校验文件，或选择另一个授权目录重试。上传脚本使用不重命名策略，避免自动覆盖。目标机无需配置百度网盘。
+手动重传命令会保留本地文件。开放平台接入方也可单独使用 `upload_baidu_release.py`，向可写的 `/apps/<应用名>` 目录上传。此方式依赖 `BAIDU_NETDISK_RELEASE_DIR` 和有效的 `BAIDU_NETDISK_ACCESS_TOKEN`。
 
-[百度网盘官方上传接口示例](https://github.com/baidu-netdisk/baidu-drive-sdk-go#上传与下载) · [百度网盘开放平台上传限制](https://help.baidu.com/question?class=800&id=1002121&prod_id=257)
+[百度网盘官方 CLI](https://github.com/baidu-netdisk/bdpan-storage) · [百度网盘官方上传接口示例](https://github.com/baidu-netdisk/baidu-drive-sdk-go#上传与下载)

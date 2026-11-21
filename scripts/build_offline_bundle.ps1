@@ -8,7 +8,8 @@ param(
     [switch]$Clean,
     [switch]$SkipTests,
     [switch]$SkipDependencyInstall,
-    [switch]$RunGpuSmoke
+    [switch]$RunGpuSmoke,
+    [switch]$SkipBaiduUpload
 )
 
 $ErrorActionPreference = "Stop"
@@ -169,7 +170,29 @@ Invoke-CheckedPython -Arguments @((Join-Path $ProjectRoot "scripts\create_releas
 Write-Host "Offline package ready: $Archive" -ForegroundColor Green
 Write-Host "The target machine needs Windows 11 x64 and either a compatible NVIDIA or Intel GPU display driver." -ForegroundColor Green
 
-if (-not [string]::IsNullOrWhiteSpace($env:BAIDU_NETDISK_RELEASE_DIR)) {
-    Write-Host "Uploading the verified ZIP and checksum to Baidu Netdisk..." -ForegroundColor Cyan
-    Invoke-CheckedPython -Arguments @((Join-Path $ProjectRoot "scripts\upload_baidu_release.py"), $Archive)
+$BaiduCredentialsFile = $env:BAIDU_NETDISK_CREDENTIALS_FILE
+if ([string]::IsNullOrWhiteSpace($BaiduCredentialsFile)) {
+    $BaiduCredentialsFile = [Environment]::GetEnvironmentVariable("BAIDU_NETDISK_CREDENTIALS_FILE", "User")
 }
+if ($SkipBaiduUpload) { return }
+if ([string]::IsNullOrWhiteSpace($BaiduCredentialsFile)) {
+    throw "Baidu Netdisk is not configured. The ZIP and checksum are ready locally. Configure the release account or use -SkipBaiduUpload for a local-only build."
+}
+& (Join-Path $ProjectRoot "scripts\upload_bdpan_release.ps1") -Archive $Archive -CredentialsFile $BaiduCredentialsFile -PrunePrevious
+
+$LocalReleaseRoot = Get-Item -LiteralPath $ReleaseRoot
+if ($LocalReleaseRoot.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+    throw "Refusing to clean a redirected release directory."
+}
+$ReleaseRootPath = $LocalReleaseRoot.FullName
+$ReleaseItems = @(Get-Item -LiteralPath $ReleaseDirectory, $Archive, ($Archive + ".sha256"))
+foreach ($Item in $ReleaseItems) {
+    Assert-SafeBuildTarget $Item.FullName
+    if ((Split-Path -Parent $Item.FullName) -ne $ReleaseRootPath -or
+            ($Item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "Refusing to clean a release item outside the expected local directory: $($Item.FullName)"
+    }
+}
+Remove-Item -LiteralPath $ReleaseDirectory -Recurse -Force
+Remove-Item -LiteralPath $Archive, ($Archive + ".sha256") -Force
+Write-Host "Baidu Netdisk release verified. Removed this build's local packaging outputs." -ForegroundColor Green
