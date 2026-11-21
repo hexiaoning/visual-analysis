@@ -70,6 +70,55 @@ function Remove-PreviousNetdiskRelease([object[]]$Previous) {
     }
 }
 
+function Save-NetdiskShare([string]$Destination, [string]$Version, [string]$Hash, [string]$ArchiveName) {
+    $recordDirectory = Join-Path $env:LOCALAPPDATA "VisualAnalysis"
+    $null = New-Item -ItemType Directory -Path $recordDirectory -Force
+    $recordPath = Join-Path $recordDirectory "latest-release.json"
+    $now = [DateTimeOffset]::UtcNow
+    if (Test-Path -LiteralPath $recordPath -PathType Leaf) {
+        $existing = Get-Content -LiteralPath $recordPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($existing.sha256 -ceq $Hash -and $existing.netdisk_directory -ceq $Destination -and
+                [DateTimeOffset]$existing.expires_at -gt $now) {
+            Write-Host "Baidu Netdisk share: $($existing.share_url)"
+            Write-Host "Share record: $recordPath"
+            return
+        }
+    }
+
+    $share = Invoke-Netdisk -Arguments @("share", $Destination, "--period", "7")
+    $url = [uri]$share.link
+    if (-not $url.IsAbsoluteUri -or $url.Scheme -ne "https" -or
+            $url.Host -ne "pan.baidu.com" -or $url.AbsolutePath -notmatch '^/s/[^/]+$') {
+        throw "Baidu Netdisk did not return a valid release share link."
+    }
+    $record = [ordered]@{
+        version = $Version
+        netdisk_directory = $Destination
+        archive = $ArchiveName
+        checksum = "$ArchiveName.sha256"
+        sha256 = $Hash
+        share_url = $share.link
+        extraction_code = $share.pwd
+        created_at = $now.ToString("o")
+        expires_at = $now.AddDays(7).ToString("o")
+    }
+    $temporary = Join-Path $recordDirectory ("latest-release-" + [guid]::NewGuid().ToString("N") + ".tmp")
+    try {
+        [IO.File]::WriteAllText($temporary, ($record | ConvertTo-Json) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+        if (Test-Path -LiteralPath $recordPath -PathType Leaf) {
+            [IO.File]::Replace($temporary, $recordPath, [NullString]::Value)
+        }
+        else {
+            [IO.File]::Move($temporary, $recordPath)
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporary -PathType Leaf) { Remove-Item -LiteralPath $temporary }
+    }
+    Write-Host "Baidu Netdisk share: $($share.link)"
+    Write-Host "Share record: $recordPath"
+}
+
 $zip = Get-Item -LiteralPath $Archive
 if ($zip.PSIsContainer -or $zip.Name -notmatch '^FaceMatching-(v\d+\.\d+\.\d+)-windows-x64\.zip$') {
     throw "Expected a versioned Visual Analysis release ZIP."
@@ -120,4 +169,5 @@ foreach ($file in @($zip, $checksum)) {
     Write-Host "Baidu Netdisk verified: $($remote.path)"
 }
 
+Save-NetdiskShare $destination $version $hash $zip.Name
 if ($PrunePrevious) { Remove-PreviousNetdiskRelease $previous }

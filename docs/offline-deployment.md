@@ -53,7 +53,7 @@
 
 默认以百度官方 Windows 命令行工具 `bdpan` 上传。扫码登录后，在构建机设置 `BAIDU_NETDISK_CREDENTIALS_FILE`，指向包含 `baidu_netdisk` 配置项的 JSON 文件。配置项 `executable`、`config_path` 和 `release_directory` 分别指向 CLI、CLI 管理的本机授权文件和网盘发布目录。账号授权由 `bdpan` 保存和续期。
 
-打包会把校验通过的 ZIP 和 `.zip.sha256` 上传到「我的应用数据/bdpan/Visual-Analysis」下以版本和 ZIP 哈希前缀命名的子目录。核对网盘上的两个文件后，打包脚本删除上一版，再清理本次本地产物。上传或核对失败时会保留本地文件和上一版。明确只需本地包时，打包加 `-SkipBaiduUpload`。
+打包会把校验通过的 ZIP 和 `.zip.sha256` 上传到「我的应用数据/bdpan/Visual-Analysis」下以版本和 ZIP 哈希前缀命名的子目录。核对网盘上的两个文件后，脚本为整版目录生成 7 天分享链接，将链接、提取码和 SHA-256 写入 %LOCALAPPDATA%\VisualAnalysis\latest-release.json，然后删除上一版和本次本地产物。上传、核对或分享失败时，保留本地文件和上一版。明确只需本地包时，打包加 `-SkipBaiduUpload`。
 
 如需从已经生成的 ZIP 重新上传，可运行：
 
