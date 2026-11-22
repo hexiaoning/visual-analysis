@@ -1,5 +1,7 @@
 #include "local_images.h"
 #include "portrait_video.h"
+#include "operations.h"
+#include "operations_window.h"
 
 #include <algorithm>
 #include <array>
@@ -17,13 +19,15 @@
 namespace {
 namespace fs = std::filesystem;
 
-enum Control { chooseImage = 100, chooseMode, restoreImage, preferRecall, chooseCandidate, exportImage };
+enum Control { chooseImage = 100, chooseMode, restoreImage, preferRecall, chooseCandidate, exportImage,
+               firstWorkflow = 300 };
 constexpr UINT_PTR workerTimer = 1;
 constexpr UINT workerPollMs = 100;
 constexpr wchar_t className[] = L"VisualAnalysisNative";
 
 struct Window {
     fs::path models;
+    fs::path worker;
     fs::path videoSource;
     cv::Mat original;
     visual::Candidates candidates;
@@ -230,6 +234,11 @@ LRESULT CALLBACK dispatch(HWND handle, UINT message, WPARAM wparam, LPARAM lpara
     }
     case WM_COMMAND:
         try {
+            const auto command=LOWORD(wparam);
+            if(command>=firstWorkflow && command<firstWorkflow+visual::workflowNames().size()) {
+                visual::openWorkflow(handle,state->models,state->worker,command-firstWorkflow);
+                return 0;
+            }
             switch (LOWORD(wparam)) {
             case chooseImage:
                 if (!state->work.valid()) {
@@ -413,9 +422,15 @@ int showWindow(HINSTANCE module, int show, const fs::path& models) {
     }
     Window state;
     state.models = models;
+    state.worker = applicationDirectory() / L"VehicleCatalogueWorker.exe";
+    const auto menu=CreateMenu();
+    for(size_t index=0;index<visual::workflowNames().size();++index) {
+        AppendMenuW(menu,MF_STRING,firstWorkflow+index,visual::workflowNames()[index]);
+    }
     const auto handle = CreateWindowExW(0, className, L"Visual Analysis · 图像还原",
-        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 1060, 700, nullptr, nullptr, module, &state);
+        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 1060, 700, nullptr, menu, module, &state);
     if (!handle) {
+        DestroyMenu(menu);
         throw std::runtime_error("Could not create the visual analysis window.");
     }
     ShowWindow(handle, show);
@@ -443,7 +458,8 @@ int WINAPI wWinMain(HINSTANCE module, HINSTANCE, PWSTR, int show) {
         std::vector<std::wstring> args(raw + 1, raw + count);
         LocalFree(raw);
         commandLine = !args.empty();
-        fs::path inputs, outputs, report, video, videoOutput;
+        fs::path inputs, outputs, report, video, videoOutput, operationRequest;
+        std::string operation;
         bool recall = false;
         for (size_t index = 0; index < args.size(); ++index) {
             const auto flag = args[index];
@@ -460,9 +476,23 @@ int WINAPI wWinMain(HINSTANCE module, HINSTANCE, PWSTR, int show) {
             else if (flag == L"--models") models = args[index];
             else if (flag == L"--restore-portrait-video") video = args[index];
             else if (flag == L"--video-output") videoOutput = args[index];
+            else if (flag == L"--native-operation") operation = visual::utf8(args[index]);
+            else if (flag == L"--request") operationRequest = args[index];
             else throw std::runtime_error("Unknown command-line argument.");
         }
         if (commandLine) {
+            if (!operation.empty() && !operationRequest.empty() && !report.empty()) {
+                try {
+                    std::atomic<bool> cancel=false;
+                    auto result=visual::runOperation(operation,visual::readJson(operationRequest),visual::localPath(models),
+                        applicationDirectory()/L"VehicleCatalogueWorker.exe",cancel);
+                    visual::writeJson(report,{{"ok",true},{"result",std::move(result)}});
+                    return 0;
+                } catch(const std::exception& error) {
+                    visual::writeJson(report,{{"ok",false},{"error",error.what()}});
+                    return 2;
+                }
+            }
             if (!video.empty() && !videoOutput.empty() && inputs.empty()) {
                 visual::VideoProgress progress;
                 visual::restorePortraitVideo(video, videoOutput, models, progress);

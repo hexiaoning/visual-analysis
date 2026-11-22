@@ -5,6 +5,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cmath>
+#include <optional>
 #include <stdexcept>
 
 #include <Windows.h>
@@ -73,11 +74,11 @@ struct Scaler {
 struct Interrupted {};
 
 int interrupt(void* state) {
-    return static_cast<VideoProgress*>(state)->cancel.load() ? 1 : 0;
+    return static_cast<VideoProgress*>(state)->cancelled() ? 1 : 0;
 }
 
 void requireRunning(const VideoProgress& progress) {
-    if (progress.cancel.load()) throw Interrupted{};
+    if (progress.cancelled()) throw Interrupted{};
 }
 
 struct StagingArea {
@@ -108,17 +109,40 @@ int rotation(const AVCodecParameters* info) {
     return std::isfinite(angle) ? (int(std::round(angle / 90)) % 4 + 4) % 4 : 0;
 }
 
-void render(const fs::path& source, const fs::path& temporary, const fs::path& models, VideoProgress& progress) {
-    Input reader{avformat_alloc_context()};
-    if (!reader.context) throw std::bad_alloc();
-    reader.context->interrupt_callback = {interrupt, &progress};
+cv::Mat imageFromFrame(const AVFrame& frame, Scaler& scaler, int orientation) {
+    scaler.context = sws_getCachedContext(scaler.context,frame.width,frame.height,
+        static_cast<AVPixelFormat>(frame.format),frame.width,frame.height,AV_PIX_FMT_BGR24,
+        SWS_BILINEAR,nullptr,nullptr,nullptr);
+    if(!scaler.context) throw std::runtime_error("Cannot convert video pixels to BGR.");
+    cv::Mat pixels(frame.height,frame.width,CV_8UC3);
+    uint8_t* planes[4]{pixels.data};
+    int strides[4]{static_cast<int>(pixels.step)};
+    check(sws_scale(scaler.context,frame.data,frame.linesize,0,frame.height,planes,strides),
+          "Video pixel conversion failed.");
+    if(orientation) {
+        constexpr std::array<int,4> rotations{0,cv::ROTATE_90_COUNTERCLOCKWISE,cv::ROTATE_180,cv::ROTATE_90_CLOCKWISE};
+        cv::rotate(pixels,pixels,rotations[orientation]);
+    }
+    return pixels;
+}
+
+void openVideo(Input& reader,const fs::path& source,AVIOInterruptCB callbacks) {
+    reader.context=avformat_alloc_context();
+    if(!reader.context) throw std::bad_alloc();
+    reader.context->interrupt_callback=callbacks;
     AVDictionary* options{};
-    av_dict_set(&options, "protocol_whitelist", "file", 0);
-    av_dict_set(&options, "format_whitelist", "mov,matroska,webm,avi,mpegts,flv,asf,mpeg,ogg", 0);
-    const auto opened = avformat_open_input(&reader.context, utf8(source).c_str(), nullptr, &options);
+    av_dict_set(&options,"protocol_whitelist","file",0);
+    av_dict_set(&options,"format_whitelist","mov,matroska,webm,avi,mpegts,flv,asf,mpeg,ogg",0);
+    const auto opened=avformat_open_input(&reader.context,utf8(source).c_str(),nullptr,&options);
     av_dict_free(&options);
-    check(opened, "Cannot open the local video.");
-    check(avformat_find_stream_info(reader.context, nullptr), "Cannot read the video tracks.");
+    check(opened,"Cannot open the local video.");
+    check(avformat_find_stream_info(reader.context,nullptr),"Cannot read the video tracks.");
+}
+
+void render(const fs::path& source,const fs::path& temporary,const FrameProcessor& transform,
+            VideoProgress& progress,bool archive,std::optional<std::pair<double,double>> clip={}) {
+    Input reader;
+    openVideo(reader,source,{interrupt,&progress});
     const AVCodec* decoder{};
     const auto videoIndex = av_find_best_stream(reader.context, AVMEDIA_TYPE_VIDEO, -1, -1, &decoder, 0);
     check(videoIndex, "No decodable video stream.");
@@ -129,30 +153,34 @@ void render(const fs::path& source, const fs::path& temporary, const fs::path& m
     decoding.context->thread_count = 2;
     decoding.context->pkt_timebase = video->time_base;
     check(avcodec_open2(decoding.context, decoder, nullptr), "Could not initialize the video decoder.");
-    const auto* ffv1 = avcodec_find_encoder(AV_CODEC_ID_FFV1);
-    if (!ffv1) throw std::runtime_error("The packaged FFmpeg SDK is missing its FFV1 encoder.");
-    Codec encoding{avcodec_alloc_context3(ffv1)};
+    const auto* encoder=avcodec_find_encoder(archive?AV_CODEC_ID_FFV1:AV_CODEC_ID_MPEG4);
+    if(!encoder) throw std::runtime_error("The packaged FFmpeg encoder is missing.");
+    Codec encoding{avcodec_alloc_context3(encoder)};
     if (!encoding.context) throw std::bad_alloc();
     const auto orientation = rotation(video->codecpar);
     const int width = orientation % 2 ? decoding.context->height : decoding.context->width;
     const int height = orientation % 2 ? decoding.context->width : decoding.context->height;
     if (width <= 0 || height <= 0) throw std::runtime_error("The source video has invalid dimensions.");
-    encoding.context->width = width;
-    encoding.context->height = height;
-    encoding.context->pix_fmt = AV_PIX_FMT_BGR0;
+    encoding.context->width = archive?width:width+width%2;
+    encoding.context->height = archive?height:height+height%2;
+    encoding.context->pix_fmt = archive?AV_PIX_FMT_BGR0:AV_PIX_FMT_YUV420P;
     encoding.context->time_base = video->time_base;
     const auto rate = av_guess_frame_rate(reader.context, video, nullptr);
     encoding.context->framerate = rate.num && rate.den ? rate : AVRational{30, 1};
     encoding.context->thread_count = 2;
+    if(!archive) {
+        encoding.context->time_base=AVRational{1,10000};
+        encoding.context->bit_rate=6000000;
+    }
 
     Output writer;
     const auto filename = utf8(temporary);
-    check(avformat_alloc_output_context2(&writer.context, nullptr, "matroska", filename.c_str()),
+    check(avformat_alloc_output_context2(&writer.context, nullptr, archive?"matroska":"mp4", filename.c_str()),
           "Cannot initialize the output container.");
     if (writer.context->oformat->flags & AVFMT_GLOBALHEADER) {
         encoding.context->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
     }
-    check(avcodec_open2(encoding.context, ffv1, nullptr), "Could not initialize the FFV1 encoder.");
+    check(avcodec_open2(encoding.context, encoder, nullptr), "Could not initialize the video encoder.");
     auto* rendered = avformat_new_stream(writer.context, nullptr);
     if (!rendered) throw std::bad_alloc();
     check(avcodec_parameters_from_context(rendered->codecpar, encoding.context), "Cannot add the output video track.");
@@ -161,7 +189,7 @@ void render(const fs::path& source, const fs::path& temporary, const fs::path& m
     std::vector<AVStream*> audio(reader.context->nb_streams);
     for (unsigned index = 0; index < reader.context->nb_streams; ++index) {
         auto* track = reader.context->streams[index];
-        if (track->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+        if (archive && track->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
             auto* copy = avformat_new_stream(writer.context, nullptr);
             if (!copy) throw std::bad_alloc();
             check(avcodec_parameters_copy(copy->codecpar, track->codecpar), "Cannot copy an audio track.");
@@ -175,28 +203,29 @@ void render(const fs::path& source, const fs::path& temporary, const fs::path& m
     check(avio_open(&writer.context->pb, filename.c_str(), AVIO_FLAG_WRITE), "Cannot open the staged MKV.");
     check(avformat_write_header(writer.context, nullptr), "Cannot write the output stream information.");
 
-    VideoPortraitRestorer restorer(models);
     Packet input, encoded;
     Frame frame, output;
-    Scaler scaler;
+    Scaler scaler, outputScaler;
     if (!input.data || !encoded.data || !frame.data || !output.data) throw std::bad_alloc();
-    output.data->format = AV_PIX_FMT_BGR0;
-    output.data->width = width;
-    output.data->height = height;
+    output.data->format = encoding.context->pix_fmt;
+    output.data->width = encoding.context->width;
+    output.data->height = encoding.context->height;
     check(av_frame_get_buffer(output.data, 32), "Cannot allocate the output frame.");
+    bool clipDone=false;
+    std::optional<int64_t> firstTimestamp;
     const auto sendFrame = [&](const AVFrame* pixels) {
         check(avcodec_send_frame(encoding.context, pixels), "Could not encode an output video frame.");
         for (;;) {
             const auto status = avcodec_receive_packet(encoding.context, encoded.data);
             if (status == AVERROR(EAGAIN) || status == AVERROR_EOF) return;
-            check(status, "Could not read FFV1 packet.");
+            check(status, "Could not read encoded video packet.");
             av_packet_rescale_ts(encoded.data, encoding.context->time_base, rendered->time_base);
             encoded.data->stream_index = rendered->index;
             check(av_interleaved_write_frame(writer.context, encoded.data), "Cannot save the video packet.");
         }
     };
     const auto receiveFrames = [&] {
-        for (;;) {
+        while(!clipDone) {
             requireRunning(progress);
             const auto status = avcodec_receive_frame(decoding.context, frame.data);
             if (status == AVERROR(EAGAIN) || status == AVERROR_EOF) return;
@@ -208,35 +237,42 @@ void render(const fs::path& source, const fs::path& temporary, const fs::path& m
             if (frame.data->best_effort_timestamp == AV_NOPTS_VALUE) {
                 throw std::runtime_error("A source frame is missing its presentation timestamp.");
             }
-            scaler.context = sws_getCachedContext(scaler.context, frame.data->width, frame.data->height,
-                static_cast<AVPixelFormat>(frame.data->format), frame.data->width, frame.data->height,
-                AV_PIX_FMT_BGR24, SWS_BILINEAR, nullptr, nullptr, nullptr);
-            if (!scaler.context) throw std::runtime_error("Cannot convert video pixels to BGR.");
-            cv::Mat pixels(frame.data->height, frame.data->width, CV_8UC3);
-            uint8_t* planes[4]{pixels.data};
-            int strides[4]{static_cast<int>(pixels.step)};
-            check(sws_scale(scaler.context, frame.data->data, frame.data->linesize, 0, frame.data->height,
-                            planes, strides), "Video pixel conversion failed.");
-            if (orientation) {
-                constexpr std::array<int, 4> rotations{0, cv::ROTATE_90_COUNTERCLOCKWISE, cv::ROTATE_180,
-                                                       cv::ROTATE_90_CLOCKWISE};
-                cv::rotate(pixels, pixels, rotations[orientation]);
+            if(clip) {
+                const auto time=frame.data->best_effort_timestamp*av_q2d(video->time_base);
+                if(time<clip->first) {av_frame_unref(frame.data);continue;}
+                if(time>clip->second) {clipDone=true;return;}
+                if(!firstTimestamp) firstTimestamp=frame.data->best_effort_timestamp;
             }
-            const auto [restored, faces] = restorer.restore(pixels);
+            const auto pixels=imageFromFrame(*frame.data,scaler,orientation);
+            const auto [restored, count] = transform(pixels);
             requireRunning(progress);
+            if(restored.empty() || restored.size()!=pixels.size()) throw std::runtime_error("Video processor changed frame dimensions.");
             check(av_frame_make_writable(output.data), "The output frame is busy.");
-            cv::Mat destination(height, width, CV_8UC4, output.data->data[0], output.data->linesize[0]);
-            cv::cvtColor(restored, destination, cv::COLOR_BGR2BGRA);
-            output.data->pts = frame.data->best_effort_timestamp;
-            output.data->duration = frame.data->duration;
+            if(archive) {
+                cv::Mat destination(height,width,CV_8UC4,output.data->data[0],output.data->linesize[0]);
+                cv::cvtColor(restored,destination,cv::COLOR_BGR2BGRA);
+            } else {
+                cv::Mat padded;
+                cv::copyMakeBorder(restored,padded,0,height%2,0,width%2,cv::BORDER_CONSTANT);
+                outputScaler.context=sws_getCachedContext(outputScaler.context,padded.cols,padded.rows,AV_PIX_FMT_BGR24,
+                    padded.cols,padded.rows,AV_PIX_FMT_YUV420P,SWS_BILINEAR,nullptr,nullptr,nullptr);
+                if(!outputScaler.context) throw std::runtime_error("Cannot prepare MP4 color conversion.");
+                const uint8_t* planes[4]{padded.data};
+                int strikes[4]{static_cast<int>(padded.step)};
+                check(sws_scale(outputScaler.context,planes,strikes,0,padded.rows,output.data->data,output.data->linesize),
+                    "Cannot convert the MP4 frame.");
+            }
+            output.data->pts=av_rescale_q(frame.data->best_effort_timestamp-firstTimestamp.value_or(0),
+                                         video->time_base,encoding.context->time_base);
+            output.data->duration=av_rescale_q(frame.data->duration,video->time_base,encoding.context->time_base);
             sendFrame(output.data);
             ++progress.frames;
-            progress.faces += faces;
+            progress.faces += count;
             av_frame_unref(frame.data);
         }
     };
     int status{};
-    while ((status = av_read_frame(reader.context, input.data)) >= 0) {
+    while (!clipDone && (status = av_read_frame(reader.context, input.data)) >= 0) {
         requireRunning(progress);
         const auto index = input.data->stream_index;
         if (index == videoIndex) {
@@ -251,15 +287,78 @@ void render(const fs::path& source, const fs::path& temporary, const fs::path& m
         av_packet_unref(input.data);
     }
     requireRunning(progress);
-    if (status != AVERROR_EOF) check(status, "Could not finish reading the source.");
-    check(avcodec_send_packet(decoding.context, nullptr), "Could not flush the decoder.");
-    receiveFrames();
-    if (!progress.frames || !progress.faces) throw std::runtime_error("No restorable faces in the source video.");
+    if(!clipDone) {
+        if (status != AVERROR_EOF) check(status, "Could not finish reading the source.");
+        check(avcodec_send_packet(decoding.context, nullptr), "Could not flush the decoder.");
+        receiveFrames();
+    }
+    if(!progress.frames || (archive&&!progress.faces)) throw std::runtime_error("No usable output frames.");
     sendFrame(nullptr);
     check(av_write_trailer(writer.context), "Could not finalize the MKV.");
     check(avio_closep(&writer.context->pb), "Could not finish writing the staged video.");
 }
 
+}
+
+int visitVideo(const fs::path& path,const FrameVisitor& visitor,int interval,const std::atomic<bool>& cancel) {
+    if(interval<1) throw std::invalid_argument("抽帧间隔必须大于 0。");
+    const auto source=localPath(path);
+    if(!fs::is_regular_file(source)) throw std::invalid_argument("请选择本机视频。");
+    Input reader;
+    auto cancelled=[](void* state){return static_cast<std::atomic<bool>*>(state)->load()?1:0;};
+    openVideo(reader,source,{cancelled,const_cast<std::atomic<bool>*>(&cancel)});
+    const AVCodec* codec{};
+    const auto videoIndex=av_find_best_stream(reader.context,AVMEDIA_TYPE_VIDEO,-1,-1,&codec,0);
+    check(videoIndex,"无法找到视频轨。");
+    const auto* track=reader.context->streams[videoIndex];
+    Codec decoder{avcodec_alloc_context3(codec)};
+    if(!decoder.context) throw std::bad_alloc();
+    check(avcodec_parameters_to_context(decoder.context,track->codecpar),"读取视频参数失败。");
+    decoder.context->thread_count=2;
+    check(avcodec_open2(decoder.context,codec,nullptr),"打开视频解码器失败。");
+    const auto orientation=rotation(track->codecpar);
+    const double frameRate=av_q2d(av_guess_frame_rate(reader.context,const_cast<AVStream*>(track),nullptr));
+    Frame frame;
+    Packet packet;
+    Scaler scaler;
+    if(!frame.data || !packet.data) throw std::bad_alloc();
+    int frames=0;
+    double previous=-1;
+    bool stopped=false;
+    auto receive=[&]{
+        while(!cancel && !stopped) {
+            const auto status=avcodec_receive_frame(decoder.context,frame.data);
+            if(status==AVERROR(EAGAIN) || status==AVERROR_EOF) return;
+            check(status,"读取视频帧失败。");
+            const auto index=frames++;
+            if(index%interval==0) {
+                auto seconds=frame.data->best_effort_timestamp==AV_NOPTS_VALUE ? -1. :
+                    frame.data->best_effort_timestamp*av_q2d(track->time_base);
+                if(!std::isfinite(seconds) || seconds<=previous) {
+                    if(!(frameRate>0 && std::isfinite(frameRate))) throw std::runtime_error("视频缺少有效时间戳。");
+                    seconds=index/frameRate;
+                }
+                previous=seconds;
+                stopped=!visitor(imageFromFrame(*frame.data,scaler,orientation),index,seconds);
+            }
+            av_frame_unref(frame.data);
+        }
+    };
+    int status{};
+    while(!cancel && !stopped && (status=av_read_frame(reader.context,packet.data))>=0) {
+        if(packet.data->stream_index==videoIndex) {
+            check(avcodec_send_packet(decoder.context,packet.data),"读取视频包失败。");
+            receive();
+        }
+        av_packet_unref(packet.data);
+    }
+    if(!cancel && !stopped) {
+        if(status!=AVERROR_EOF) check(status,"视频提前结束。");
+        check(avcodec_send_packet(decoder.context,nullptr),"结束视频解码失败。");
+        receive();
+    }
+    if(!frames && !cancel) throw std::runtime_error("视频无可读画面。");
+    return frames;
 }
 
 void restorePortraitVideo(const fs::path& input, const fs::path& output,
@@ -273,7 +372,8 @@ void restorePortraitVideo(const fs::path& input, const fs::path& output,
     const StagingArea staging{temporaryFolder(target)};
     const auto temporary = staging.folder / L"video.mkv";
     try {
-        render(source, temporary, localPath(models), progress);
+        VideoPortraitRestorer restorer(localPath(models));
+        render(source,temporary,[&](const cv::Mat& pixels){return restorer.restore(pixels);},progress,true);
         requireRunning(progress);
         if (!MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_WRITE_THROUGH)) {
             throw std::runtime_error("Could not publish the restored video. The output may already exist.");
@@ -281,8 +381,36 @@ void restorePortraitVideo(const fs::path& input, const fs::path& output,
     } catch (const Interrupted&) {
         return;
     } catch (...) {
-        if (!progress.cancel) throw;
+        if (!progress.cancelled()) throw;
     }
+}
+
+static void renderMp4(const fs::path& input,const fs::path& output,const FrameProcessor& transform,
+                      VideoProgress& progress,std::optional<std::pair<double,double>> clip={}) {
+    const auto source=localPath(input);
+    const auto target=localPath(output);
+    if(!fs::is_regular_file(source) || _wcsicmp(target.extension().c_str(),L".mp4") || fs::exists(target)) {
+        throw std::runtime_error("请选择本机视频和新的 MP4 输出路径。");
+    }
+    const StagingArea staging{temporaryFolder(target)};
+    const auto temporary=staging.folder/L"video.mkv";
+    try {
+        render(source,temporary,transform,progress,false,clip);
+        requireRunning(progress);
+        if(!MoveFileExW(temporary.c_str(),target.c_str(),MOVEFILE_WRITE_THROUGH)) {
+            throw std::runtime_error("写入 MP4 失败，输出可能已存在。");
+        }
+    } catch(const Interrupted&) {} catch(...) { if(!progress.cancelled()) throw; }
+}
+
+void renderObjectVideo(const fs::path& source,const fs::path& target,const FrameProcessor& transform,
+                       VideoProgress& progress) {
+    renderMp4(source,target,transform,progress);
+}
+
+void renderReviewClip(const fs::path& source,const fs::path& target,double from,double until,VideoProgress& progress) {
+    if (!std::isfinite(from) || !std::isfinite(until) || until<from) throw std::invalid_argument("视频片段范围无效。");
+    renderMp4(source,target,[](const auto& pixels){return std::pair{pixels,0};},progress,std::pair{from,until});
 }
 
 }

@@ -12,16 +12,17 @@ namespace visual {
 namespace {
 
 cv::Mat motionKernel(cv::Size imageSize, int length, int angle) {
-    const int center = length / 2;
+    const int kernelSize=length|1;
+    const int center = kernelSize / 2;
     const double radians = angle * std::numbers::pi / 180;
-    const cv::Point offset(cvRound(center * std::cos(radians)), cvRound(center * std::sin(radians)));
+    const cv::Point offset(cvRound((length-1)*.5*std::cos(radians)), cvRound((length-1)*.5*std::sin(radians)));
     const cv::Point origin(center, center);
-    cv::Mat support = cv::Mat::zeros(length, length, CV_32F);
+    cv::Mat support = cv::Mat::zeros(kernelSize, kernelSize, CV_32F);
     cv::line(support, origin - offset, origin + offset, cv::Scalar(1));
     const double mass = cv::sum(support)[0];
     cv::Mat kernel = cv::Mat::zeros(imageSize, CV_32F);
-    for (int row = 0; row < length; ++row) {
-        for (int col = 0; col < length; ++col) {
+    for (int row = 0; row < kernelSize; ++row) {
+        for (int col = 0; col < kernelSize; ++col) {
             kernel.at<float>((row + imageSize.height - center) % imageSize.height,
                              (col + imageSize.width - center) % imageSize.width)
                 = float(support.at<float>(row, col) / mass);
@@ -63,6 +64,11 @@ cv::Mat deblur(const cv::Mat& input, int length, int angle) {
     return result;
 }
 
+}
+
+cv::Mat deblurPlate(const cv::Mat& crop,int length,int angle) {
+    if(crop.empty() || length<3 || length>21 || angle<0 || angle>179) throw std::invalid_argument("去拖影参数超出范围。");
+    return deblur(crop,length,angle);
 }
 
 Candidates restorePlate(const cv::Mat& image, cv::Rect region) {

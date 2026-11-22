@@ -1,12 +1,14 @@
 #include "portrait.h"
+#include "model_session.h"
+#include "vision_models.h"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
-#include <onnxruntime_cxx_api.h>
 #include <opencv2/calib3d.hpp>
 #include <opencv2/dnn.hpp>
 #include <opencv2/imgproc.hpp>
@@ -24,52 +26,7 @@ const std::array<cv::Point2f, 5> ffhq{{
     {201.26117f, 371.41043f}, {313.08905f, 371.15118f},
 }};
 
-class Inference {
-public:
-    explicit Inference(const std::filesystem::path& path)
-        : session_(environment(), path.c_str(), options()) {
-        if (session_.GetInputCount() != 1) {
-            throw std::runtime_error("An unexpected number of ONNX input tensors.");
-        }
-        inputName_ = session_.GetInputNameAllocated(0, allocator_).get();
-        for (size_t index = 0; index < session_.GetOutputCount(); ++index) {
-            outputNames_.emplace_back(session_.GetOutputNameAllocated(index, allocator_).get());
-        }
-        for (const auto& name : outputNames_) {
-            outputs_.push_back(name.c_str());
-        }
-    }
-
-    std::vector<Ort::Value> run(cv::Mat blob) {
-        const auto memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-        const std::array<int64_t, 4> shape{1, 3, blob.size[2], blob.size[3]};
-        auto tensor = Ort::Value::CreateTensor<float>(
-            memory, blob.ptr<float>(), blob.total(), shape.data(), shape.size());
-        const char* inputName = inputName_.c_str();
-        return session_.Run(Ort::RunOptions{nullptr}, &inputName, &tensor, 1, outputs_.data(), outputs_.size());
-    }
-
-private:
-    static Ort::Env& environment() {
-        static Ort::Env environment{ORT_LOGGING_LEVEL_ERROR, "VisualAnalysis"};
-        static const bool telemetryDisabled = (environment.DisableTelemetryEvents(), true);
-        (void)telemetryDisabled;
-        return environment;
-    }
-
-    static Ort::SessionOptions options() {
-        Ort::SessionOptions options;
-        options.SetIntraOpNumThreads(2);
-        options.SetInterOpNumThreads(1);
-        return options;
-    }
-
-    Ort::Session session_;
-    Ort::AllocatorWithDefaultOptions allocator_;
-    std::string inputName_;
-    std::vector<std::string> outputNames_;
-    std::vector<const char*> outputs_;
-};
+using Inference = ModelSession;
 
 struct Detection {
     cv::Rect2f box;
@@ -588,6 +545,134 @@ std::pair<cv::Mat, int> VideoPortraitRestorer::restore(const cv::Mat& source) {
     }
     state_->previous = std::move(current);
     return {std::move(result), static_cast<int>(state_->previous.size())};
+}
+
+namespace {
+
+cv::Rect faceBox(const Detection& face, const cv::Mat& image) {
+    const int x = static_cast<int>(std::floor(face.box.x));
+    const int y = static_cast<int>(std::floor(face.box.y));
+    const int right = static_cast<int>(std::ceil(face.box.br().x));
+    const int bottom = static_cast<int>(std::ceil(face.box.br().y));
+    return cv::Rect(x, y, right - x, bottom - y) & cv::Rect(0, 0, image.cols, image.rows);
+}
+
+float faceQuality(const cv::Mat& crop, const Detection& detection) {
+    const auto clamp = [](double value) { return std::clamp(value, 0., 1.); };
+    cv::Mat pixels, laplacian;
+    cv::cvtColor(crop, pixels, cv::COLOR_BGR2GRAY);
+    cv::Laplacian(pixels, laplacian, CV_32F);
+    cv::Scalar mean, deviation;
+    cv::meanStdDev(laplacian, mean, deviation);
+    const double variance = deviation[0] * deviation[0];
+    const auto& p = detection.landmarks;
+    const double eyes = std::max(cv::norm(p[1] - p[0]), 1e-6);
+    const double nose = (p[2].x - p[0].x) / std::max(p[1].x - p[0].x, 1e-6f);
+    const double yaw = std::min(std::abs(nose - .5) / .55, 1.);
+    const double tilt = std::min(std::abs(p[1].y - p[0].y) / (eyes * .35), 1.);
+    const double vertical = clamp(((p[3].y + p[4].y) * .5 - p[2].y) / (eyes * .75));
+    const std::array parts{
+        clamp(variance / (variance + 100)), clamp((1-yaw)*.65 + (1-tilt)*.2 + vertical*.15),
+        clamp((std::min(detection.box.width,detection.box.height)-20)/80),
+        clamp((detection.score-.45)/.55), clamp(1-std::abs(cv::mean(pixels)[0]-127.5)/127.5)
+    };
+    constexpr std::array weights{.28, .27, .20, .15, .10};
+    double result = 1.;
+    for (size_t i = 0; i < parts.size(); ++i) result *= std::pow(std::max(parts[i], .05), weights[i]);
+    return static_cast<float>(clamp(result));
+}
+
+cv::Mat arcFaceCrop(const cv::Mat& image, const Detection& face, int size) {
+    const std::vector<cv::Point2f> points(face.landmarks.begin(), face.landmarks.end());
+    std::vector<cv::Point2f> target{{38.2946f,51.6963f},{73.5318f,51.5014f},{56.0252f,71.7366f},
+                                    {41.5493f,92.3655f},{70.7299f,92.2041f}};
+    for (auto& point : target) point *= size / 112.f;
+    auto transform = cv::estimateAffinePartial2D(points, target, cv::noArray(), cv::LMEDS);
+    if (transform.empty() || !cv::checkRange(transform)) return {};
+    transform.convertTo(transform,CV_32F);
+    cv::Mat crop;
+    cv::warpAffine(image,crop,transform,{size,size});
+    return crop;
+}
+
+}
+
+struct FaceEngine::State {
+    State(const std::filesystem::path& models, FaceSettings config)
+        : settings(std::move(config)), detector(models / L"scrfd_10g_bnkps.onnx"),
+          embedder(models / (settings.profile == "lvface-b" ? L"LVFace-B_Glint360K.onnx" : L"glintr100.onnx")) {
+        const auto shape = embedder.inputShape(0);
+        size = shape.size() == 4 && shape.back() > 0 ? static_cast<int>(shape.back()) : 112;
+    }
+    FaceSettings settings;
+    ModelSession detector, embedder;
+    int size{};
+
+    Feature embed(const cv::Mat& crop) {
+        const auto infer = [&](const cv::Mat& pixels) {
+            auto output = embedder.run(cv::dnn::blobFromImage(pixels,1./127.5,{size,size},
+                                                             {127.5,127.5,127.5},true));
+            const auto count = output.at(0).GetTensorTypeAndShapeInfo().GetElementCount();
+            const auto* data = output[0].GetTensorData<float>();
+            if (!count) throw std::runtime_error("人脸模型返回空特征。");
+            return Feature(data,data+count);
+        };
+        auto feature = infer(crop);
+        if (settings.mirror) {
+            cv::Mat flipped;
+            cv::flip(crop,flipped,1);
+            const auto other = infer(flipped);
+            if (other.size() != feature.size()) throw std::runtime_error("镜像特征维度不符。");
+            for (size_t i = 0; i < feature.size(); ++i) feature[i] += other[i];
+        }
+        return normalized(std::move(feature));
+    }
+};
+
+FaceEngine::FaceEngine(const std::filesystem::path& models, FaceSettings settings)
+    : state_(std::make_unique<State>(models, std::move(settings))) {}
+FaceEngine::~FaceEngine() = default;
+const FaceSettings& FaceEngine::settings() const { return state_->settings; }
+
+std::vector<FaceObservation> FaceEngine::faces(const cv::Mat& image) {
+    std::vector<FaceObservation> result;
+    for (const auto& found : detect(state_->detector,image,state_->settings.threshold)) {
+        const auto box = faceBox(found,image);
+        if (std::min(box.width,box.height) < state_->settings.minimumSize) continue;
+        auto crop = arcFaceCrop(image,found,state_->size);
+        if (crop.empty()) continue;
+        const auto quality = faceQuality(crop,found);
+        if (quality < state_->settings.minimumQuality) continue;
+        auto feature = state_->embed(crop);
+        result.push_back({box,std::move(crop),std::move(feature),quality});
+    }
+    return result;
+}
+
+FaceObservation FaceEngine::reference(const cv::Mat& image) {
+    auto candidates = detect(state_->detector,image,std::min(state_->settings.threshold,.25f));
+    for (const double border : {.25,.5}) {
+        if (!candidates.empty()) break;
+        const int pixels = std::max(1,cvRound(std::max(image.rows,image.cols)*border));
+        cv::Mat padded;
+        cv::copyMakeBorder(image,padded,pixels,pixels,pixels,pixels,cv::BORDER_CONSTANT,cv::Scalar(127,127,127));
+        for (auto found : detect(state_->detector,padded,std::min(state_->settings.threshold,.25f))) {
+            found.box.x -= pixels;
+            found.box.y -= pixels;
+            const auto visible = faceBox(found,image);
+            if (visible.area() < found.box.area()*.55) continue;
+            for (auto& point : found.landmarks) point -= cv::Point2f(float(pixels),float(pixels));
+            candidates.push_back(found);
+        }
+    }
+    if (candidates.size() != 1) throw std::runtime_error("参考图应包含一张可用人脸。");
+    const auto& found = candidates.front();
+    auto crop = arcFaceCrop(image,found,state_->size);
+    if (crop.empty()) throw std::runtime_error("参考图人脸关键点无法对齐。");
+    const auto quality = faceQuality(crop,found);
+    if (quality < state_->settings.enrollmentQuality) throw std::runtime_error("参考图人脸质量低于录入门槛。");
+    auto feature = state_->embed(crop);
+    return {faceBox(found,image),std::move(crop),std::move(feature),quality};
 }
 
 }

@@ -14,3 +14,4 @@
 - 把分享链接和提取码记录到 %LOCALAPPDATA%\VisualAnalysis\latest-release.json，并把链接交给用户。发布记录放在本机。
 - 新版上传且核对通过、分享链接已记录后，删除项目发布目录里的上一版，再删除本机本次生成的 ZIP、校验文件和打包展开目录。上传、核对、分享或记录失败时，保留上一版和本机产物。
 - 上传时更新 %LOCALAPPDATA%\VisualAnalysis\release-progress.json，记录阶段、已确认字节数及基于上传进程读盘量的估算。
+- 原生版使用 scripts/build_native.ps1 构建，使用 scripts/test_native_operations.ps1 生成验收摘要。通过后用 scripts/publish_native.ps1 完成打包、校验、上传、分享和清理。

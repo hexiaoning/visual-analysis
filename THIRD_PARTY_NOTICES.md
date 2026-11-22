@@ -1,31 +1,15 @@
-# Third-party notices
+# 第三方组件与权重
 
-离线包会收集各 Python wheel 自带的 `dist-info` 元数据和许可证文件。构建/交付人员仍需审核最终 `SHA256SUMS.txt` 和以下模型授权范围。
+| 组件 | 上游与用途 |
+| --- | --- |
+| ONNX Runtime 1.24.4 | Microsoft MIT，原生本机 CPU 推理。 |
+| OpenCV 4.13.0 | Apache-2.0，图像解码、几何对齐、光流和局部特征。 |
+| FFmpeg 8.1 LGPL shared | FFmpeg C API，动态库版。构建版本 n8.1.3-39-g660b5aa7db-20261121。[FFmpeg 源码](https://github.com/FFmpeg/FFmpeg/tree/660b5aa7db) · [Windows 构建配方](https://github.com/FFmpeg-Builds/FFmpeg-Builds) |
+| nlohmann/json 3.12.0 | MIT，构建时使用单头文件。[上游发行版](https://github.com/nlohmann/json/releases/tag/v3.12.0) |
+| RT-DETRv2-R50 | Apache-2.0，人和车辆检测。ONNX 导出固定为 1699ea019e5570bb7283d80ee9a9e42d6245436f。 |
+| Chinese-CLIP ViT-B/16 | MIT，中文图文特征。双编码器为 felixdu 固定提交 47080d16c631d8416d2e6b155c59f8fd2c322e98，词表为 Xenova 提交 f26904860903e70e050b8f48255e5f48401816e9。 |
+| PCFlow BFR | MIT，使用作者的 BFR/LCPL 检查点和 TAESD3 解码器。[PCFlow](https://github.com/aiimaginglab/PCFlow) · [TAESD3](https://huggingface.co/madebyollin/taesd3) |
+| GFPGAN v1.4 | Apache-2.0，使用官方 clean 权重导出的 ONNX。 |
+| SCRFD 与 AuraFace R100 | 人脸关键点、特征模型。权重来自固定 AuraFace-v1 发行版本。[模型卡](https://huggingface.co/fal/AuraFace-v1) |
 
-| 组件 | 用途 | 上游 / 许可提示 |
-| --- | --- | --- |
-| ONNX Runtime GPU | NVIDIA CUDA 推理 | Microsoft MIT |
-| OpenVINO | Intel GPU 推理 | Apache-2.0 |
-| PySide6 / Qt | 桌面 GUI | LGPLv3/GPLv3/商业许可；交付前按所选 Qt 许可履行义务 |
-| OpenCV | 视频与图像处理 | Apache-2.0 |
-| PyAV / FFmpeg wheels | 视频人脸增强与音轨封装 | PyAV BSD-3-Clause。FFmpeg 及编解码库的发行条款取决于随包构建，参见 https://ffmpeg.org/legal.html |
-| RT-DETRv2-R50 / ONNX Community 导出 | 人和车辆的类别、位置及置信度检测 | 作者 lyuwenyu / PekingU，Apache-2.0；ONNX 导出固定版本 1699ea019e5570bb7283d80ee9a9e42d6245436f；许可证随包保存在 licenses/RT-DETR-LICENSE.txt |
-| NumPy | 数值计算 | BSD-3-Clause |
-| Chinese-CLIP ViT-B/16 | 中文衣着与车辆颜色语义检索 | OFA-Sys，MIT；FP32 ONNX转换来自 felixdu/chinese-clip-vit-base-patch16-onnx，固定版本47080d16c631d8416d2e6b155c59f8fd2c322e98；匹配词表来自Xenova固定版本f26904860903e70e050b8f48255e5f48401816e9。两编码器及词表均固定SHA-256，许可证随包保存在licenses/Chinese-CLIP-LICENSE.txt。 |
-| NVIDIA CUDA/cuDNN/cuBLAS wheels | GPU 运行库 | NVIDIA SDK/EULA 条款 |
-| PCFlow BFR | 照片人脸还原 | aiimaginglab，代码 MIT，上游发布的 BFR/LCPL 检查点；许可证随包保存在 licenses/PCFlow-LICENSE.txt。TAESD3 解码器权重的发布者 madebyollin 标注为 MIT，见 https://huggingface.co/madebyollin/taesd3 |
-| GFPGAN v1.4 | 备用人脸还原与视频基础模型 | TencentARC，Apache-2.0，使用官方 v1.4 clean 权重转换；许可证随包保存在 licenses/GFPGAN-LICENSE.txt。StyleGAN2 组件的许可说明见上游项目。 |
-| SCRFD-10G | 人脸检测 | 参见 InsightFace/AuraFace 模型来源和适用条款 |
-| LVFace-B Glint360K | 高精度人脸特征 | 代码 MIT；官方预训练权重仅限非商业研究，商用必须另获授权 |
-| AuraFace-v1 | 可替代人脸特征 | Apache-2.0 模型卡；部署方仍需完成数据与用途合规审核 |
-
-构建脚本不会绕过 LVFace 权重提示：包含 `lvface-b` 时必须显式传入 `-AcceptResearchWeights`。生物特征和身份证号属于敏感个人信息，模型许可证不等于取得数据处理或安防使用授权。
-
-
-## Offline administrative region reference data
-
-The 2023 province/city/county reference JSON and its WTFPL license are bundled under
-`face_matching/resources`. Source: https://github.com/modood/Administrative-divisions-of-China
-at commit c49d495b40ac73eb1a66f6eeae5f8fd10696f035. Dataset date: 2023-06-30.
-The pinned source URL and SHA-256 are recorded in regions-source.json. Names are
-historical references; unmatched historic address codes can be entered directly.
+发布包包含依赖及模型的相关许可证文本。随包的 CRT 来自 Windows x64 Visual C++ 运行库。

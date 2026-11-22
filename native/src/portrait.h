@@ -31,6 +31,7 @@ std::vector<Candidates> restorePortraits(
     bool preferRecall = false);
 
 Candidates restorePlate(const cv::Mat& image, cv::Rect region);
+cv::Mat deblurPlate(const cv::Mat& crop, int length, int angle);
 
 class VideoPortraitRestorer {
 public:

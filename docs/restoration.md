@@ -2,7 +2,7 @@
 
 ## 人像
 
-- 照片采用 PCFlow 官方 BFR 检查点，先对齐人脸，执行五步 Euler 推理，再以平滑蒙版将还原区域贴回原图。GFPGAN v1.4 提供第二个同源结果。两者都在 FP32 ONNX 中执行。原图找不到可对齐的人脸时，抑制细密翻拍网纹后再试定位，模型区域以外保留原像素。包内权重及转换哈希固定。
+- 照片采用 PCFlow 官方 BFR 检查点，先对齐人脸，执行五步 Euler 推理，再以平滑蒙版将还原区域贴回原图。GFPGAN v1.4 同时产生待比较结果。两者都由 ONNX Runtime C++ 执行 FP32 模型。只有同时满足原图一致性、局部结构差异和碎纹限制时，才保留第二张。原图找不到可对齐的人脸时，抑制细密翻拍网纹后再试定位，模型区域以外保留原像素。包内权重及转换哈希固定。
 - 视频使用可分发的 GFPGAN v1.4 基线，对同一轨迹的前帧残差执行光流对齐后做局部平滑。镜头变化、遮挡或匹配置信不足时重置历史。音频沿用原轨，视频按原 PTS 导出。
 - DicFace 和 CodeFormer 的官方代码采用 S-Lab 许可，作为独立对比基线。发布包由构建脚本按固定模型清单生成。
 
@@ -15,13 +15,13 @@
 
 [MF-LPR²](https://doi.org/10.1016/j.cviu.2025.104361) · [LP-Diff](https://openaccess.thecvf.com/content/CVPR2025/html/Gong_LP-Diff_Towards_Improved_Restoration_of_Real-World_Degraded_License_Plate_CVPR_2025_paper.html) · [Geo-CTM](https://github.com/ufukasia/geo-ctm) · [PP-OCRv6](https://www.paddleocr.ai/latest/en/version3.x/algorithm/PP-OCRv6/PP-OCRv6.html)
 
-## 模型转换
+## 模型来源
 
-使用 Python 3.12、PyTorch 2.5.1 CPU、torchvision 0.20.1、ONNX 1.23.2 和 Safetensors。转换与运行隔离。GFPGAN 需要 BasicSR 1.4.2 的源码可导入。图像端转换脚本指定固定文件名、输入归一化和 FP32 数值对照。
+原生构建使用已有的 FP32 ONNX 权重。SHA-256 固定在 scripts/build_native.ps1。模型制备与运行分开，应用从本机加载校验后的产物。
 
-- GFPGAN 源代码固定为提交 7552a7791caad982045a7bbe5634bbf1cd5c8679，预训练源文件为 GFPGANv1.4.pth。运行 scripts/export_gfpgan_onnx.py <源码> <权重> <模型目录>/gfpgan-v1.4-fp32.onnx。
-- PCFlow 源码固定为提交 2028210a4252a088891744e35a6e47778c1d7266，使用作者公开的 BFR/lcpl/model_500.pth 和 BFR/lcpl/lq_encoder_500.pth，解码器为 TAESD3 固定提交 d58dcaccd2b36fcb7a6b9e93c1cc507acab5a778。把三个权重分别放为 pcflow-model-500.pth、pcflow-lq-encoder.pth、taesd3.safetensors，然后运行 scripts/export_pcflow_onnx.py <源码> <权重目录> <模型目录>/pcflow-bfr-fp32.onnx。
+- GFPGAN 使用官方 v1.4 clean 权重，源码固定为 7552a7791caad982045a7bbe5634bbf1cd5c8679。转换产物为 gfpgan-v1.4-fp32.onnx。
+- PCFlow 使用作者的 BFR/LCPL 权重，源码固定为 2028210a4252a088891744e35a6e47778c1d7266。TAESD3 解码器固定为 d58dcaccd2b36fcb7a6b9e93c1cc507acab5a778。转换产物为 pcflow-bfr-fp32.onnx。
 
-构建时用 -ModelDirectory 指向含上述两个 ONNX 的模型目录。离线启动自检验证权重哈希并实际运行两张还原图。开发或复现实测时用 scripts/benchmark_face_restoration.py 对同一份对齐素材运行四个模型。保存每个输入的 SHA-256 及视频帧时间点。
+发布前使用 scripts/test_native_operations.ps1 以默认和偏召回两轮复测三张本机照片，保存原图哈希、还原 PNG、分数与置信等级。
 
 [GFPGAN](https://github.com/TencentARC/GFPGAN) · [PCFlow](https://github.com/aiimaginglab/PCFlow) · [DicFace](https://github.com/fudan-generative-vision/DicFace) · [CodeFormer](https://github.com/sczhou/CodeFormer) · [TAESD3](https://huggingface.co/madebyollin/taesd3)
