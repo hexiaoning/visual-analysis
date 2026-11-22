@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QPushButton
 from face_matching.config import AppConfig
 from face_matching.database import FaceSampleInput
 from face_matching.gui.main_window import MainWindow
-from face_matching.image_enhancement import save_new_png
+from face_matching.restoration_io import save_new_png
 
 
 def _photo(path: Path, value: int) -> Path:

@@ -15,8 +15,8 @@ from PySide6.QtWidgets import QApplication
 from . import __version__
 from .config import AppConfig
 from .gui.main_window import MainWindow
-from .image_enhancement import PRESETS, encode_png, enhance_image
-from .models import available_profiles, file_sha256, required_paths, required_person_vehicle_model, required_semantic_models
+from .restoration_io import encode_png
+from .models import available_profiles, file_sha256, required_paths, required_person_vehicle_model, required_restoration_models, required_semantic_models
 from .vehicle_analysis import VehicleCandidate, _query_worker
 from .vision.local_media import open_local_video
 
@@ -31,11 +31,23 @@ def check_runtime(config: AppConfig, *, diagnose: bool = False) -> dict:
             profiles = [config.model_profile]
         models = {required_person_vehicle_model()}
         models.update(required_semantic_models())
+        restoration_models = required_restoration_models()
+        models.update(restoration_models)
+        from .face_restoration import cpu_session
+
+        restoration_runtime = []
+        for model in restoration_models:
+            session = cpu_session(model)
+            sample = np.zeros((1, 3, 512, 512), dtype=np.float32)
+            result, = session.run(None, {session.get_inputs()[0].name: sample})
+            if result.shape != sample.shape or not np.isfinite(result).all():
+                raise RuntimeError(f"离线还原模型自检失败：{model.name}")
+            restoration_runtime.append(model.name)
+            del session
         for profile in profiles:
             models.update(required_paths(profile, verify_hash=True))
         pixels = np.full((32, 48, 3), 70, np.uint8)
-        result = enhance_image(pixels, PRESETS["屏幕翻拍"])
-        if cv2.imdecode(np.frombuffer(encode_png(result), np.uint8), 1).shape != pixels.shape:
+        if cv2.imdecode(np.frombuffer(encode_png(pixels), np.uint8), 1).shape != pixels.shape:
             raise RuntimeError("PNG 编解码自检失败")
         with tempfile.TemporaryDirectory(prefix="face-matching-check-") as temporary:
             video_path = Path(temporary) / "sample.mp4"
@@ -43,7 +55,7 @@ def check_runtime(config: AppConfig, *, diagnose: bool = False) -> dict:
             try:
                 if not writer.isOpened():
                     raise RuntimeError("MP4 编码器无法打开")
-                writer.write(cv2.resize(result, (96, 64)))
+                writer.write(cv2.resize(pixels, (96, 64)))
             finally:
                 writer.release()
             with av.open(str(video_path), options={"protocol_whitelist": "file"}) as reader:
@@ -72,6 +84,7 @@ def check_runtime(config: AppConfig, *, diagnose: bool = False) -> dict:
             raise RuntimeError("车型核验子进程自检失败")
         report = {
             "vehicle_worker": True,
+            "restoration_models": restoration_runtime,
             "ok": True, "application": "FaceMatching", "version": __version__,
             "tabs": [window.tabs.tabText(index) for index in range(window.tabs.count())],
             "profiles": profiles, "video_codec": "mp4v",

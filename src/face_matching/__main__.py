@@ -36,7 +36,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--diagnose", action="store_true", help="校验模型并执行真实 GPU 推理")
     parser.add_argument("--check-gui", action="store_true", help="检查离线 Qt GUI 运行库并退出")
     page = parser.add_mutually_exclusive_group()
-    page.add_argument("--image-tools", action="store_true", help="打开综合分析窗口并选中图像增强")
+    page.add_argument("--restoration", "--image-tools", dest="restoration", action="store_true", help="打开综合分析窗口并选中图像还原")
     page.add_argument("--video-detection", action="store_true", help="打开综合分析窗口并选中人车检测")
     page.add_argument("--semantic-search", action="store_true", help="打开综合分析窗口并选中语义搜索")
     page.add_argument("--vehicle-analysis", action="store_true", help="打开综合分析窗口并选中车型识别")
@@ -146,8 +146,8 @@ def main(argv: list[str] | None = None) -> int:
     application.setApplicationVersion(__version__)
     application.setStyle("Fusion")
     window = MainWindow(config)
-    if args.image_tools:
-        window.tabs.setCurrentWidget(window.image_tools)
+    if args.restoration:
+        window.tabs.setCurrentWidget(window.restoration)
     elif args.video_detection:
         window.tabs.setCurrentWidget(window.video_detection)
     elif args.semantic_search:

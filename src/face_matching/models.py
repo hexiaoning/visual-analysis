@@ -74,6 +74,24 @@ SEMANTIC_VOCAB = ModelFile(
 )
 SEMANTIC_FILES = (SEMANTIC_VISION, SEMANTIC_TEXT, SEMANTIC_VOCAB)
 
+RESTORATION_MODELS = (
+    ModelFile("pcflow-bfr-fp32.onnx", "", "74ea9dcf3ded27a4dbd4a3c71dfa994fe7ee03365c275f78a9023a6c2a68e91a",
+              129_000_731),
+    ModelFile("gfpgan-v1.4-fp32.onnx", "", "a05c0040e64b383861810701f183b7455718313fb3a7465446cdc67b1fa7807d",
+              340_363_268),
+)
+
+
+def required_restoration_models(root: Path | None = None) -> tuple[Path, ...]:
+    if root is None:
+        root = packaged_models_dir() or models_dir()
+    paths = tuple(root / spec.name for spec in RESTORATION_MODELS)
+    for path, spec in zip(paths, RESTORATION_MODELS, strict=True):
+        if not is_valid_model(path, spec, verify_hash=True):
+            raise ModelMissingError(f"缺少或损坏的离线还原模型：{path.name}")
+    return paths
+
+
 PROFILES: dict[str, ModelProfile] = {
     "lvface-b": ModelProfile(
         key="lvface-b",

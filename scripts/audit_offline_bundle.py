@@ -6,13 +6,14 @@ import json
 from pathlib import Path
 
 from PyInstaller.archive.readers import CArchiveReader
-from face_matching.models import PROFILES, required_paths, required_person_vehicle_model, required_semantic_models
+from face_matching.models import PROFILES, required_paths, required_person_vehicle_model, required_restoration_models, required_semantic_models
 
 
 def audit(root: Path, profiles: list[str]) -> dict:
     model_root = root / '_internal/models'
     models = {required_person_vehicle_model(model_root)}
     models.update(required_semantic_models(model_root))
+    models.update(required_restoration_models(model_root))
     for profile in profiles:
         models.update(required_paths(profile, model_root, verify_hash=True))
     if {path.name for path in model_root.iterdir()} != {model.name for model in models}:
@@ -24,13 +25,13 @@ def audit(root: Path, profiles: list[str]) -> dict:
     required_modules = {
         'face_matching.__main__', 'face_matching.engine', 'face_matching.database',
         'face_matching.enrollment', 'face_matching.matching', 'face_matching.gui.main_window',
-        'face_matching.gui.video_detection', 'face_matching.gui.image_tools',
+        'face_matching.gui.video_detection', 'face_matching.gui.restoration',
         'face_matching.gui.visual_search', 'face_matching.gui.portrait_libraries',
         'face_matching.gui.semantic_search', 'face_matching.semantic_search', 'face_matching.semantic_model',
         'face_matching.identity_filters', 'face_matching.visual_search', 'face_matching.runtime_check',
         'face_matching.annotation_export', 'face_matching.gui.annotation_compare',
         'face_matching.gui.vehicle_analysis', 'face_matching.vehicle_analysis', 'face_matching.vision.local_media',
-        'face_matching.face_video_enhancement',
+        'face_matching.face_restoration_video',
     }
     if missing := sorted(required_modules - modules.keys()):
         raise RuntimeError(f'Missing application features: {missing}')

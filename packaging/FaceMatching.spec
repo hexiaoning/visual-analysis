@@ -9,7 +9,7 @@ from PyInstaller.building.datastruct import TOC
 from PyInstaller.utils.win32.versioninfo import (
     FixedFileInfo, StringFileInfo, StringStruct, StringTable, VarFileInfo, VarStruct, VSVersionInfo,
 )
-from face_matching.models import required_paths, required_person_vehicle_model, required_semantic_models
+from face_matching.models import required_paths, required_person_vehicle_model, required_restoration_models, required_semantic_models
 
 
 project_root = Path(os.environ.get("FACE_MATCHING_PROJECT_ROOT", Path.cwd())).resolve()
@@ -23,6 +23,7 @@ version = runpy.run_path(str(project_root / "src/face_matching/__init__.py"))["_
 profiles = os.environ.get("FACE_MATCHING_BUNDLE_PROFILES", "lvface-b,auraface").split(',')
 models = {required_person_vehicle_model(model_root)}
 models.update(required_semantic_models(model_root))
+models.update(required_restoration_models(model_root))
 for profile in profiles:
     models.update(required_paths(profile, model_root, verify_hash=True))
 
@@ -33,6 +34,9 @@ datas = [
     (str(project_root / "THIRD_PARTY_NOTICES.md"), "."),
     (str(project_root / "packaging" / "licenses" / "RT-DETR-LICENSE.txt"), "licenses"),
     (str(project_root / "packaging" / "licenses" / "Chinese-CLIP-LICENSE.txt"), "licenses"),
+    (str(project_root / "packaging" / "licenses" / "GFPGAN-LICENSE.txt"), "licenses"),
+    (str(project_root / "packaging" / "licenses" / "PCFlow-LICENSE.txt"), "licenses"),
+    (str(project_root / "docs" / "restoration.md"), "docs"),
     (str(project_root / "docs" / "offline-deployment.md"), "docs"),
     (str(project_root / "docs" / "vehicle-catalogues.md"), "docs"),
     (str(project_root / "packaging" / "verify_offline.ps1"), "."),

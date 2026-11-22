@@ -12,7 +12,9 @@ from threading import Event
 import cv2
 import numpy as np
 
-from .image_enhancement import PRESETS, encode_png, enhance_image, write_enhancement_archive
+from .plate_restoration import align_flow, restore_motion, restore_plate_photo
+from .restoration_candidates import RestorationCandidate, choose_candidates, score_candidate
+from .restoration_io import encode_png, write_restoration_archive
 from .vision.local_media import open_local_video
 
 
@@ -32,11 +34,15 @@ class PlateResult:
     anchor: np.ndarray
     reference: PlateFrame
     frames: tuple[PlateFrame, ...]
-    enhanced: np.ndarray
+    candidates: tuple[RestorationCandidate, ...]
     tracked_count: int
     tracking_notice: str
     blur_length: int
     blur_angle: int
+
+    @property
+    def enhanced(self) -> np.ndarray:
+        return self.candidates[0].pixels
 
 
 def read_frame(capture: cv2.VideoCapture, index: int) -> np.ndarray:
@@ -131,24 +137,6 @@ def _align(reference_gray: np.ndarray, pixels: np.ndarray) -> np.ndarray | None:
     return aligned
 
 
-def _deblur(image: np.ndarray, length: int, angle: int) -> np.ndarray:
-    # Regularized inverse of a centered line PSF. Reflective padding suppresses wraparound.
-    radius = length + 4
-    padded = cv2.copyMakeBorder(image, radius, radius, radius, radius, cv2.BORDER_REFLECT_101)
-    kernel = np.zeros(padded.shape[:2], np.float32)
-    radians = np.deg2rad(angle)
-    center = kernel.shape[1] // 2, kernel.shape[0] // 2
-    dx = round((length - 1) * np.cos(radians) / 2)
-    dy = round((length - 1) * np.sin(radians) / 2)
-    cv2.line(kernel, (center[0] - dx, center[1] - dy), (center[0] + dx, center[1] + dy), 1, 1)
-    spectrum = np.fft.rfft2(np.fft.ifftshift(kernel / kernel.sum()))
-    inverse = 1.04 * spectrum.conj() / (np.abs(spectrum) ** 2 + 0.04)
-    channels = np.fft.rfft2(padded, axes=(0, 1))
-    restored = np.fft.irfft2(channels * inverse[..., None], s=kernel.shape, axes=(0, 1))
-    cropped = restored[radius:-radius, radius:-radius]
-    return np.rint(np.clip(image + np.clip((cropped - image) * 0.65, -30, 30), 0, 255)).astype(np.uint8)
-
-
 def enhance_plate_video(source: Path, index: int, region: tuple[int, int, int, int],
                         anchor: np.ndarray, count: int, blur_length: int, blur_angle: int,
                         stop: Event) -> PlateResult | None:
@@ -178,6 +166,7 @@ def enhance_plate_video(source: Path, index: int, region: tuple[int, int, int, i
     original = best.pixels.astype(np.float32)
     total = original.copy()
     weights = np.ones(original.shape[:2], np.float32)
+    observations = []
     for frame in ranked[1:]:
         if stop.is_set():
             return None
@@ -188,21 +177,32 @@ def enhance_plate_video(source: Path, index: int, region: tuple[int, int, int, i
             continue
         # Subpixel resampling changes some edge intensities. Fuse only pixels that
         # still agree, with the reference dominant to limit residual double edges.
-        valid = np.max(np.abs(aligned - original), axis=2) <= 28
+        aligned, support = align_flow(best.pixels, aligned)
+        valid = support & (np.max(np.abs(aligned - original), axis=2) <= 28)
         if valid.mean() < 0.55:
             continue
         weight = 0.5 / np.sqrt(len(used))
         total[valid] += aligned[valid] * weight
         weights[valid] += weight
         used.append(frame)
+        observations.append(np.where(valid[..., None], aligned, original).astype(np.uint8))
     fused = np.rint(total / weights[..., None]).astype(np.uint8)
+    candidates = []
+    if len(used) > 1:
+        candidates.append(score_candidate("多帧一致性融合", fused, best.pixels, tuple(observations)))
+        if np.abs(fused.astype(np.float32) - original).mean() > 1:
+            candidates.append(score_candidate("参考清晰帧", best.pixels, best.pixels, tuple(observations)))
     if blur_length >= 3:
-        fused = _deblur(fused, blur_length, blur_angle)
-    enhanced = enhance_image(fused, PRESETS["车牌清晰化（保守）"])
+        restored = restore_motion(fused, blur_length, blur_angle)
+        candidates.append(score_candidate("约束去拖影", restored, best.pixels, tuple(observations)))
+    if not candidates:
+        h, w = best.pixels.shape[:2]
+        candidates.extend(restore_plate_photo(best.pixels, (0, 0, w, h)))
     if stop.is_set():
         return None
+    ranked_candidates = choose_candidates(candidates)
     return PlateResult(source, index, region, anchor, best, tuple(sorted(used, key=lambda frame: frame.index)),
-                       enhanced, len(tracked), tracking_notice, blur_length, blur_angle)
+                       ranked_candidates, len(tracked), tracking_notice, blur_length, blur_angle)
 
 
 def _original_filename(index: int) -> str:
@@ -212,6 +212,8 @@ def _original_filename(index: int) -> str:
 def _export_images(result: PlateResult) -> Iterator[tuple[str, bytes]]:
     yield _original_filename(result.anchor_index), encode_png(result.anchor)
     yield "enhanced.png", encode_png(result.enhanced)
+    for index, candidate in enumerate(result.candidates[1:], 2):
+        yield f"alternatives/{index}.png", encode_png(candidate.pixels)
     later = [frame for frame in result.frames if frame.index != result.anchor_index]
     if not later:
         return
@@ -234,7 +236,13 @@ def _export_images(result: PlateResult) -> Iterator[tuple[str, bytes]]:
 def export_plate_result(destination: Path, result: PlateResult) -> None:
     manifest = {
         "schema_version": 1,
-        "algorithm": "plate-video-alignment-v1",
+        "algorithm": "plate-video-ecc-flow-v2",
+        "candidates": [
+            {"file": "enhanced.png" if index == 1 else f"alternatives/{index}.png",
+             "label": item.label, "score": item.score, "agreement": item.agreement,
+             "detail": item.detail, "observations": item.observations}
+            for index, item in enumerate(result.candidates, 1)
+        ],
         "source_name": result.source.name,
         "anchor_frame_number": result.anchor_index + 1,
         "anchor_file": _original_filename(result.anchor_index),
@@ -249,7 +257,7 @@ def export_plate_result(destination: Path, result: PlateResult) -> None:
         "single_frame_fallback": len(result.frames) == 1,
         "motion_blur_length_px": result.blur_length,
         "motion_blur_angle_degrees": result.blur_angle,
-        "notice": "增强结果供辅助观察。请同时复核原始视频和原始帧。帧号从 1 开始，框坐标从 0 开始，右、下边界不含在框内。",
+        "notice": "还原结果供辅助观察。请同时复核原始视频和原始帧。帧号从 1 开始，框坐标从 0 开始，右、下边界不含在框内。",
     }
     with closing(_export_images(result)) as images:
-        write_enhancement_archive(destination, images, manifest)
+        write_restoration_archive(destination, images, manifest)

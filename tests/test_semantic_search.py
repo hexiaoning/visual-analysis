@@ -10,7 +10,7 @@ from PySide6.QtTest import QTest
 
 from face_matching.config import AppConfig
 from face_matching.gui.semantic_search import SemanticSearchWidget, SourceVideoDialog, time_label
-from face_matching.image_enhancement import encode_png
+from face_matching.restoration_io import encode_png
 from face_matching.semantic_model import ChineseTokenizer, normalized_feature
 from face_matching.semantic_search import COLORS, QueryScorer, SemanticIndex, object_colors, parse_query, sample_frames
 from face_matching.vision.io import read_image

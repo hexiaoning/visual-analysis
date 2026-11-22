@@ -1,12 +1,11 @@
 from fractions import Fraction
 from threading import Event
-from types import SimpleNamespace
 
 import av
 import numpy as np
 import pytest
 
-from face_matching.face_video_enhancement import enhance_face_video
+from face_matching.face_restoration_video import render_portrait_video
 
 
 def _source(path):
@@ -38,8 +37,12 @@ def test_keeps_video_frame_timestamps_and_audio(tmp_path):
     source = tmp_path / "原片.mkv"
     result = tmp_path / "增强.mkv"
     pixels, times = _source(source)
-    detector = SimpleNamespace(detect=lambda frame: [SimpleNamespace(bbox=(10, 10, 60, 50))])
-    assert enhance_face_video(source, result, detector, 12, Event()) == (4, 4)
+    def restore(frame):
+        result = frame.copy()
+        result[10:50, 10:60] += 10
+        return result, 1
+
+    assert render_portrait_video(source, result, restore, Event()) == (4, 4)
     with av.open(str(result)) as output:
         frames = list(output.decode(video=0))
         assert [frame.pts * frame.time_base * 1000 for frame in frames] == times
@@ -57,11 +60,12 @@ def test_no_face_and_stop_leave_no_export(tmp_path):
     source = tmp_path / "source.mkv"
     result = tmp_path / "result.mkv"
     _source(source)
-    detector = SimpleNamespace(detect=lambda frame: [])
+    def no_face(frame):
+        return frame, 0
     with pytest.raises(ValueError, match="未找到"):
-        enhance_face_video(source, result, detector, 12, Event())
+        render_portrait_video(source, result, no_face, Event())
     assert not result.exists()
     stopped = Event()
     stopped.set()
-    assert enhance_face_video(source, result, detector, 12, stopped) == (0, 0)
+    assert render_portrait_video(source, result, no_face, stopped) == (0, 0)
     assert not result.exists()

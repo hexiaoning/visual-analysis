@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..detection_video import VideoControl, analyze_video
-from ..image_enhancement import save_new_png
+from ..restoration_io import save_new_png
 from ..vision.local_media import open_local_video
 from ..person_vehicle import MODEL_TITLE, load_person_vehicle_detector
 from .workspace_style import workspace_panel

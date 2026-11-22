@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 
 from ..plate_video import PlateResult, enhance_plate_video, export_plate_result, load_plate_preview
 from ..vision.local_media import VIDEO_EXTENSIONS
-from .image_tools import ImagePane
+from .image_pane import ImagePane
 
 
 class PlateVideoWorker(QThread):
@@ -37,7 +37,7 @@ class PlateVideoWorker(QThread):
 class PlateVideoDialog(QDialog):
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
-        self.setWindowTitle("视频车牌清晰化")
+        self.setWindowTitle("视频车牌还原")
         self.resize(1180, 680)
         self.source: Path | None = None
         self.frame: np.ndarray | None = None
@@ -70,17 +70,20 @@ class PlateVideoDialog(QDialog):
         self.original.region_selected.connect(self._select_region)
         self.reference = ImagePane()
         self.enhanced = ImagePane()
+        self.result_label = QLabel("还原结果")
+        self.alternatives = QHBoxLayout()
         self.reference_label = QLabel("参考原帧 · 车牌区域")
         panes = QHBoxLayout()
         for label, view, stretch in (
             (QLabel("起始原帧 · 拖动框选车牌"), self.original, 2),
             (self.reference_label, self.reference, 1),
-            (QLabel("增强结果"), self.enhanced, 1),
+            (self.result_label, self.enhanced, 1),
         ):
             column = QVBoxLayout()
             column.addWidget(label)
             column.addWidget(view, 1)
             panes.addLayout(column, stretch)
+        panes.addLayout(self.alternatives, 1)
 
         self.zoom_button = QPushButton("起始帧 100%")
         self.zoom_button.clicked.connect(self.original.actual_size)
@@ -223,6 +226,11 @@ class PlateVideoDialog(QDialog):
         self.result = None
         self.reference.clear_image()
         self.enhanced.clear_image()
+        self.result_label.setText("还原结果")
+        while item := self.alternatives.takeAt(0):
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
         self.reference_label.setText("参考原帧 · 车牌区域")
         self._update_controls()
         if self.original.region is None:
@@ -256,8 +264,19 @@ class PlateVideoDialog(QDialog):
         self.reference.set_image(result.reference.pixels)
         self.reference_label.setText(f"参考原帧 · 第 {result.reference.index + 1} 帧的车牌")
         self.enhanced.set_image(result.enhanced)
+        first, *alternatives = result.candidates
+        self.result_label.setText(f"{first.label} · {first.score:.2f}")
+        for candidate in alternatives:
+            card = QWidget()
+            column = QVBoxLayout(card)
+            column.addWidget(QLabel(f"{candidate.label} · {candidate.score:.2f}"))
+            preview = ImagePane()
+            preview.setMinimumWidth(180)
+            preview.set_image(candidate.pixels)
+            column.addWidget(preview)
+            self.alternatives.addWidget(card)
         if len(result.frames) == 1:
-            message = f"可用帧不足，已回退为单帧增强（第 {result.reference.index + 1} 帧）。"
+            message = f"可用帧不足，已回退为单帧还原（第 {result.reference.index + 1} 帧）。"
         else:
             numbers = "、".join(str(frame.index + 1) for frame in result.frames)
             message = f"已跟踪 {result.tracked_count} 帧（含起始帧），融合第 {numbers} 帧。"
@@ -268,7 +287,7 @@ class PlateVideoDialog(QDialog):
         if self.worker is not None or result is None:
             return
         path, _ = QFileDialog.getSaveFileName(
-            self, "导出车牌增强结果", f"{result.source.stem}-第{result.anchor_index + 1}帧-车牌.zip", "ZIP (*.zip)",
+            self, "导出车牌还原结果", f"{result.source.stem}-第{result.anchor_index + 1}帧-车牌.zip", "ZIP (*.zip)",
         )
         if not path:
             return

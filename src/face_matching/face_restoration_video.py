@@ -1,4 +1,4 @@
-"""Conservative local video face enhancement with the source audio tracks."""
+"""Render offline portrait restoration without losing source timestamps or audio."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -8,43 +8,104 @@ from threading import Event
 from typing import Callable
 
 import av
+import cv2
 import numpy as np
 
 from .config import AppConfig
-from .gpu import create_gpu_session
-from .image_enhancement import PRESETS, enhance_image
-from .models import required_paths
-from .vision.detector import SCRFDDetector
+from .face_restoration import (
+    AlignedFace, DICFACE_FILENAME, GFPGAN_FILENAME, FaceRestorer, aligned_face,
+    create_restoration_detector, paste_face, restoration_model_dir,
+)
 from .vision.local_media import local_path, local_video_path
 
 
-def create_face_detector(config: AppConfig) -> SCRFDDetector:
-    model, _ = required_paths(config.model_profile)
-    session = create_gpu_session(model, config.gpu_device_id, backend=config.gpu_backend)
-    return SCRFDDetector(session, input_size=config.detector_size, threshold=config.detector_threshold,
-                         nms_threshold=config.nms_threshold)
+class VideoPortraitRestorer:
+    def __init__(self, config: AppConfig, stop: Event):
+        self.stop = stop
+        self.detector = create_restoration_detector(config)
+        folder = restoration_model_dir()
+        dicface = folder / DICFACE_FILENAME
+        gfpgan = folder / GFPGAN_FILENAME
+        if dicface.is_file():
+            self.model = FaceRestorer(dicface, "DicFace", 512, config, frame_count=5)
+        elif gfpgan.is_file():
+            self.model = FaceRestorer(gfpgan, "GFPGAN v1.4", 512, config)
+        else:
+            raise FileNotFoundError("缺少本地视频人像还原模型")
+        self.previous: list[tuple[AlignedFace, tuple[np.ndarray, ...], np.ndarray]] = []
+
+    def __call__(self, frame: np.ndarray) -> tuple[np.ndarray, int]:
+        result = frame.copy()
+        current = []
+        remaining = self.previous.copy()
+        for detection in self.detector.detect(frame):
+            if self.stop.is_set():
+                break
+            face = aligned_face(frame, detection, self.model.size)
+            if face is None:
+                continue
+            tracked = None
+            distance = float("inf")
+            for index, earlier in enumerate(remaining):
+                before = earlier[0].detection
+                delta = np.linalg.norm(before.bbox - detection.bbox)
+                if delta < distance and delta < min(detection.width, detection.height) * 0.45:
+                    tracked, distance = index, delta
+
+            history = ()
+            previous = None
+            if tracked is not None:
+                before, history, past_residual = remaining.pop(tracked)
+                crop_change = np.abs(face.crop.astype(np.float32) - before.crop).mean()
+                if crop_change <= 24:
+                    previous = before.crop, past_residual
+                else:
+                    history = ()
+
+            if self.model.frame_count == 1:
+                restored, = self.model.restore((face.crop,))
+                if previous is not None:
+                    restored = _stable_image(face.crop, restored, *previous)
+            else:
+                inputs = (*history, face.crop)
+                inputs = (inputs[0],) * (self.model.frame_count - len(inputs)) + inputs
+                restored = self.model.restore(inputs)[-1]
+            paste_face(result, face, restored)
+            current.append((face, (*history, face.crop)[-4:], restored.astype(np.float32) - face.crop))
+        self.previous = current
+        return result, len(current)
 
 
-def enhance_faces(frame: np.ndarray, detector: SCRFDDetector, minimum_size: int) -> tuple[np.ndarray, int]:
-    height, width = frame.shape[:2]
-    result = frame.copy()
-    count = 0
-    for face in detector.detect(frame):
-        left, top, right, bottom = (round(value) for value in face.bbox)
-        left, top, right, bottom = max(0, left), max(0, top), min(width, right), min(height, bottom)
-        w, h = right - left, bottom - top
-        if min(w, h) < minimum_size:
-            continue
-        roi = frame[top:bottom, left:right]
-        enhanced = enhance_image(roi, PRESETS["人脸清晰化（保守）"])
-        y, x = np.ogrid[-1:1:complex(h), -1:1:complex(w)]
-        weight = np.clip((1 - x * x - y * y) * 2.5, 0, 1)[..., None]
-        result[top:bottom, left:right] = np.rint(roi + (enhanced.astype(np.float32) - roi) * weight)
-        count += 1
-    return result, count
+def _stable_image(current: np.ndarray, restored: np.ndarray, previous: np.ndarray,
+                  previous_residual: np.ndarray) -> np.ndarray:
+    # Align a prior residual to the current source rather than averaging eyes
+    # or lips across differently positioned frames.
+    gray_now = cv2.cvtColor(current, cv2.COLOR_BGR2GRAY)
+    gray_before = cv2.cvtColor(previous, cv2.COLOR_BGR2GRAY)
+    flow = cv2.calcOpticalFlowFarneback(gray_now, gray_before, None, 0.5, 2, 13, 2, 5, 1.1, 0)
+    h, w = gray_now.shape
+    x, y = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
+    x, y = x + flow[..., 0], y + flow[..., 1]
+    aligned_source = cv2.remap(gray_before, x, y, cv2.INTER_LINEAR)
+    aligned_detail = cv2.remap(previous_residual, x, y, cv2.INTER_LINEAR)
+    visible = ((np.abs(gray_now.astype(np.float32) - aligned_source) < 9)
+               & (np.linalg.norm(flow, axis=2) < 10))
+    result = restored.astype(np.float32)
+    smoothed = (current + aligned_detail) * 0.2 + result * 0.8
+    result[visible] = smoothed[visible]
+    return np.rint(np.clip(result, 0, 255)).astype(np.uint8)
 
 
-def _process(source: Path, target: Path, detector: SCRFDDetector, minimum_size: int,
+def restore_face_video(
+    source: Path, destination: Path, config: AppConfig, stop: Event,
+    progress: Callable[[int, int], None] | None = None,
+) -> tuple[str, int, int]:
+    engine = VideoPortraitRestorer(config, stop)
+    frames, faces = render_portrait_video(source, destination, engine, stop, progress)
+    return engine.model.name, frames, faces
+
+
+def _process(source: Path, target: Path, restore,
              stop: Event, progress: Callable[[int, int], None] | None) -> tuple[int, int]:
     frames = faces = 0
     with av.open(str(source), options={"protocol_whitelist": "file"}) as probe:
@@ -89,7 +150,7 @@ def _process(source: Path, target: Path, detector: SCRFDDetector, minimum_size: 
                         pixels = np.ascontiguousarray(np.rot90(pixels, quarter_turns))
                     if (pixels.shape[1], pixels.shape[0]) != (stream.width, stream.height):
                         raise ValueError("源视频在片段中改变了分辨率或方向，请分段处理")
-                    pixels, count = enhance_faces(pixels, detector, minimum_size)
+                    pixels, count = restore(pixels)
                     output = av.VideoFrame.from_ndarray(pixels, format="bgr24")
                     output.pts, output.time_base = frame.pts, frame.time_base
                     for encoded in stream.encode(output):
@@ -104,20 +165,20 @@ def _process(source: Path, target: Path, detector: SCRFDDetector, minimum_size: 
     return frames, faces
 
 
-def enhance_face_video(source: Path, destination: Path, detector: SCRFDDetector,
-                       minimum_size: int, stop: Event,
+def render_portrait_video(source: Path, destination: Path, restore,
+                          stop: Event,
                        progress: Callable[[int, int], None] | None = None) -> tuple[int, int]:
     if stop.is_set():
         return 0, 0
     source = local_video_path(source)
     destination = local_path(destination)
     if destination.suffix.lower() != ".mkv":
-        raise ValueError("请使用 MKV 格式保存视频人脸增强")
+        raise ValueError("请使用 MKV 格式保存视频人像还原")
     if destination.exists():
         raise FileExistsError("输出文件已存在，请另选文件名")
     with TemporaryDirectory(prefix="face-enhancement-", dir=destination.parent) as temporary:
         staged = Path(temporary) / "video.mkv"
-        frames, faces = _process(source, staged, detector, minimum_size, stop, progress)
+        frames, faces = _process(source, staged, restore, stop, progress)
         if stop.is_set():
             return 0, 0
         if not frames:

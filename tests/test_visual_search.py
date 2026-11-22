@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from PySide6.QtTest import QTest
 
-from face_matching.image_enhancement import encode_png
+from face_matching.restoration_io import encode_png
 from face_matching.visual_search import (FaceExampleMatcher, ObjectExampleMatcher, collect_sources,
                                          read_hit_frame, search_sources)
 from face_matching.gui.visual_search import VisualSearchWidget

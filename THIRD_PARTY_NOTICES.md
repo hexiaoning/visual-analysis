@@ -13,6 +13,8 @@
 | NumPy | 数值计算 | BSD-3-Clause |
 | Chinese-CLIP ViT-B/16 | 中文衣着与车辆颜色语义检索 | OFA-Sys，MIT；FP32 ONNX转换来自 felixdu/chinese-clip-vit-base-patch16-onnx，固定版本47080d16c631d8416d2e6b155c59f8fd2c322e98；匹配词表来自Xenova固定版本f26904860903e70e050b8f48255e5f48401816e9。两编码器及词表均固定SHA-256，许可证随包保存在licenses/Chinese-CLIP-LICENSE.txt。 |
 | NVIDIA CUDA/cuDNN/cuBLAS wheels | GPU 运行库 | NVIDIA SDK/EULA 条款 |
+| PCFlow BFR | 照片人脸还原 | aiimaginglab，代码 MIT，上游发布的 BFR/LCPL 检查点；许可证随包保存在 licenses/PCFlow-LICENSE.txt。TAESD3 解码器权重的发布者 madebyollin 标注为 MIT，见 https://huggingface.co/madebyollin/taesd3 |
+| GFPGAN v1.4 | 备用人脸还原与视频基础模型 | TencentARC，Apache-2.0，使用官方 v1.4 clean 权重转换；许可证随包保存在 licenses/GFPGAN-LICENSE.txt。StyleGAN2 组件的许可说明见上游项目。 |
 | SCRFD-10G | 人脸检测 | 参见 InsightFace/AuraFace 模型来源和适用条款 |
 | LVFace-B Glint360K | 高精度人脸特征 | 代码 MIT；官方预训练权重仅限非商业研究，商用必须另获授权 |
 | AuraFace-v1 | 可替代人脸特征 | Apache-2.0 模型卡；部署方仍需完成数据与用途合规审核 |

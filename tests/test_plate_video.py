@@ -12,7 +12,6 @@ from PySide6.QtTest import QTest
 
 from face_matching.config import AppConfig
 from face_matching.gui.main_window import MainWindow
-from face_matching.image_enhancement import PRESETS, enhance_image
 from face_matching.plate_video import enhance_plate_video, export_plate_result, load_plate_preview
 
 
@@ -63,9 +62,8 @@ def test_tracks_moving_plate_and_exports_verified_full_original_frames(moving_pl
     assert "第 7 帧匹配不足" in result.tracking_notice
     assert len(result.frames) >= 3
     assert [frame.region for frame in result.frames] == [regions[frame.index - 1] for frame in result.frames]
-    single = enhance_image(result.reference.pixels, PRESETS["车牌清晰化（保守）"])
-    assert result.enhanced.shape == single.shape
-    assert not np.array_equal(result.enhanced, single)
+    assert result.enhanced.shape == result.reference.pixels.shape
+    assert any(candidate.label == "多帧一致性融合" for candidate in result.candidates)
 
     destination = tmp_path / "结果.zip"
     export_plate_result(destination, result)
@@ -79,7 +77,8 @@ def test_tracks_moving_plate_and_exports_verified_full_original_frames(moving_pl
         ]
         original_files = {item["file"]: item["frame_number"] for item in manifest["original_frames"]}
         original_files[manifest["anchor_file"]] = 2
-        assert set(archive.namelist()) == {*original_files, "enhanced.png", "manifest.json"}
+        candidate_files = {item["file"] for item in manifest["candidates"]}
+        assert set(archive.namelist()) == {*original_files, *candidate_files, "manifest.json"}
         for filename, number in original_files.items():
             pixels = cv2.imdecode(np.frombuffer(archive.read(filename), np.uint8), cv2.IMREAD_COLOR)
             np.testing.assert_array_equal(pixels, frames[number - 1])
@@ -138,10 +137,10 @@ def test_main_window_can_choose_frame_draw_box_process_and_export(qt_runtime, mo
                         lambda *args: (str(destination), ""))
     window = MainWindow(AppConfig())
     window.show()
-    tools = window.image_tools
+    tools = window.restoration
     window.tabs.setCurrentWidget(tools)
     QTest.mouseClick(tools.open_plate_video, Qt.LeftButton)
-    dialog = tools.plate_video_dialog
+    dialog = tools.plate_dialog
     try:
         assert dialog is not None and dialog.isVisible()
         QTest.mouseClick(dialog.open_button, Qt.LeftButton)
@@ -180,4 +179,4 @@ def test_main_window_can_choose_frame_draw_box_process_and_export(qt_runtime, mo
             wait_for_task(qt_runtime, dialog)
             dialog.close()
         window.close()
-    assert tools.plate_video_dialog is None
+    assert tools.plate_dialog is None

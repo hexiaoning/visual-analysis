@@ -16,11 +16,11 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from ..image_enhancement import encode_png
+from ..restoration_io import encode_png
 from ..visual_search import (FaceExampleMatcher, ObjectExampleMatcher, SearchHit,
                              collect_sources, read_hit_frame, search_sources)
 from ..vision.io import read_image
-from .image_tools import ImagePane
+from .image_pane import ImagePane
 
 
 class SearchWorker(QThread):

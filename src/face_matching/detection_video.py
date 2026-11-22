@@ -12,7 +12,7 @@ from typing import Callable
 import cv2
 import numpy as np
 
-from .image_enhancement import save_new_png
+from .restoration_io import save_new_png
 from .person_vehicle import ObjectDetection, annotate_objects, crop_object
 from .vision.local_media import local_path, open_local_video
 

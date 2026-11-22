@@ -9,7 +9,7 @@ from face_matching import __version__, __main__
 from face_matching.video_analysis import main
 
 ROOT = Path(__file__).resolve().parents[1]
-TABS = ["人脸检索", "人车检测", "车型识别", "图像增强", "以图搜索", "语义搜索", "人员库", "标注库", "设置"]
+TABS = ["人脸检索", "人车检测", "车型识别", "图像还原", "以图搜索", "语义搜索", "人员库", "标注库", "设置"]
 
 
 def test_release_version_matches_project_and_portable_instructions(tmp_path):
@@ -23,12 +23,12 @@ def test_release_version_matches_project_and_portable_instructions(tmp_path):
 
 @pytest.mark.parametrize("entry, args, selected", [
     (__main__.main, [], "人脸检索"),
-    (__main__.main, ["--image-tools"], "图像增强"),
+    (__main__.main, ["--image-tools"], "图像还原"),
     (__main__.main, ["--video-detection"], "人车检测"),
     (__main__.main, ["--vehicle-analysis"], "车型识别"),
     (__main__.main, ["--semantic-search"], "语义搜索"),
     (main, [], "人脸检索"),
-    (main, ["--image-tools"], "图像增强"),
+    (main, ["--image-tools"], "图像还原"),
 ])
 def test_every_entry_opens_complete_app_without_initializing_gpu(qt_runtime, tmp_path, monkeypatch, entry, args, selected):
     monkeypatch.setenv("FACE_MATCHING_HOME", str(tmp_path))

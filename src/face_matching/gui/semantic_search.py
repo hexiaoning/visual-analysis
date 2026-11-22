@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
-from ..image_enhancement import save_new_png
+from ..restoration_io import save_new_png
 from ..models import SEMANTIC_MODEL_ID
 from ..person_vehicle import crop_object, load_person_vehicle_detector
 from ..semantic_model import SemanticEncoder
@@ -25,7 +25,7 @@ from ..semantic_search import SemanticIndex, parse_query
 from ..visual_search import SearchHit, collect_sources, read_hit_frame
 from ..vision.io import IMAGE_EXTENSIONS
 from ..vision.local_media import local_path, open_local_video
-from .image_tools import ImagePane
+from .image_pane import ImagePane
 from .workspace_style import workspace_panel
 
 

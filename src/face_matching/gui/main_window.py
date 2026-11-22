@@ -59,7 +59,7 @@ from .export_dialog import AnnotationExportDialog, AnnotationExportWorker
 from .person_photos import PersonPhotosDialog
 from .photo_identity import PhotoIdentityWidget
 from .annotation_compare import AnnotationCompareDialog
-from .image_tools import ImageToolsWidget
+from .restoration import RestorationWidget
 from .video_detection import VideoDetectionWidget
 from .vehicle_analysis import VehicleAnalysisWidget
 from .portrait_libraries import LibrariesDialog, LibrarySelection, PersonFilterWidget
@@ -391,10 +391,10 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.video_detection, "人车检测")
         self.vehicle_analysis = VehicleAnalysisWidget(self.config, self)
         self.tabs.addTab(self.vehicle_analysis, "车型识别")
-        self.image_tools = ImageToolsWidget(self, config=self.config)
-        self.tabs.addTab(self.image_tools, "图像增强")
+        self.restoration = RestorationWidget(self, config=self.config)
+        self.tabs.addTab(self.restoration, "图像还原")
         self.visual_search = VisualSearchWidget(self._prepare_search_engine, self)
-        self.visual_search.enhance_requested.connect(self._enhance_search_result)
+        self.visual_search.enhance_requested.connect(self._restore_search_result)
         self.tabs.addTab(self.visual_search, "以图搜索")
         self.semantic_search = SemanticSearchWidget(self.config, self)
         self.tabs.addTab(self.semantic_search, "语义搜索")
@@ -405,7 +405,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(WORKSPACE_STYLE)
         self.refresh_people()
         self._set_video_enabled(True)
-        self.statusBar().showMessage("已就绪 · 首次检索或录入人员时初始化人脸模型；人车检测和图像增强可直接使用")
+        self.statusBar().showMessage("已就绪 · 首次检索或录入人员时初始化人脸模型；人车检测和图像还原可直接使用")
         self._initializing = False
 
     def initialize(self) -> bool:
@@ -1500,12 +1500,8 @@ class MainWindow(QMainWindow):
             self.video_detection.stop()
             event.ignore()
             return
-        if self.image_tools.face_video_worker is not None:
-            self.image_tools.stop_video_enhancement()
-            event.ignore()
-            return
-        if self.image_tools.is_busy():
-            QMessageBox.information(self, "图像增强", "请等待图片处理或导出完成后再关闭。")
+        if self.restoration.is_busy():
+            self.restoration.stop()
             event.ignore()
             return
         if self.export_worker and self.export_worker.isRunning():
@@ -1529,20 +1525,20 @@ class MainWindow(QMainWindow):
             return None
         return self.engine if self.initialize() else None
 
-    def _enhance_search_result(self, frame, bbox) -> None:
-        if self.image_tools.is_busy():
-            QMessageBox.information(self, "图像增强进行中", "请等待当前处理或导出完成。")
+    def _restore_search_result(self, frame, bbox) -> None:
+        if self.restoration.is_busy():
+            QMessageBox.information(self, "图像还原进行中", "请等待当前处理或导出完成。")
             return
-        from ..image_enhancement import save_new_png
+        from ..restoration_io import save_new_png
 
         directory = self.database.path.parent / 'query_images'
         path = directory / f'搜索原始帧-{uuid.uuid4().hex}.png'
         try:
             directory.mkdir(parents=True, exist_ok=True)
             save_new_png(path, frame)
-            if self.image_tools.load_image(path):
-                self.image_tools.region_only.setChecked(True)
-                self.image_tools._select_region(bbox)
-                self.tabs.setCurrentWidget(self.image_tools)
+            if self.restoration.load_image(path):
+                self.restoration.mode.setCurrentIndex(0)
+                self.restoration.select_region(bbox)
+                self.tabs.setCurrentWidget(self.restoration)
         except OSError as exc:
-            QMessageBox.warning(self, "无法打开清晰化", str(exc))
+            QMessageBox.warning(self, "无法打开图像还原", str(exc))
