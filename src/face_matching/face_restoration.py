@@ -125,43 +125,95 @@ def paste_face(image: np.ndarray, face: AlignedFace, restored: np.ndarray, stren
     region[:] = np.rint(region * (1 - alpha) + warped * alpha).astype(np.uint8)
 
 
+def _photo_faces(image: np.ndarray, detector: SCRFDDetector,
+                 region: tuple[int, int, int, int] | None) -> list[AlignedFace]:
+    def discover(pixels: np.ndarray) -> list[AlignedFace]:
+        found = []
+        for detection in detector.detect(pixels):
+            if region:
+                x1, y1, x2, y2 = region
+                center = detection.bbox.reshape(2, 2).mean(axis=0)
+                if not (x1 <= center[0] < x2 and y1 <= center[1] < y2):
+                    continue
+            if (face := aligned_face(pixels, detection, 512)) is not None:
+                found.append(face)
+        return found
+
+    faces = discover(image)
+    if faces:
+        return faces
+    # One-pixel display patterns can overwhelm the landmark detector even when
+    # the underlying face is large. Use the softer pixels only as model input.
+    return discover(cv2.GaussianBlur(image, (0, 0), 0.9))
+
+
+def restore_portraits(
+    items: tuple[tuple[np.ndarray, tuple[int, int, int, int] | None], ...],
+    config: AppConfig,
+    stop: Event,
+) -> tuple[tuple[RestorationCandidate, ...], ...]:
+    """Use one detector and one restorer at a time for all images in a batch."""
+    detector = create_restoration_detector(replace(config, detector_size=640))
+    aligned = [_photo_faces(image, detector, region) for image, region in items]
+    output: list[list[tuple[RestorationCandidate, tuple[np.ndarray, ...]]]] = [[] for _ in items]
+    if not any(aligned):
+        return tuple(() for _ in items)
+    models = restoration_model_dir()
+    failures = []
+    for filename, label in ((PCFLOW_FILENAME, "PCFlow"), (GFPGAN_FILENAME, "GFPGAN v1.4")):
+        path = models / filename
+        if not path.is_file():
+            continue
+        model = None
+        try:
+            model = FaceRestorer(path, label, 512, config)
+            for index, (faces, (image, _)) in enumerate(zip(aligned, items, strict=True)):
+                if stop.is_set():
+                    return tuple(() for _ in items)
+                if not faces:
+                    continue
+                canvas = image.copy()
+                scores, checks = [], []
+                for face in faces:
+                    pixels, = model.restore((face.crop,))
+                    scores.append(score_candidate(label, pixels, face.crop))
+                    checks.append(cv2.resize(pixels, (32, 32), interpolation=cv2.INTER_AREA))
+                    paste_face(canvas, face, pixels)
+                output[index].append((replace(min(scores, key=lambda score: score.score), pixels=canvas),
+                                      tuple(checks)))
+        except Exception as error:
+            failures.append(f"{label}: {error}")
+        finally:
+            del model
+    if not any(output):
+        details = "；".join(failures) if failures else "请检查随包部署的本地模型"
+        raise ValueError(f"未能运行人像还原模型。{details}")
+
+    grouped = []
+    for candidates, faces in zip(output, aligned, strict=True):
+        if len(candidates) < 2:
+            consensus = False
+        else:
+            comparisons = zip(candidates[0][1], candidates[1][1], strict=True)
+            consensus = all(float(np.abs(first.astype(np.float32) - second).mean()) <= 9
+                            for first, second in comparisons)
+        ranking = [
+            replace(item, confidence="中" if consensus and item.agreement >= 90
+                    and min(face.detection.score for face in faces) >= 0.65 else "低")
+            for item, _ in candidates
+        ]
+        ranked = choose_candidates(ranking)
+        if len(ranked) == 2 and np.array_equal(ranked[0].pixels, ranked[1].pixels):
+            ranked = ranked[:1]
+        grouped.append(ranked)
+    return tuple(grouped)
+
+
 def restore_portrait(
     image: np.ndarray, config: AppConfig, stop: Event,
     region: tuple[int, int, int, int] | None = None,
 ) -> tuple[RestorationCandidate, ...]:
-    models = restoration_model_dir()
-    options = [
-        (PCFLOW_FILENAME, "PCFlow", 512),
-        (GFPGAN_FILENAME, "GFPGAN v1.4", 512),
-    ]
-    detections = create_restoration_detector(config).detect(image)
-    if region:
-        x1, y1, x2, y2 = region
-        detections = [face for face in detections
-                      if x1 <= face.bbox[[0, 2]].mean() < x2 and y1 <= face.bbox[[1, 3]].mean() < y2]
-    if not detections:
-        raise ValueError("选区内未检测到符合条件的人脸")
-    candidates = []
-    for filename, name, size in options:
-        path = models / filename
-        if not path.is_file():
-            continue
-        faces = [face for detection in detections if (face := aligned_face(image, detection, size)) is not None]
-        if not faces:
-            continue
-        restored_image = image.copy()
-        model = FaceRestorer(path, name, size, config)
-        scores = []
-        for face in faces:
-            if stop.is_set():
-                return ()
-            restored, = model.restore((face.crop,))
-            scores.append(score_candidate(name, restored, face.crop))
-            paste_face(restored_image, face, restored)
-        weakest = min(scores, key=lambda score: score.score)
-        candidates.append(replace(weakest, pixels=restored_image))
-        del model
-    if not candidates:
-        raise ValueError("没有可用的本地人脸还原模型，或人脸关键点不足以对齐")
-    # Expose both model outputs until an agreement rule is validated for photos.
-    return choose_candidates(candidates)
+    candidates, = restore_portraits(((image, region),), config, stop)
+    if not candidates and not stop.is_set():
+        raise ValueError("未找到可对齐的人脸，请选择五官可见的原图")
+    return candidates

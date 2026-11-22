@@ -197,7 +197,8 @@ class RestorationWidget(QWidget):
         for item in candidates:
             card = QWidget()
             column = QVBoxLayout(card)
-            label = QLabel(f"{item.label} · {item.score:.2f}\n来源一致性 {item.agreement:.2f} · 边缘细节 {item.detail:.2f}")
+            label = QLabel(f"{item.label} · {item.score:.2f} 分 · 置信度 {item.confidence}\n"
+                           f"来源一致性 {item.agreement:.2f} · 边缘细节 {item.detail:.2f}")
             label.setWordWrap(True)
             pane = ImagePane()
             pane.set_image(item.pixels)
@@ -207,7 +208,7 @@ class RestorationWidget(QWidget):
             column.addWidget(pane, 1)
             column.addWidget(save)
             self.candidate_row.addWidget(card, 1)
-        self.status.setText(f"{len(candidates)} 个结果。分数用于同源候选排序。")
+        self.status.setText(f"{len(candidates)} 个结果。分数用于同源候选排序，置信度依据原图与候选的一致性。")
 
     def _save_candidate(self, candidate: RestorationCandidate) -> None:
         stem = self.source.stem if self.source else "图片"

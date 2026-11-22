@@ -15,6 +15,7 @@ class RestorationCandidate:
     agreement: float
     detail: float
     observations: int
+    confidence: str = "待复核"
 
 
 def score_candidate(

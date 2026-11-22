@@ -10,11 +10,13 @@ from .config import AppConfig
 from .gpu import assert_gpu_available
 from .models import PROFILES, available_profiles, required_paths
 from .paths import is_frozen_app
+from .vision.local_media import local_path
 
 
 def _write_report(path: Path | None, payload: dict[str, object]) -> None:
     value = json.dumps(payload, ensure_ascii=False, indent=2)
     if path is not None:
+        path = local_path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(value, encoding="utf-8")
     if sys.stdout is not None:
@@ -43,9 +45,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--backend", choices=("auto", "cuda", "openvino"), help="覆盖 GPU 后端")
     parser.add_argument("--device-id", type=int, help="覆盖 GPU 编号")
     parser.add_argument("--check-runtime", action="store_true", help="检查完整应用、运行库及全部已打包模型")
+    parser.add_argument("--check-restoration-cases", type=Path, metavar="DIR", help="对本机案例执行离线人像还原")
+    parser.add_argument("--case-output", type=Path, metavar="DIR", help="保存案例的还原图片")
     parser.add_argument("--report", type=Path, help="把诊断 JSON 写入指定文件")
     parser.add_argument("--profile", choices=sorted(PROFILES), help="覆盖配置中的模型档")
     args = parser.parse_args(argv)
+    if (args.check_restoration_cases is None) != (args.case_output is None):
+        parser.error("--check-restoration-cases 和 --case-output 必须同时指定")
     sys.addaudithook(_reject_outbound)
     if args.version:
         _write_report(args.report, {"application": "FaceMatching", "version": __version__})
@@ -76,6 +82,16 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:
             _write_report(args.report, {"ok": False, "error": str(exc)})
             return 2
+    if args.check_restoration_cases is not None:
+        response = {"application": "FaceMatching", "version": __version__}
+        try:
+            from .restoration_cases import run_portrait_cases
+
+            response.update(run_portrait_cases(args.check_restoration_cases, args.case_output, config))
+        except Exception as exc:
+            response.update(ok=False, error=str(exc))
+        _write_report(args.report, response)
+        return 0 if response["ok"] else 2
     if args.check_runtime:
         try:
             from .runtime_check import check_runtime

@@ -3,9 +3,11 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from face_matching.face_restoration import FFHQ_LANDMARKS, aligned_face, paste_face
+from face_matching.face_restoration import FFHQ_LANDMARKS, _photo_faces, aligned_face, paste_face
 from face_matching.gui.restoration import RestorationWidget
 from face_matching.restoration_candidates import RestorationCandidate, choose_candidates
+from face_matching.restoration_cases import run_portrait_cases
+from face_matching.restoration_io import save_new_png
 from face_matching.vision.detector import Detection
 
 
@@ -39,3 +41,47 @@ def test_widget_lists_each_scored_candidate():
     widget._show_candidates((candidate("A", 95), candidate("B", 94)))
     assert widget.candidate_row.count() == 2
     widget.close()
+
+
+def test_local_case_report_preserves_both_candidates_and_missing_results(tmp_path, monkeypatch):
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    first, second = inputs / "01.png", inputs / "02.png"
+    pixels = np.zeros((8, 8, 3), dtype=np.uint8)
+    save_new_png(first, pixels)
+    save_new_png(second, pixels)
+    options = (candidate("A", 95), candidate("B", 94))
+
+    def restore(items, config, stop):
+        assert len(items) == 2
+        return (options, ())
+
+    monkeypatch.setattr("face_matching.restoration_cases.restore_portraits", restore)
+    report = run_portrait_cases(inputs, tmp_path / "outputs", SimpleNamespace())
+    assert not report["ok"]
+    case, missing = report["cases"]
+    assert case["source"] == first.name
+    assert len(case["source_sha256"]) == 64
+    assert [(item["model"], item["score"], item["confidence"]) for item in case["candidates"]] == [
+        ("A", 95, "待复核"), ("B", 94, "待复核"),
+    ]
+    assert missing["source"] == second.name
+    assert missing["candidates"] == []
+
+
+def test_photo_faces_retries_with_texture_suppression_at_same_threshold():
+    yy, xx = np.indices((512, 512))
+    grid = np.uint8((xx + yy) % 2) * 255
+    original = np.repeat(grid[..., None], 3, axis=2)
+    face = Detection(np.array([140, 180, 360, 440]), 0.8, FFHQ_LANDMARKS.copy())
+    inputs = []
+
+    def detect(pixels):
+        inputs.append(pixels)
+        return [] if pixels is original else [face]
+
+    result = _photo_faces(original, SimpleNamespace(detect=detect), (140, 180, 360, 440))
+    assert len(inputs) == 2
+    assert inputs[1].std() < original.std()
+    assert len(result) == 1
+    assert result[0].crop.std() < original.std()

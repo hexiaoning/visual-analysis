@@ -31,7 +31,7 @@ def audit(root: Path, profiles: list[str]) -> dict:
         'face_matching.identity_filters', 'face_matching.visual_search', 'face_matching.runtime_check',
         'face_matching.annotation_export', 'face_matching.gui.annotation_compare',
         'face_matching.gui.vehicle_analysis', 'face_matching.vehicle_analysis', 'face_matching.vision.local_media',
-        'face_matching.face_restoration_video',
+        'face_matching.face_restoration_video', 'face_matching.restoration_cases',
     }
     if missing := sorted(required_modules - modules.keys()):
         raise RuntimeError(f'Missing application features: {missing}')

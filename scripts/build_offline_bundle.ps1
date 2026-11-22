@@ -9,7 +9,8 @@ param(
     [switch]$SkipTests,
     [switch]$SkipDependencyInstall,
     [switch]$RunGpuSmoke,
-    [switch]$SkipBaiduUpload
+    [switch]$SkipBaiduUpload,
+    [string]$RestorationCaseDirectory
 )
 
 $ErrorActionPreference = "Stop"
@@ -116,7 +117,9 @@ $env:FACE_MATCHING_PROJECT_ROOT = $ProjectRoot
 $env:FACE_MATCHING_BUNDLE_MODEL_DIR = $ModelRoot
 $env:FACE_MATCHING_BUNDLE_PROFILES = $Profiles -join ','
 try {
-    Invoke-CheckedPython -Arguments @("-m", "PyInstaller", "--noconfirm", "--clean", (Join-Path $ProjectRoot "packaging\FaceMatching.spec"))
+    $FreezerArguments = @("-m", "PyInstaller", "--noconfirm")
+    if ($Clean) { $FreezerArguments += "--clean" }
+    Invoke-CheckedPython -Arguments ($FreezerArguments + (Join-Path $ProjectRoot "packaging\FaceMatching.spec"))
 }
 finally {
     Remove-Item Env:FACE_MATCHING_PROJECT_ROOT -ErrorAction SilentlyContinue
@@ -138,12 +141,13 @@ $GuiReport = Join-Path $ReleaseDirectory "runtime-check.json"
 $PreviousHome = $env:FACE_MATCHING_HOME
 $PreviousQt = $env:QT_QPA_PLATFORM
 $env:FACE_MATCHING_HOME = Join-Path $ProjectRoot ".build-assets\unified-clean-home"
+New-Item -ItemType Directory -Path $env:FACE_MATCHING_HOME -Force | Out-Null
 $env:QT_QPA_PLATFORM = "offscreen"
 try {
     $Arguments = @("--check-runtime", "--report", ('"{0}"' -f $GuiReport))
     if ($RunGpuSmoke) { $Arguments += "--diagnose" }
     $GuiCheck = Start-Process -FilePath (Join-Path $ReleaseDirectory "FaceMatching.exe") `
-        -ArgumentList $Arguments -Wait -PassThru -WindowStyle Hidden
+        -ArgumentList $Arguments -WorkingDirectory $env:FACE_MATCHING_HOME -Wait -PassThru -WindowStyle Hidden
     if ($GuiCheck.ExitCode -ne 0) {
         if (Test-Path -LiteralPath $GuiReport) {
             Get-Content -LiteralPath $GuiReport
@@ -154,6 +158,26 @@ try {
     $ExpectedTabs = @("人脸检索", "人车检测", "车型识别", "图像还原", "以图搜索", "语义搜索", "人员库", "标注库", "设置")
     if (-not $Payload.ok -or @($Payload.restoration_models).Count -ne 2 -or -not $Payload.vehicle_worker -or $Payload.version -ne $Version -or ($Payload.tabs -join '|') -ne ($ExpectedTabs -join '|')) {
         throw "Packaged application is incomplete or has the wrong version."
+    }
+    if ($RestorationCaseDirectory) {
+        Write-Host "Running real portrait cases with the packaged offline application..." -ForegroundColor Cyan
+        $CaseInputs = (Resolve-Path -LiteralPath $RestorationCaseDirectory).ProviderPath
+        $CaseOutput = Join-Path (Split-Path -Parent $CaseInputs) "outputs"
+        New-Item -ItemType Directory -Path $CaseOutput -Force | Out-Null
+        $CaseReport = Join-Path $CaseOutput "frozen-report-$([System.Guid]::NewGuid()).json"
+        $Arguments = @("--check-restoration-cases", ('"{0}"' -f $CaseInputs),
+            "--case-output", ('"{0}"' -f $CaseOutput), "--report", ('"{0}"' -f $CaseReport),
+            "--profile", $Profiles[0])
+        $CaseCheck = Start-Process -FilePath (Join-Path $ReleaseDirectory "FaceMatching.exe") `
+            -ArgumentList $Arguments -WorkingDirectory $env:FACE_MATCHING_HOME -Wait -PassThru -WindowStyle Hidden
+        if ($CaseCheck.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $CaseReport -PathType Leaf)) {
+            throw "Packaged restoration case check failed (exit $($CaseCheck.ExitCode)). Report: $CaseReport"
+        }
+        $CasePayload = Get-Content -LiteralPath $CaseReport -Raw -Encoding UTF8 | ConvertFrom-Json
+        if (-not $CasePayload.ok -or $CasePayload.version -ne $Version -or @($CasePayload.cases).Count -eq 0) {
+            throw "Packaged restoration case report is incomplete. Report: $CaseReport"
+        }
+        Write-Host "All $(@($CasePayload.cases).Count) portrait cases passed. Report: $CaseReport" -ForegroundColor Green
     }
 }
 finally {
