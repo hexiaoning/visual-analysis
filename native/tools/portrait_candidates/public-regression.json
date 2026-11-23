@@ -1,0 +1,63 @@
+{
+  "encoding": "SHA-256 over decoded 8-bit BGR pixels, row-major, without padding; grayscale is expanded to three channels.",
+  "cases": [
+    {
+      "id": "1848",
+      "default": [
+        "codeformer"
+      ],
+      "fitted": [
+        "amd"
+      ],
+      "input_hashes": {
+        "source": "5f37e03f283a229fe317eb211d153fde54a64a1b05566e090421dbf4747a0c39",
+        "codeformer": "67acc9074acaaafacbc3014c60b970bbd8deb49ab6da3e660eacb3a3995b0fff",
+        "amd": "ca5f586c56554d75a4dba68a835fe1060144aff08a49b1ae2faa9bfe303e1494"
+      },
+      "observed_hash": "370521dc7683425d978ad2bdcc7c1f5885e2e0c7df11ed493b67a419cdd9f73a",
+      "replay_hashes": {
+        "amd": "c8ac6b175811c108a3d9a84679a0ebe509919930fda481013aa6a78bf048f9b9",
+        "codeformer": "a4623361d7e80af06df915a7058f1af709d277878ab824fcc398bd32cea71ba6"
+      }
+    },
+    {
+      "id": "2762",
+      "default": [
+        "codeformer",
+        "amd"
+      ],
+      "fitted": [
+        "codeformer",
+        "amd"
+      ],
+      "input_hashes": {
+        "source": "840151646c25b7cb7e7db0c71c26885a21035106e0892291ba89bcfa26252954",
+        "codeformer": "137b3e7eb9e2a68712ad1be943a37df836bf73cb6682e516dbc92c31a60495de",
+        "amd": "d485b64ada7eec0d1bd4788b7fc100adf3a791cc22d62812503c2c827bc9ace7"
+      },
+      "observed_hash": "d2ccdb10f21158c32af1f497107a5b4e19cd80aa5ec1728b06b19664e8169f93",
+      "replay_hashes": {
+        "codeformer": "da68f9f08a3fdbfab633af784ed54c541c4d4588073770c76c85ea051547d4e3",
+        "amd": "66df55b434281cecc00b04f41fe1f1c5f7d3c827fdda1e2109c10b21104e79ef"
+      }
+    },
+    {
+      "id": "739",
+      "default": [
+        "codeformer"
+      ],
+      "fitted": [
+        "codeformer"
+      ],
+      "input_hashes": {
+        "source": "c212a6920f1d632e3824f2138ef87be02484624a186b0829951a8f80bc82a23a",
+        "codeformer": "dad3d3619c3445c696df468ef916f30917ed9a97e7bb98fcda93d9a278ba2dfa",
+        "amd": "7d7eee1e196d5f80dd5792731cadb23c59b7279b51d2512b3ccd110ba75ea3fb"
+      },
+      "observed_hash": "9539eefbf62b2862dd28469067f1e85c62734acd434ca53b0951a2237c507297",
+      "replay_hashes": {
+        "codeformer": "05ad0e12d3af1ed99abf46efdd6ed5c05851e8f8604862e6e5268d4f37a58c0f"
+      }
+    }
+  ]
+}
