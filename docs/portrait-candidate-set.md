@@ -41,4 +41,16 @@ python scripts/explore_portrait_preimage.py output/sensor-preimage/set.json boun
 
 枚举器的默认设置会遍历每个相容光栅恰好一次。`--discard-bits b` 将每个通道每个像素划入宽度为 `2^b` 的区间，每个有解的组合取一张相容代表。穷尽后，对于任一相容原图，至少有一幅代表在所有通道、所有像素上的误差都不超过 `2^b − 1`。页清单中的 `all_feasible_cells_written` 说明这次是否真的走完。取一个前缀只保证已输出图像通过回放。`bound` 给出按指定逐通道最大误差覆盖全体相容光栅所需数量的数学下界。
 
-真实拍摄可能包含运动模糊、重采样偏移和 JPEG 压缩。这里的逐像素保证只对声明的成像模型成立。数学集合也容许带纹理噪声的图像；人像外观仍需单独评估。
+真实拍摄可能包含运动模糊、重采样偏移和 JPEG 压缩。这里的逐像素保证只对声明的成像模型成立。数学集合也容许带纹理噪声的图像，人像外观仍需单独评估。
+
+## 从极低分辨率的观测生成可查看的人脸
+
+对于已裁成方形、正面单人脸大体居中的输入，可用 StyleGAN2 FFHQ 512 生成不同五官、脸型和发型的提案。即使输入只剩几个色块，也可以用这条命令。程序在 CPU 上按种子生成人像，先对整幅提案施加连续的色调校正，再修正整数像素，逐通道核对重新成像的结果。只有通过的图才会写入输出目录。每个种子的 PNG、哈希和相机参数列在 `faces.json`。严重欠曝时，候选仍可能带有明显色偏。
+
+```powershell
+python scripts/explore_portrait_preimage.py camera-set/set.json sample-faces faces --stylegan-source D:/models/stylegan3 --weights D:/models/stylegan2-ffhq-512x512.pkl --first-seed 0 --count 16
+```
+
+运行需要已安装 CPU 版 PyTorch 及 NVIDIA 源码依赖的 Python 环境，可信的本地 NVlabs/stylegan3 源码，以及 NVIDIA 发布的 StyleGAN2 FFHQ 512×512 权重。已测源码提交为 `c233a919a6faee6e36a316ddd4eddababad1adf9`。程序在加载权重前校验 SHA-256。每张模糊图是唯一的个案输入，模型、相机参数和种子范围属于运行配置。延续取样可使用新的输出目录，并将 `--first-seed` 设为上一批的结束种子加一。[官方源码](https://github.com/NVlabs/stylegan3/tree/c233a919a6faee6e36a316ddd4eddababad1adf9) · [官方权重目录](https://catalog.ngc.nvidia.com/orgs/nvidia/research/models/stylegan2/1/file-browser)
+
+种子决定一开始生成哪一张脸。观测用于约束其重新成像的结果。每张候选都可能通过这个约束，而某一张真实原照的长相仍可能在整批中缺席。增加种子数量能扩充候选，程序尚无判定所有人像外观已覆盖的停止条件。

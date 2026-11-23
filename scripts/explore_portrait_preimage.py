@@ -152,6 +152,51 @@ def raster_budget_bound(camera, observed, radius):
             "independent_swaps": independent}
 
 
+def sample_faces(camera, observed, output, source, weights, first_seed, count):
+    """Generate FFHQ-aligned face proposals and replay them against the observation."""
+    from portrait_stylegan_prior import generate_stylegan_faces, STYLEGAN_WEIGHTS_SHA256
+    if count < 1 or first_seed < 0 or first_seed + count > 2 ** 32:
+        raise ValueError("Use a positive count and seeds in the uint32 range.")
+    if output.exists():
+        raise ValueError("Choose a new output directory.")
+    height, width = observed.shape[:2]
+    if width != height:
+        raise ValueError("This face prior expects a square, aligned single-face crop.")
+    lower, upper = camera.bounds(observed)
+    empty = bool(np.any(lower > upper))
+    size = height * camera.scale
+    report = {
+        "prior": "NVIDIA StyleGAN2 FFHQ 512x512", "weights_sha256": STYLEGAN_WEIGHTS_SHA256,
+        "first_seed": first_seed, "requested": count, "empty": empty,
+        "assumed_framing": "square FFHQ-style single-face crop",
+        "open_world_coverage": "unverified", "candidates": [],
+        "camera": {"model": "rgb8-mean-half-up-v1", "scale": camera.scale,
+                   "gain": str(camera.gain), "offset": camera.offset},
+        "observation_bgr8_sha256": sha256(observed.tobytes()).hexdigest(),
+        "projection": "smooth exposure correction with exact block-sum replay",
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(dir=output.parent) as tmp:
+        stage = Path(tmp) / "faces"
+        stage.mkdir()
+        if not empty:
+            for seed, proposed in generate_stylegan_faces(source, weights, first_seed, count):
+                if proposed.shape[:2] != (size, size):
+                    interpolation = cv2.INTER_AREA if size < proposed.shape[0] else cv2.INTER_CUBIC
+                    proposed = cv2.resize(proposed, (size, size), interpolation=interpolation)
+                pixels = camera.project_smooth(observed, proposed)
+                if not camera.contains(observed, pixels):
+                    raise ArithmeticError("Projected face failed exact replay.")
+                filename = f"seed-{seed}.png"
+                report["candidates"].append({"file": filename, "seed": seed,
+                                             "sha256": save_png(stage / filename, pixels)})
+            if len(report["candidates"]) != count:
+                raise RuntimeError("Face generator returned fewer candidates than requested.")
+        (stage / "faces.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+        stage.rename(output)
+    return report
+
+
 def enumerate_page(camera, observed, output, count, start=None, discard_bits=0):
     from portrait_preimage_iterator import cover_blocks
     if (count is not None and count < 1) or output.exists():
@@ -200,6 +245,12 @@ if __name__ == "__main__":
     check.add_argument("candidate", type=Path)
     budget = commands.add_parser("bound", help="Lower bound on the number of representatives for all rasters.")
     budget.add_argument("--radius", type=int, required=True, help="Maximum error of any RGB8 channel.")
+    faces = commands.add_parser("sample-faces", help="Sample clear face proposals for a square aligned crop.")
+    faces.add_argument("output", type=Path)
+    faces.add_argument("--stylegan-source", type=Path, required=True, help="Trusted local NVlabs/stylegan3 checkout.")
+    faces.add_argument("--weights", type=Path, required=True, help="Official StyleGAN2 FFHQ 512x512 pickle.")
+    faces.add_argument("--first-seed", type=int, default=0)
+    faces.add_argument("--count", type=int, required=True)
     window = commands.add_parser("enumerate", help="Write a prefix of the complete finite raster enumeration.")
     window.add_argument("output", type=Path)
     limit = window.add_mutually_exclusive_group(required=True)
@@ -233,6 +284,11 @@ if __name__ == "__main__":
         raise SystemExit(0 if match else 1)
     if args.command == "bound":
         print(json.dumps(raster_budget_bound(camera, observed, args.radius)))
+        raise SystemExit(0)
+    if args.command == "sample-faces":
+        sample_faces(camera, observed, args.output, args.stylegan_source, args.weights,
+                     args.first_seed, args.count)
+        print(args.output / "faces.json")
         raise SystemExit(0)
     seed = read_raster(args.start) if args.start else None
     print(json.dumps(enumerate_page(camera, observed, args.output, args.count, seed, args.discard_bits)))

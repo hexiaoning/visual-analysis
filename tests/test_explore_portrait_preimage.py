@@ -8,12 +8,45 @@ from unittest.mock import patch
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from explore_portrait_preimage import enumerate_page, load_set, raster_budget_bound, read_raster, save_png
+from explore_portrait_preimage import enumerate_page, load_set, raster_budget_bound, read_raster, sample_faces, save_png
 from portrait_preimage import BlockMeanCamera
 from restore_portrait_set import save_set
 
 
 class ExplorePortraitPreimageTest(unittest.TestCase):
+    def test_sampled_face_files_pass_exact_replay_and_bind_seed(self):
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            camera = BlockMeanCamera(2)
+            observed = np.array([[[111, 88, 224]]], np.uint8)
+            proposal = np.arange(4 * 4 * 3, dtype=np.uint8).reshape(4, 4, 3)
+            with patch("portrait_stylegan_prior.generate_stylegan_faces",
+                       return_value=iter([(7, proposal), (8, proposal[::-1])])) as generate:
+                result = sample_faces(camera, observed, root / "faces", root, root / "w", 7, 2)
+            generate.assert_called_once_with(root, root / "w", 7, 2)
+            self.assertEqual(result, json.loads((root / "faces" / "faces.json").read_text()))
+            self.assertEqual([r["seed"] for r in result["candidates"]], [7, 8])
+            for row in result["candidates"]:
+                self.assertTrue(camera.contains(observed, read_raster(root / "faces" / row["file"])))
+            self.assertEqual(result["open_world_coverage"], "unverified")
+
+    def test_sampling_failure_has_no_partial_gallery_and_empty_set_skips_weights(self):
+        def partial(*args):
+            yield 0, np.ones((2, 2, 3), np.uint8)
+            raise RuntimeError("interrupted")
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            observed = np.ones((1, 1, 3), np.uint8)
+            with patch("portrait_stylegan_prior.generate_stylegan_faces", side_effect=partial):
+                with self.assertRaisesRegex(RuntimeError, "interrupted"):
+                    sample_faces(BlockMeanCamera(2), observed, root / "faces", root, root, 0, 2)
+            self.assertFalse((root / "faces").exists())
+            with patch("portrait_stylegan_prior.generate_stylegan_faces") as generate:
+                report = sample_faces(BlockMeanCamera(2, 0), observed, root / "empty", root, root, 0, 2)
+                self.assertTrue(report["empty"])
+                self.assertEqual(report["candidates"], [])
+                generate.assert_not_called()
+
     def test_single_photo_to_inspectable_set_and_exhausted_cover(self):
         with TemporaryDirectory() as temp:
             root = Path(temp)

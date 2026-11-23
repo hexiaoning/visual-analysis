@@ -143,3 +143,41 @@ class BlockMeanCamera:
             moves += available & (np.cumsum(available, axis=1, dtype=np.int64) <= remaining[:, None])
             rows[ids] = values + direction * moves
         return self.image(rows, obs.shape)
+
+    def project_smooth(self, observation, proposal):
+        """Fit a smooth additive color field, then enforce the exact RGB8 block sums."""
+        import cv2
+
+        obs = _rgb8(observation)
+        proposal = _rgb8(proposal)
+        h, w = obs.shape[:2]
+        if proposal.shape != (h * self.scale, w * self.scale, 3):
+            raise ValueError("Proposal dimensions do not match observation and scale")
+        if self.contains(obs, proposal):
+            return proposal.copy()
+        lower, upper = self.bounds(obs)
+        if np.any(lower > upper):
+            raise ValueError("Observation has no RGB8 preimage under this camera")
+
+        n = self.scale ** 2
+        lower_mean, upper_mean = lower / n, upper / n
+        # Aim just inside the quantizer bin so rounding the smooth result will
+        # usually require little or no correction from the exact integer solver.
+        margin = np.minimum(.25, (upper_mean - lower_mean) * .25)
+        inner_low = (lower_mean + margin).astype(np.float32)
+        inner_high = (upper_mean - margin).astype(np.float32)
+        field = np.zeros(obs.shape, dtype=np.float32)
+        original = proposal.astype(np.float32)
+        corrected = original
+        for _ in range(64):
+            measured = cv2.resize(corrected, (w, h), interpolation=cv2.INTER_AREA)
+            residual = np.clip(measured, inner_low, inner_high) - measured
+            if np.max(np.abs(residual)) <= .025:
+                break
+            field += residual
+            smooth = cv2.resize(field, (proposal.shape[1], proposal.shape[0]),
+                                interpolation=cv2.INTER_LINEAR)
+            corrected = np.clip(original + smooth, 0, 255)
+
+        rounded = np.floor(corrected + .5).astype(np.uint8)
+        return self.project(obs, rounded)
