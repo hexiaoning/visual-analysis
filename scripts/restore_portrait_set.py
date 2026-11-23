@@ -13,6 +13,7 @@ import json
 import math
 import tempfile
 from pathlib import Path
+from fractions import Fraction
 
 import cv2
 import numpy as np
@@ -151,7 +152,7 @@ def generate(crop, models):
             yield name + "-" + direction, pixels
 
 
-def save_set(photo, out, models, aligned=False, sparse_assets=None):
+def save_set(photo, out, models, aligned=False, sparse_assets=None, sensor_camera=None):
     if out.exists():
         raise ValueError(f"Choose a new output directory: {out}")
     raw = photo.read_bytes()
@@ -175,6 +176,10 @@ def save_set(photo, out, models, aligned=False, sparse_assets=None):
     with tempfile.TemporaryDirectory(dir=out.parent) as tmp:
         stage = Path(tmp) / "set"
         stage.mkdir()
+        sensor = None
+        if sensor_camera is not None:
+            from explore_portrait_preimage import CameraPreviews
+            sensor = CameraPreviews(stage / "sensor-preimage", sensor_camera, image, alignment)
         def branches():
             yield from generate(crop, models)
             if sparse_assets is not None:
@@ -185,6 +190,8 @@ def save_set(photo, out, models, aligned=False, sparse_assets=None):
                 yield from SparsePortraitPrior(*sparse_assets).generate(crop).items()
 
         for branch, pixels in branches():
+            if sensor is not None:
+                sensor.add(branch, pixels)
             key = hashlib.sha256(pixels.tobytes()).hexdigest()
             if key in seen:
                 seen[key]["branches"].append(branch)
@@ -200,6 +207,10 @@ def save_set(photo, out, models, aligned=False, sparse_assets=None):
                    "coarse_rgb_rmse_255": float(np.sqrt(np.mean((small - coarse) ** 2)))}
             report["candidates"].append(row)
             seen[key] = row
+        if sensor is not None:
+            sensor.finish()
+            report["sensor_preimage"] = "sensor-preimage/set.json"
+            report["sensor_preview_count"] = len(sensor.seen)
         (stage / "manifest.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
         stage.rename(out)
     return report
@@ -212,9 +223,22 @@ if __name__ == "__main__":
     parser.add_argument("--models", type=Path, required=True,
                         help="Directory containing the offline SCRFD, PCFlow and GFPGAN ONNX models.")
     parser.add_argument("--aligned", action="store_true", help="Input is already an aligned square face.")
+    parser.add_argument("--sensor-scale", type=int, help="Also explore an integer block-average camera at this upscale factor.")
+    parser.add_argument("--sensor-gain", type=Fraction, help="Rational exposure gain of the block-average camera (default 1).")
+    parser.add_argument("--sensor-offset", type=int, help="Integer channel offset of this camera (default 0).")
     parser.add_argument("--sparse-prior", type=Path, nargs=3,
                         metavar=("SWINIR_DIR", "DICFACE_DIR", "DICFACE_WEIGHTS"),
                         help="Include DiffBIR SwinIR plus full and sparse DicFace detail codes.")
     args = parser.parse_args()
-    report = save_set(args.photo, args.out, args.models, args.aligned, args.sparse_prior)
+    camera = None
+    if args.sensor_scale is not None:
+        from portrait_preimage import BlockMeanCamera
+        camera = BlockMeanCamera(args.sensor_scale, args.sensor_gain if args.sensor_gain is not None else 1,
+                                 args.sensor_offset or 0)
+    elif args.sensor_gain is not None or args.sensor_offset is not None:
+        parser.error("Exposure parameters require --sensor-scale.")
+    report = save_set(args.photo, args.out, args.models, args.aligned, args.sparse_prior, camera)
     print(f"{len(report['candidates'])} distinct portraits saved to {args.out}")
+    if camera is not None:
+        print(f"{report['sensor_preview_count']} camera-consistent previews; set description at "
+              f"{args.out / report['sensor_preimage']}")
