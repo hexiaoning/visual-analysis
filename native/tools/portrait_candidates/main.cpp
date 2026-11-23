@@ -1,4 +1,5 @@
 #include "portrait_selection.h"
+#include "exposure_normalizer.h"
 
 #include <algorithm>
 #include <chrono>
@@ -38,6 +39,21 @@ void write_image(const fs::path &output, const cv::Mat &image) {
     stream.close();
     if (!stream)
         throw std::runtime_error("Failed to save candidate PNG");
+}
+
+void publish_exposure(const fs::path &output, const cv::Mat &image) {
+    const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    fs::path pending = output;
+    pending += ".tmp-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(timestamp);
+    try {
+        write_image(pending, image);
+        if (!MoveFileExW(pending.c_str(), output.c_str(), 0))
+            throw std::runtime_error("Could not publish exposure output as a new file");
+    } catch (...) {
+        std::error_code ignored;
+        fs::remove(pending, ignored);
+        throw;
+    }
 }
 
 const char *route_name(Route name) { return name == Route::codeformer ? "codeformer" : "amd"; }
@@ -158,12 +174,27 @@ int wmain(int argc, wchar_t **argv) {
         constexpr auto usage =
             "PortraitCandidates.exe [--fit-duplicate | --texture-guard model.json] landmarks.onnx "
             "source.png "
-            "codeformer.png amd.png output-directory [source2.png codeformer2.png amd2.png output2 ...]";
+            "codeformer.png amd.png output-directory [source2.png codeformer2.png amd2.png output2 ...]\n"
+            "PortraitCandidates.exe --normalize-exposure model.json source.png output.png";
         if (argc == 2 && std::wstring_view(argv[1]) == L"--help") {
             std::cout << usage << '\n';
             return 0;
         }
         const std::wstring_view option = argc > 1 ? argv[1] : L"";
+        if (option == L"--normalize-exposure") {
+            if (argc != 5)
+                throw std::invalid_argument(usage);
+            const fs::path output(argv[4]);
+            if (fs::exists(output))
+                throw std::invalid_argument("Exposure output must be a new path");
+            cv::setNumThreads(1);
+            const auto result = portrait_selection::normalize_exposure(read_image(argv[3]), argv[2]);
+            publish_exposure(output, result.image);
+            std::cout << Json{{"applied", result.applied}, {"gain_bgr", result.gain_bgr},
+                              {"black_level", result.black_level}, {"evidence", result.evidence},
+                              {"recovered_grid", result.recovered_grid}}.dump() << '\n';
+            return 0;
+        }
         const bool protect = option == L"--texture-guard";
         const bool fit_duplicate = protect || option == L"--fit-duplicate";
         const int model_arg = protect ? 3 : (fit_duplicate ? 2 : 1);

@@ -33,6 +33,18 @@ $exe = Join-Path $build.OutputDirectory 'PortraitCandidates.exe'
 
 标准输出每行是一个新结果目录的 UTF-8 绝对路径。批量处理可在同一命令后重复追加四个参数 `source codeformer amd output-directory`。同一批复用关键点模型会话。每个成功样本独立发布，重试会生成单独的结果目录。
 
+## 单张模糊图的曝光校正
+
+`--normalize-exposure` 在生成候选之前运行，输入为一张已对齐的 512×512 BGR 图像。参数文件由公开配对数据的离线训练生成。此模式使用 C++ 和 OpenCV 估计亮度及色偏，需要提供研究参数文件，无需加载关键点模型。示例将得到一张新路径下的 PNG，可送入原生人像生成器。
+
+```powershell
+& $exe --normalize-exposure .\exposure-model.json .\source.png .\corrected.png
+```
+
+标准输出为一行 JSON，包含 `applied`、BGR 三通道 `gain_bgr`、`black_level`、是否触发校正的打分 `evidence`，以及 `recovered_grid`。采样网格未检出时为 0，低于校正阈值时输出像素与输入相同。
+
+参数文件包含 99 项的 `center`、`scale` 和每行 99 项的 `centers`。设特征长度为 99、基函数个数为 K，`weights` 为 (100+K)×4 数组，`classifier` 长度为 100+K，`gate_limit` 为标量。设计向量依次为常数 1、中心化后的特征、RBF 响应。研究参数由 CelebA 配对拟合，保存于本机评测目录。公开样本及由其拟合的本轮参数用于研究评测。[评测与限制](../../../docs/portrait-native-paired-evaluation.md) · [CelebA 数据使用协议](https://mmlab.ie.cuhk.edu.hk/projects/CelebA.html#agreement)
+
 ## 选择规则和输出
 
 - 默认保留 CodeFormer。只有 AMD 的回放误差不超过 CodeFormer 加 0.007，清晰度至少为 CodeFormer 的 96%，且扣除整体相似变换后至少一个五官区域的平均位移大于 3 像素，才同时展示 AMD。
