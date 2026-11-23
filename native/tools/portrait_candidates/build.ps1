@@ -40,7 +40,7 @@ $Arguments = @(
     "/I$MsvcDirectory\include", "/I$SdkHeaders\ucrt", "/I$SdkHeaders\um", "/I$SdkHeaders\shared",
     "/Fo$Objects\", "/Fe$Output\PortraitCandidates.exe",
     (Join-Path $PSScriptRoot "main.cpp"), (Join-Path $PSScriptRoot "portrait_selection.cpp"),
-    (Join-Path $PSScriptRoot "duplicate_consensus.cpp"),
+    (Join-Path $PSScriptRoot "duplicate_consensus.cpp"), (Join-Path $PSScriptRoot "texture_guard.cpp"),
     "/link", "/subsystem:console", "/incremental:no", "/libpath:$MsvcDirectory\lib\x64",
     "/libpath:$SdkLib\ucrt\x64", "/libpath:$SdkLib\um\x64",
     (Join-Path $OrtNative "onnxruntime.lib"), $World[0].FullName

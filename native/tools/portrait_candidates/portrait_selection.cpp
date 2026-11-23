@@ -117,7 +117,8 @@ class Selector::Model {
 Selector::Selector(const std::filesystem::path &model) : model_(std::make_unique<Model>(model)) {}
 Selector::~Selector() = default;
 
-Result Selector::select(const cv::Mat &source, const cv::Mat &codeformer, const cv::Mat &amd) {
+Result Selector::select(const cv::Mat &source, const cv::Mat &codeformer, const cv::Mat &amd,
+                        const TextureGuard *guard) {
     for (const cv::Mat *im : {&source, &codeformer, &amd}) {
         if (im->type() != CV_8UC3 || im->size() != cv::Size(512, 512))
             throw std::invalid_argument("Expected an aligned 512x512 CV_8UC3 portrait");
@@ -145,6 +146,15 @@ Result Selector::select(const cv::Mat &source, const cv::Mat &codeformer, const 
         r.amd_fraction = portrait_consensus::amd_fraction(source, codeformer, amd);
         if (*r.amd_fraction > .5)
             r.fitted_display = {Route::amd};
+    }
+    if (guard) {
+        r.texture_cutoff = guard->cutoff;
+        r.guarded_display = r.original_display;
+        if (r.fitted_display != r.original_display) {
+            r.replacement_texture_score = guard->score(amd);
+            if (*r.replacement_texture_score <= guard->cutoff)
+                r.guarded_display = r.fitted_display;
+        }
     }
     return r;
 }

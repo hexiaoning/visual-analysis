@@ -1,6 +1,8 @@
 #include "portrait_selection.h"
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -42,6 +44,28 @@ const char *route_name(Route name) { return name == Route::codeformer ? "codefor
 
 using Json = nlohmann::ordered_json;
 
+portrait_selection::TextureGuard read_guard(const fs::path &path) {
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream)
+        throw std::runtime_error("Cannot open texture guard model");
+    const auto json = Json::parse(stream);
+    portrait_selection::TextureGuard guard{};
+    const auto &coefficients = json.at("coefficients");
+    if (json.at("schema") != "portrait-texture-linear-v1" ||
+        json.at("feature_count") != guard.feature_count || !coefficients.is_array() ||
+        coefficients.size() != guard.feature_count)
+        throw std::invalid_argument("Expected a 96-feature portrait texture model, version 1");
+    const auto number = [](const Json &v) {
+        if (!v.is_number() || !std::isfinite(v.get<double>()))
+            throw std::invalid_argument("Invalid texture model coefficient");
+        return v.get<double>();
+    };
+    guard.bias = number(json.at("bias"));
+    guard.cutoff = number(json.at("cutoff"));
+    std::transform(coefficients.begin(), coefficients.end(), guard.coefficients.begin(), number);
+    return guard;
+}
+
 Json routes(const std::vector<Route> &selection) {
     auto names = Json::array();
     for (Route route : selection) {
@@ -64,20 +88,25 @@ void write_result(const fs::path &file, const Result &r, bool fit_duplicate, con
     for (size_t i = 0; i < regions.size(); ++i) {
         shifts[regions[i]] = r.regional_shift[i];
     }
-    Json report{{"selected", routes(r.selected(fit_duplicate))},
-                {"previous_rule_selected", routes(r.original_display)},
-                {"fitted_duplicate_rule_selected", routes(r.fitted_display)},
-                {"fit_duplicate_enabled", fit_duplicate},
-                {"input_clarity", r.input_clarity},
-                {"relative_clarity", r.relative_clarity},
-                {"codeformer", evidence(r.codeformer)},
-                {"amd", evidence(r.amd)},
-                {"regional_shift_px", shifts},
-                {"replay_supported", r.replay_supported},
-                {"duplicate_eligible", r.duplicate_eligible},
-                {"amd_fraction", nullable(r.amd_fraction)},
-                {"observed_luminance_png", "observed-luminance.png"},
-                {"outputs", outputs}};
+    Json report{
+        {"selected", routes(r.selected(fit_duplicate))},
+        {"previous_rule_selected", routes(r.original_display)},
+        {"fitted_duplicate_rule_selected", routes(r.fitted_display)},
+        {"fit_duplicate_enabled", fit_duplicate},
+        {"mode", r.guarded_display ? "texture-guard" : (fit_duplicate ? "fit-duplicate" : "default")},
+        {"texture_guard_selected", r.guarded_display ? routes(*r.guarded_display) : Json(nullptr)},
+        {"replacement_texture_score", nullable(r.replacement_texture_score)},
+        {"texture_cutoff", nullable(r.texture_cutoff)},
+        {"input_clarity", r.input_clarity},
+        {"relative_clarity", r.relative_clarity},
+        {"codeformer", evidence(r.codeformer)},
+        {"amd", evidence(r.amd)},
+        {"regional_shift_px", shifts},
+        {"replay_supported", r.replay_supported},
+        {"duplicate_eligible", r.duplicate_eligible},
+        {"amd_fraction", nullable(r.amd_fraction)},
+        {"observed_luminance_png", "observed-luminance.png"},
+        {"outputs", outputs}};
     std::ofstream stream(file, std::ios::binary);
     stream << report.dump(2) << '\n';
     stream.close();
@@ -127,24 +156,28 @@ fs::path publish(const fs::path &directory, const cv::Mat &cf, const cv::Mat &am
 int wmain(int argc, wchar_t **argv) {
     try {
         constexpr auto usage =
-            "PortraitCandidates.exe [--fit-duplicate] landmarks.onnx source.png "
+            "PortraitCandidates.exe [--fit-duplicate | --texture-guard model.json] landmarks.onnx "
+            "source.png "
             "codeformer.png amd.png output-directory [source2.png codeformer2.png amd2.png output2 ...]";
         if (argc == 2 && std::wstring_view(argv[1]) == L"--help") {
             std::cout << usage << '\n';
             return 0;
         }
-        const bool fit_duplicate = argc > 1 && std::wstring_view(argv[1]) == L"--fit-duplicate";
-        const int model_arg = fit_duplicate ? 2 : 1;
+        const std::wstring_view option = argc > 1 ? argv[1] : L"";
+        const bool protect = option == L"--texture-guard";
+        const bool fit_duplicate = protect || option == L"--fit-duplicate";
+        const int model_arg = protect ? 3 : (fit_duplicate ? 2 : 1);
         const int first_sample = model_arg + 1;
         if (argc - first_sample < 4 || (argc - first_sample) % 4 != 0)
             throw std::invalid_argument(usage);
         cv::setNumThreads(1);
+        const auto guard = protect ? std::optional(read_guard(argv[2])) : std::nullopt;
         portrait_selection::Selector select(argv[model_arg]);
         for (int i = first_sample; i < argc; i += 4) {
             const auto source = read_image(argv[i]);
             const auto cf = read_image(argv[i + 1]);
             const auto amd = read_image(argv[i + 2]);
-            const Result result = select.select(source, cf, amd);
+            const Result result = select.select(source, cf, amd, guard ? &*guard : nullptr);
             const fs::path path = fs::absolute(publish(argv[i + 3], cf, amd, result, fit_duplicate));
             const auto utf8 = path.u8string();
             std::cout.write(reinterpret_cast<const char *>(utf8.data()), utf8.size()) << std::endl;

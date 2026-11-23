@@ -50,8 +50,10 @@ function Test-Pixels([string]$File, [int]$Side, [string]$Expected) {
 $App = (Resolve-Path -LiteralPath $Executable).ProviderPath
 $Graph = (Resolve-Path -LiteralPath $Model).ProviderPath
 $Fixtures = (Resolve-Path -LiteralPath $FixtureDirectory).ProviderPath
-$Cases = (Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $PSScriptRoot "public-regression.json") |
-    ConvertFrom-Json).cases
+$Reference = (Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $PSScriptRoot "public-regression.json") |
+    ConvertFrom-Json)
+$Cases = $Reference.cases
+$TextureModel = Join-Path $PSScriptRoot "texture-guard-v1.json"
 $TempRoot = (Resolve-Path -LiteralPath ([IO.Path]::GetTempPath())).ProviderPath
 $OutputRoot = Join-Path $TempRoot ("portrait-candidates-" + [guid]::NewGuid().ToString("N"))
 New-Item -Path $OutputRoot -ItemType Directory -ErrorAction Stop | Out-Null
@@ -64,9 +66,11 @@ try {
             Test-Pixels $png 512 $Case.input_hashes.$route
         }
     }
-    foreach ($fit in $false, $true) {
+    foreach ($mode in "default", "fit-duplicate", "texture-guard") {
+        $fit = $mode -ne "default"
         $arguments = @()
-        if ($fit) { $arguments += "--fit-duplicate" }
+        if ($mode -eq "fit-duplicate") { $arguments += "--fit-duplicate" }
+        if ($mode -eq "texture-guard") { $arguments += @("--texture-guard", $TextureModel) }
         $arguments += $Graph
         foreach ($Case in $Cases) {
             foreach ($route in "source", "codeformer", "amd") {
@@ -82,12 +86,26 @@ try {
             $Case = $Cases[$i]
             $folder = $folders[$i]
             $report = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $folder "selection.json") | ConvertFrom-Json
-            $expected = if ($fit) { $Case.fitted } else { $Case.default }
-            if (($report.previous_rule_selected -join ",") -cne ($Case.default -join ",") -or
+            $expected = $Case.default
+            if ($mode -eq "fit-duplicate") { $expected = $Case.fitted }
+            if ($mode -eq "texture-guard") {
+                $expected = $Case.guarded
+                $score = $Case.replacement_texture_score
+                if (($report.texture_guard_selected -join ",") -cne ($expected -join ",") -or
+                    $report.texture_cutoff -ne $Reference.texture_cutoff -or
+                    ($null -eq $report.replacement_texture_score) -ne ($null -eq $score) -or
+                    ($null -ne $score -and [Math]::Abs($report.replacement_texture_score - $score) -gt 0.00001)) {
+                    throw "Unexpected texture guard result for $($Case.id)."
+                }
+            } elseif ($null -ne $report.texture_guard_selected -or $null -ne $report.texture_cutoff -or
+                      $null -ne $report.replacement_texture_score) {
+                throw "Unexpected texture result without a guard model for $($Case.id)."
+            }
+            if ($report.mode -cne $mode -or ($report.previous_rule_selected -join ",") -cne ($Case.default -join ",") -or
                 ($report.fitted_duplicate_rule_selected -join ",") -cne ($Case.fitted -join ",") -or
                 $report.fit_duplicate_enabled -ne $fit -or ($report.selected -join ",") -cne ($expected -join ",") -or
                 ($report.outputs.route -join ",") -cne ($expected -join ",")) {
-                throw "Unexpected selection for sample $($Case.id), fit=$fit."
+                throw "Unexpected selection for sample $($Case.id), mode=$mode."
             }
             Test-Pixels (Join-Path $folder $report.observed_luminance_png) 128 $Case.observed_hash
             foreach ($item in $report.outputs) {
@@ -95,7 +113,7 @@ try {
                 Test-Pixels (Join-Path $folder $item.png) 512 $Case.input_hashes.$route
                 Test-Pixels (Join-Path $folder $item.replay_luminance_png) 128 $Case.replay_hashes.$route
             }
-            Write-Output "$($Case.id) fit=$fit selected=$($expected -join ',')"
+            Write-Output "$($Case.id) mode=$mode selected=$($expected -join ',')"
         }
     }
 } finally {

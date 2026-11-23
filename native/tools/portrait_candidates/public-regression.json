@@ -18,7 +18,11 @@
       "replay_hashes": {
         "amd": "c8ac6b175811c108a3d9a84679a0ebe509919930fda481013aa6a78bf048f9b9",
         "codeformer": "a4623361d7e80af06df915a7058f1af709d277878ab824fcc398bd32cea71ba6"
-      }
+      },
+      "guarded": [
+        "codeformer"
+      ],
+      "replacement_texture_score": 0.7390060754155277
     },
     {
       "id": "2762",
@@ -39,7 +43,12 @@
       "replay_hashes": {
         "codeformer": "da68f9f08a3fdbfab633af784ed54c541c4d4588073770c76c85ea051547d4e3",
         "amd": "66df55b434281cecc00b04f41fe1f1c5f7d3c827fdda1e2109c10b21104e79ef"
-      }
+      },
+      "guarded": [
+        "codeformer",
+        "amd"
+      ],
+      "replacement_texture_score": null
     },
     {
       "id": "739",
@@ -57,7 +66,58 @@
       "observed_hash": "9539eefbf62b2862dd28469067f1e85c62734acd434ca53b0951a2237c507297",
       "replay_hashes": {
         "codeformer": "05ad0e12d3af1ed99abf46efdd6ed5c05851e8f8604862e6e5268d4f37a58c0f"
+      },
+      "guarded": [
+        "codeformer"
+      ],
+      "replacement_texture_score": null
+    },
+    {
+      "id": "1003",
+      "default": [
+        "codeformer"
+      ],
+      "fitted": [
+        "amd"
+      ],
+      "guarded": [
+        "codeformer"
+      ],
+      "replacement_texture_score": 0.6526281329163904,
+      "input_hashes": {
+        "source": "2edb4c62d99b05288c8b221636bc156f89383ce9afa57614fe97d99a3092c4e7",
+        "codeformer": "9766f42c614b8e21060fd8ed065b1790657ddd8690120d0b1aecd26a6db2fa71",
+        "amd": "68493b5cbc5aeaac852b5dd9dc1b1940a2151f455345dfb63e37d461049b693a"
+      },
+      "observed_hash": "f94837840fe27a9b9e90a08eb03230986e3987b9592a2207eb16f8d9c3c4e954",
+      "replay_hashes": {
+        "codeformer": "3daf3cabb04acbef3663ea0e304bc8c537183f053ea70f526e09ae6912fc38c8",
+        "amd": "3f6de4c2abb74e4d4d0444a99e554102daeb89407c4a5d6800814d0a857832ac"
+      }
+    },
+    {
+      "id": "1432",
+      "default": [
+        "codeformer"
+      ],
+      "fitted": [
+        "amd"
+      ],
+      "guarded": [
+        "amd"
+      ],
+      "replacement_texture_score": 0.40405039492399597,
+      "input_hashes": {
+        "source": "b7536a7d7fa8a9eb85c3cfebfa1c78abee846ac5b1517001239894e5234145cb",
+        "codeformer": "1dea30dfd770e05b46729333e7bd2ce70ee93bb80310ae16a41aa319b800ef3e",
+        "amd": "e6cb23dec141ee59da8993a5f25d8eb7f41966d60180122a79792307fb97199a"
+      },
+      "observed_hash": "a3a14b8add31265eb4bab0c1b5c69ba805308e97cca76547ebbfadcd1ed28ab2",
+      "replay_hashes": {
+        "codeformer": "69c6faff20806390f734b3f0ac881db4958f9a0f5a7249cc2a09c99eebc145c8",
+        "amd": "4eaa18dd5723624466242a0ae3071ec116356d3cc06a540427733c72764a169b"
       }
     }
-  ]
+  ],
+  "texture_cutoff": 0.5641734981312992
 }
