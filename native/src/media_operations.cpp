@@ -1,6 +1,7 @@
 #include "media_operations.h"
 #include "local_images.h"
 #include "people.h"
+#include "person_tracks.h"
 #include "portrait_video.h"
 
 #include <algorithm>
@@ -57,10 +58,10 @@ std::set<fs::path> sources(const Json& input) {
     return result;
 }
 
-void sample(const fs::path& path,const FrameVisitor& visitor,int interval,const std::atomic<bool>& cancel, int firstFrame=0) {
+void sample(const fs::path& path,const FrameVisitor& visitor,int interval,const std::atomic<bool>& cancel,int firstFrame=0,const FrameSelector& select={}) {
     if(cancel) return;
     if(isImage(path)) visitor(readImage(path),0,-1.);
-    else visitVideo(path,visitor,interval,cancel,firstFrame);
+    else visitVideo(path,visitor,interval,cancel,firstFrame,select);
 }
 
 std::optional<fs::path> outputDirectory(const Json& request) {
@@ -74,6 +75,58 @@ std::optional<fs::path> outputDirectory(const Json& request) {
 Json hit(const fs::path& path,int frame,double seconds,cv::Rect box,double score,const std::string& method) {
     return {{"source",pathText(path)},{"frame_index",frame},{"seconds",seconds>=0?Json(seconds):Json(nullptr)},
             {"bbox",rectJson(box)},{"score",score},{"method",method}};
+}
+
+using TrackHits = std::map<size_t,Json>;
+
+void keepBest(TrackHits& hits,size_t track,Json candidate) {
+    candidate["track_id"]=track;
+    auto [best,inserted]=hits.try_emplace(track,std::move(candidate));
+    if(!inserted && candidate.at("score")>best->second.at("score")) best->second=std::move(candidate);
+}
+
+Feature clothingAppearance(const cv::Mat& frame,cv::Rect box) {
+    const cv::Rect shirt(box.x+box.width/5,box.y+box.height/6,
+        std::max(1,box.width*3/5),std::max(1,box.height/2));
+    cv::Mat small,hsv;
+    cv::resize(frame(shirt),small,{12,16},0,0,cv::INTER_AREA);
+    cv::cvtColor(small,hsv,cv::COLOR_BGR2HSV);
+    Feature histogram(13);
+    for(const auto& pixel:cv::Mat_<cv::Vec3b>(hsv)) {
+        const auto bin=pixel[2]<48?10:pixel[1]>60?pixel[0]/18:pixel[2]<175?11:12;
+        ++histogram[bin];
+    }
+    return normalized(std::move(histogram));
+}
+
+void appendTrackHits(Json& results,TrackHits& tracks,size_t limit) {
+    for(auto& [id,candidate]:tracks) {
+        if(results.size()>=limit) break;
+        results.push_back(std::move(candidate));
+    }
+}
+
+void savePersonScreenshots(const fs::path& source,const fs::path& output,TrackHits& tracks,
+                           const std::atomic<bool>& cancel,int& saved,size_t limit) {
+    std::map<int,std::vector<Json*>> frames;
+    size_t selected=0;
+    for(auto& [id,candidate]:tracks) {
+        if(selected>=limit) break;
+        frames[candidate.at("frame_index").get<int>()].push_back(&candidate);
+        ++selected;
+    }
+    if(frames.empty() || cancel) return;
+    sample(source,[&](const cv::Mat& pixels,int index,double) {
+        for(auto* candidate:frames.at(index)) {
+            if(cancel) return false;
+            const auto box=readRect(candidate->at("bbox"))&cv::Rect(0,0,pixels.cols,pixels.rows);
+            if(box.empty()) continue;
+            const auto path=output/(L"人-"+std::to_wstring(++saved)+L".png");
+            writePng(path,pixels(box));
+            (*candidate)["image"]=pathText(path);
+        }
+        return !cancel && index<frames.rbegin()->first;
+    },1,cancel,frames.begin()->first,[&](int index){return frames.contains(index);});
 }
 
 void rank(Json& results,size_t limit=500) {
@@ -194,26 +247,44 @@ Json visualSearch(const Json& request,const fs::path& models,const std::atomic<b
     int processed=0;
     for(const auto& source:sources(request)) {
         if(cancel) break;
+        PersonTracks tracks(.50);
+        TrackHits representatives;
         try {sample(source,[&](const cv::Mat& pixels,int frame,double seconds){
-            const auto prior=matches.size();
+            int foundCount=0;
             if(face) {
-                for(const auto& found:engine->faces(pixels)) {
+                const auto faces=engine->faces(pixels);
+                const bool video=seconds>=0;
+                std::vector<PersonObservation> observations;
+                if(video) {
+                    observations.reserve(faces.size());
+                    for(const auto& observation:faces) observations.push_back({observation.box,observation.feature});
+                }
+                const auto ids=video?tracks.update(observations,seconds):std::vector<size_t>{};
+                for(size_t i=0;i<faces.size();++i) {
+                    const auto& found=faces[i];
                     const auto score=similarity(target,found.feature);
-                    if(score>=threshold) matches.push_back(hit(source,frame,seconds,found.box,score,"人脸特征相似候选"));
+                    if(score<threshold) continue;
+                    ++foundCount;
+                    auto candidate=hit(source,frame,seconds,found.box,score,"人脸特征相似候选");
+                    if(video) keepBest(representatives,ids[i],std::move(candidate));
+                    else matches.push_back(std::move(candidate));
                 }
             } else {
                 const auto match=appearance->find(pixels);
-                if(match.score>=threshold && !match.box.empty()) matches.push_back(hit(source,frame,seconds,match.box,match.score,match.method));
+                if(match.score>=threshold && !match.box.empty()) {
+                    foundCount=1;
+                    matches.push_back(hit(source,frame,seconds,match.box,match.score,match.method));
+                }
             }
             ++processed;
-            if(preview && preview->refreshDue() && seconds>=0 && !cancel) {
-                preview->update(pixels,processed,static_cast<int>(matches.size()-prior));
-            }
+            if(preview && preview->refreshDue() && seconds>=0 && !cancel) preview->update(pixels,processed,foundCount);
             if(matches.size()>1000) rank(matches);
             return !cancel;
         },request.value("step",1),cancel);} catch(const std::exception& error) {
             failures.push_back({{"source",pathText(source)},{"error",error.what()}});
         }
+        appendTrackHits(matches,representatives,matches.size()+representatives.size());
+        if(matches.size()>1000) rank(matches);
     }
     rank(matches);
     return {{"hits",matches},{"failures",failures},{"cancelled",cancel.load()}};
@@ -243,36 +314,59 @@ Json objectScan(const Json& request,const fs::path& models,const std::atomic<boo
                 {"output",cancel.load()?Json(nullptr):Json(pathText(target))}};
     }
     const auto output=outputDirectory(request);
-    int n=0;
+    int n=0,savedPeople=0;
+    constexpr size_t resultLimit=2000;
     Json results=Json::array(),failures=Json::array();
     for(const auto& source:sources(request)) {
         if(cancel) break;
-        try {sample(source,[&](const cv::Mat& frame,int index,double seconds){
-            if(preview && !preview->wait(cancel)) return false;
-            ++n;
-            auto detections=detector.detect(frame,threshold,people,vehicles);
-            for(size_t i=0;i<detections.size();++i) {
-                if(cancel) return false;
-                const auto& found=detections[i];
-                auto item=hit(source,index,seconds,found.box,found.score,objectName(found.category));
-                if(output) {
-                    const auto path=*output/(std::to_wstring(n)+L"-"+std::to_wstring(i+1)+L".png");
-                    writePng(path,frame(found.box));
-                    item["image"]=pathText(path);
+        const bool video=isVideo(source);
+        PersonTracks tracks(.40);
+        TrackHits representatives;
+        try {
+            sample(source,[&](const cv::Mat& frame,int index,double seconds){
+                if(preview && !preview->wait(cancel)) return false;
+                ++n;
+                auto detections=detector.detect(frame,threshold,people,vehicles);
+                std::vector<PersonObservation> observations;
+                if(video) {
+                    for(const auto& found:detections) {
+                        if(found.category==0) observations.push_back({found.box,clothingAppearance(frame,found.box)});
+                    }
                 }
-                if(results.size()<2000) results.push_back(std::move(item));
-            }
-            const bool saveMarked=output && request.value("marked_frames",false);
-            const bool refresh=preview && preview->refreshDue();
-            if(refresh || saveMarked) {
-                const auto marked=markObjects(frame,detections);
-                if(refresh) preview->update(marked,n,static_cast<int>(detections.size()));
-                if(saveMarked) writePng(*output/(std::to_wstring(n)+L"-marked.png"),marked);
-            }
-            return !cancel;
-        },request.value("step",1),cancel);} catch(const std::exception& error) {
+                const auto personIds=video?tracks.update(observations,seconds):std::vector<size_t>{};
+                size_t person=0;
+                for(size_t i=0;i<detections.size();++i) {
+                    if(cancel) return false;
+                    const auto& found=detections[i];
+                    auto item=hit(source,index,seconds,found.box,found.score,objectName(found.category));
+                    if(video && found.category==0) {
+                        const auto track=personIds[person++];
+                        if(representatives.size()<resultLimit || representatives.contains(track)) {
+                            keepBest(representatives,track,std::move(item));
+                        }
+                        continue;
+                    }
+                    if(output) {
+                        const auto path=*output/(std::to_wstring(n)+L"-"+std::to_wstring(i+1)+L".png");
+                        writePng(path,frame(found.box));
+                        item["image"]=pathText(path);
+                    }
+                    if(results.size()<resultLimit) results.push_back(std::move(item));
+                }
+                const bool saveMarked=output && request.value("marked_frames",false);
+                const bool refresh=preview && preview->refreshDue();
+                if(refresh || saveMarked) {
+                    const auto marked=markObjects(frame,detections);
+                    if(refresh) preview->update(marked,n,static_cast<int>(detections.size()));
+                    if(saveMarked) writePng(*output/(std::to_wstring(n)+L"-marked.png"),marked);
+                }
+                return !cancel;
+            },request.value("step",1),cancel);
+            if(output) savePersonScreenshots(source,*output,representatives,cancel,savedPeople,resultLimit-results.size());
+        } catch(const std::exception& error) {
             failures.push_back({{"source",pathText(source)},{"error",error.what()}});
         }
+        appendTrackHits(results,representatives,resultLimit);
     }
     if(output) writeJson(*output/L"检测结果.json",results);
     return {{"frames",n},{"hits",results},{"failures",failures},{"cancelled",cancel.load()}};
@@ -536,19 +630,51 @@ Json semanticSearch(const Json& request,const fs::path& models,const std::atomic
                 batch.commit();
                 ++indexed;
             }
-            const auto entries=index.query("SELECT frame_index,seconds,bbox,features FROM objects WHERE source_id=? AND category=?",
+            const auto entries=index.query(
+                "SELECT frame_index,seconds,bbox,features FROM objects WHERE source_id=? AND category=? ORDER BY frame_index,rowid",
                 {id,query.person?"person":"vehicle"});
+            const bool groupPeople=query.person && isVideo(source);
+            PersonTracks tracks(.72);
+            TrackHits representatives;
+            std::vector<PersonObservation> observations;
+            std::vector<std::optional<Json>> candidates;
+            int currentFrame=-1;
+            double currentTime=0.;
+            const auto completeFrame=[&] {
+                if(observations.empty()) return;
+                const auto ids=tracks.update(observations,currentTime);
+                for(size_t i=0;i<ids.size();++i) {
+                    if(candidates[i]) keepBest(representatives,ids[i],std::move(*candidates[i]));
+                }
+                observations.clear();
+                candidates.clear();
+            };
             for(const auto& item:entries) {
                 if(cancel) break;
                 const auto feature=readFeature(item.at("features"),4*(512+colorNames.size()));
                 if(feature.empty()) continue;
+                const auto frame=item["frame_index"].get<int>();
+                const auto seconds=item["seconds"].is_number()?item["seconds"].get<double>():-1.;
+                const auto box=readRect(Json::parse(item["bbox"].get<std::string>()));
                 const auto score=semanticScore(query,feature);
-                if(score && *score>=threshold) {
-                    results.push_back(hit(source,item["frame_index"].get<int>(),item["seconds"].is_number()?item["seconds"].get<double>():-1,
-                        readRect(Json::parse(item["bbox"].get<std::string>())),*score,"中文语义与区域颜色"));
+                std::optional<Json> candidate;
+                if(score && *score>=threshold) candidate=hit(source,frame,seconds,box,*score,"中文语义与区域颜色");
+                if(groupPeople && seconds>=0.) {
+                    if(frame!=currentFrame) {
+                        completeFrame();
+                        currentFrame=frame;
+                        currentTime=seconds;
+                    }
+                    observations.push_back({box,Feature(feature.begin(),feature.begin()+512)});
+                    candidates.push_back(std::move(candidate));
+                } else if(candidate) {
+                    results.push_back(std::move(*candidate));
+                    if(results.size()>1000) rank(results);
                 }
-                if(results.size()>1000) rank(results);
             }
+            completeFrame();
+            appendTrackHits(results,representatives,results.size()+representatives.size());
+            if(results.size()>1000) rank(results);
         } catch(const std::exception& error) {failures.push_back({{"source",pathText(source)},{"error",error.what()}});}
     }
     rank(results);
@@ -580,7 +706,7 @@ Json exportHits(const Json& request,const std::atomic<bool>& cancel) {
                     }
                 }
                 return frame<frames.rbegin()->first && !cancel;
-            },1,cancel,frames.begin()->first);
+            },1,cancel,frames.begin()->first,[&](int index){return frames.contains(index);});
         } catch(const std::exception& error) {failures.push_back({{"source",pathText(source)},{"error",error.what()}});}
     }
     return {{"screenshots",count},{"output",pathText(*directory)},{"failed",failures},{"cancelled",cancel.load()}};
@@ -591,7 +717,26 @@ Json exportHits(const Json& request,const std::atomic<bool>& cancel) {
 Json mediaOperation(const std::string& action,const Json& request,const fs::path& models,const std::atomic<bool>& cancel,DetectionPreview* preview) {
     if(action=="visual.search") return visualSearch(request,models,cancel,preview);
     if(action=="objects.scan") return objectScan(request,models,cancel,preview);
-    if(action=="face.scan") return faceScan(request,models,cancel,preview);
+    if(action=="face.scan") {
+        auto result=faceScan(request,models,cancel,preview);
+        std::map<std::pair<std::string,std::string>,size_t> positions;
+        Json hits=Json::array();
+        for(auto& item:result.at("hits")) {
+            if(item.value("accepted",false) && !item.contains("camera") && item.at("seconds").is_number()) {
+                const auto key=std::pair{item.at("source").get<std::string>(),
+                    item.at("candidate").at("person_id").get<std::string>()};
+                const auto [position,inserted]=positions.try_emplace(key,hits.size());
+                if(!inserted) {
+                    auto& best=hits.at(position->second);
+                    if(item.at("score")>best.at("score")) best=std::move(item);
+                    continue;
+                }
+            }
+            hits.push_back(std::move(item));
+        }
+        result["hits"]=std::move(hits);
+        return result;
+    }
     if(action=="semantic.search") return semanticSearch(request,models,cancel,preview);
     if(action=="hits.export") return exportHits(request,cancel);
     throw std::invalid_argument("未知多媒体操作。");

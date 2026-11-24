@@ -19,8 +19,9 @@ void restorePortraitVideo(const std::filesystem::path& source, const std::filesy
                           const std::filesystem::path& models, VideoProgress& progress);
 
 using FrameVisitor = std::function<bool(const cv::Mat&, int, double)>;
+using FrameSelector = std::function<bool(int)>;
 int visitVideo(const std::filesystem::path& source, const FrameVisitor& visitor, int interval,
-               const std::atomic<bool>& cancel, int firstFrame=0);
+               const std::atomic<bool>& cancel, int firstFrame=0, const FrameSelector& select={});
 using FrameProcessor = std::function<std::pair<cv::Mat,int>(const cv::Mat&)>;
 void renderObjectVideo(const std::filesystem::path& source,const std::filesystem::path& target,
                        const FrameProcessor& transform,VideoProgress& progress);

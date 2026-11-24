@@ -308,7 +308,7 @@ void render(const fs::path& source,const fs::path& temporary,const FrameProcesso
 
 }
 
-int visitVideo(const fs::path& path,const FrameVisitor& visitor,int interval,const std::atomic<bool>& cancel,int firstFrame) {
+int visitVideo(const fs::path& path,const FrameVisitor& visitor,int interval,const std::atomic<bool>& cancel,int firstFrame,const FrameSelector& select) {
     if(interval<1) throw std::invalid_argument("抽帧间隔必须大于 0。");
     const auto source=localPath(path);
     if(!fs::is_regular_file(source)) throw std::invalid_argument("请选择本机视频。");
@@ -345,10 +345,12 @@ int visitVideo(const fs::path& path,const FrameVisitor& visitor,int interval,con
             auto seconds=timestamp==AV_NOPTS_VALUE ? -1. : (timestamp-sourceStart)*av_q2d(track->time_base);
             if(!std::isfinite(seconds) || seconds<0 || (previous && seconds<=*previous)) {
                 if(frameRate>0 && std::isfinite(frameRate)) seconds=previous ? *previous+1./frameRate : 0.;
-                else if(index%interval==0 && index>=firstFrame) throw std::runtime_error("视频缺少有效时间戳。");
+                else if(index%interval==0 && index>=firstFrame && (!select || select(index))) {
+                    throw std::runtime_error("视频缺少有效时间戳。");
+                }
             }
             if(seconds>=0 && (!previous || seconds>*previous)) previous=seconds;
-            if(index%interval==0 && index>=firstFrame) {
+            if(index%interval==0 && index>=firstFrame && (!select || select(index))) {
                 stopped=!visitor(imageFromFrame(*frame.data,scaler,orientation),index,seconds);
             }
             av_frame_unref(frame.data);

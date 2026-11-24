@@ -87,6 +87,15 @@ try {
         source = $FaceVideo; video_output = (Join-Path $OutputDirectory "objects.mp4")
     } "objects-video"
     Require ($ObjectVideo.frames -gt 0 -and (Test-Path -LiteralPath $ObjectVideo.output -PathType Leaf)) "Annotated MP4 was not created."
+    $TrackScreens = Invoke-NativeOperation "objects.scan" @{
+        source = $FaceVideo; people = $true; vehicles = $false
+        output = (Join-Path $OutputDirectory "person-track-screenshots")
+    } "person-track-screens"
+    $TrackHits = @($TrackScreens.hits)
+    $TrackFiles = @(Get-ChildItem -LiteralPath (Join-Path $OutputDirectory "person-track-screenshots") -Filter "*.png")
+    Require ($TrackScreens.frames -eq $ObjectVideo.frames -and $TrackHits.Count -gt 0 -and
+        $TrackHits.Count -lt $ObjectVideo.detections -and $TrackHits.Count -eq $TrackFiles.Count -and
+        @($TrackHits | Select-Object -ExpandProperty track_id -Unique).Count -eq $TrackHits.Count) "Video person tracks returned duplicate crops or no matching screenshots."
     $Checks.object_detection = $true
     $SemanticPayload = @{ source = $VehicleImage; text = "汽车"; threshold = -.5 }
     $Semantic = Invoke-NativeOperation "semantic.search" $SemanticPayload "semantic-first"
