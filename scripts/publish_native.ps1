@@ -31,19 +31,25 @@ foreach ($Pair in @(@("VisualAnalysis.exe", "exe_sha256"), @("VehicleCatalogueWo
         throw "The build binary differs from the accepted binary. $($Pair[0])"
     }
 }
-if (@(git -C $Project ls-files "*.py").Count -gt 0) {
+$LegacyPython = @(git -C $Project ls-files -- ':(glob)src/**/*.py' ':(glob)native/src/**/*.py')
+if ($LASTEXITCODE -ne 0 -or $LegacyPython.Count -gt 0) {
     throw "Complete the accepted source cutover before the native release."
 }
 $Commit = (git -C $Project rev-parse HEAD).Trim()
 if ($LASTEXITCODE -or @(git -C $Project status --porcelain).Count -gt 0) {
     throw "Commit the native source cutover before creating the release."
 }
-$ReleaseRoot = Join-Path $Project "dist"
+$Worktrees = @(git -C $Project worktree list --porcelain)
+if ($LASTEXITCODE -ne 0 -or $Worktrees.Count -eq 0 -or $Worktrees[0] -notlike 'worktree *') {
+    throw "Cannot locate the main worktree for release output."
+}
+$MainProject = (Resolve-Path -LiteralPath $Worktrees[0].Substring('worktree '.Length)).ProviderPath
+$ReleaseRoot = Join-Path $MainProject "dist"
 New-Item -ItemType Directory -Path $ReleaseRoot -Force | Out-Null
 $ReleaseRoot = (Resolve-Path -LiteralPath $ReleaseRoot).ProviderPath
 $ReleaseRootItem = Get-Item -LiteralPath $ReleaseRoot
 if ($ReleaseRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint -or
-    -not $ReleaseRoot.StartsWith($Project + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+    -not $ReleaseRoot.StartsWith($MainProject + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
     throw "Refusing a redirected release directory."
 }
 $Name = "FaceMatching-v$Version-windows-x64"
