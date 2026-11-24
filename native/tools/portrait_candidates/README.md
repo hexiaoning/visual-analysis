@@ -45,6 +45,16 @@ $exe = Join-Path $build.OutputDirectory 'PortraitCandidates.exe'
 
 参数文件包含 99 项的 `center`、`scale` 和每行 99 项的 `centers`。设特征长度为 99、基函数个数为 K，`weights` 为 (100+K)×4 数组，`classifier` 长度为 100+K，`gate_limit` 为标量。设计向量依次为常数 1、中心化后的特征、RBF 响应。研究参数由 CelebA 配对拟合，保存于本机评测目录。公开样本及由其拟合的本轮参数用于研究评测。[评测与限制](../../../docs/portrait-native-paired-evaluation.md) · [CelebA 数据使用协议](https://mmlab.ie.cuhk.edu.hk/projects/CelebA.html#agreement)
 
+## 已生成候选的亮度匹配
+
+`--match-candidate-tone` 接收同一糊图生成的两张 512×512 对齐彩色图。先给需要调整的候选，再给作为亮度参照的候选。命令在对数线性颜色空间计算两张图的低频差异，从脸部中央向边缘渐变应用到第一张图。像素位置和局部细节来自第一张图。命令只读本地图片，结果写入一个新 PNG 路径。
+
+```powershell
+& $exe --match-candidate-tone .\candidate.png .\guide.png .\tone-matched.png
+```
+
+此研究模式使用固定校正强度。评测中不同候选的效果有差异，可将输出送入同一糊图的回放筛选，核对是否适合作为单张结果。[配对评测](../../../docs/portrait-native-paired-evaluation.md)
+
 ## 选择规则和输出
 
 - 默认保留 CodeFormer。同时展示 AMD 要求其回放误差不超过 CodeFormer 加 0.007，清晰度至少为 CodeFormer 的 96%，并有一个区域同时通过位移和像素检验。区域扣除整体相似变换后的平均位移须大于 3 像素。以主候选关键点覆盖区域外扩 8 像素计算亮度带通差异，原幅度差的均方根须达到 1.5 个灰阶，按局部带通强度归一化后的均方根须达到 0.25。`visible_shape_difference` 记录这两项检验的联合结果。

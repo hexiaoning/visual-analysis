@@ -15,4 +15,5 @@ struct ExposureResult {
 };
 
 ExposureResult normalize_exposure(const cv::Mat &image, const std::filesystem::path &model_path);
+cv::Mat match_candidate_tone(const cv::Mat &candidate, const cv::Mat &guide);
 }

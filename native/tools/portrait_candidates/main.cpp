@@ -176,12 +176,25 @@ int wmain(int argc, wchar_t **argv) {
             "PortraitCandidates.exe [--fit-duplicate | --texture-guard model.json] landmarks.onnx "
             "source.png "
             "codeformer.png amd.png output-directory [source2.png codeformer2.png amd2.png output2 ...]\n"
-            "PortraitCandidates.exe --normalize-exposure model.json source.png output.png";
+            "PortraitCandidates.exe --normalize-exposure model.json source.png output.png\n"
+            "PortraitCandidates.exe --match-candidate-tone candidate.png guide.png output.png";
         if (argc == 2 && std::wstring_view(argv[1]) == L"--help") {
             std::cout << usage << '\n';
             return 0;
         }
         const std::wstring_view option = argc > 1 ? argv[1] : L"";
+        if (option == L"--match-candidate-tone") {
+            if (argc != 5)
+                throw std::invalid_argument(usage);
+            const fs::path output(argv[4]);
+            if (fs::exists(output))
+                throw std::invalid_argument("Tone-matched output must be a new path");
+            cv::setNumThreads(1);
+            const auto candidate = read_image(argv[2]);
+            const auto guide = read_image(argv[3]);
+            publish_exposure(output, portrait_selection::match_candidate_tone(candidate, guide));
+            return 0;
+        }
         if (option == L"--normalize-exposure") {
             if (argc != 5)
                 throw std::invalid_argument(usage);

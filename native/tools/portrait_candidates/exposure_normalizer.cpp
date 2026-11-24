@@ -12,9 +12,27 @@
 namespace portrait_selection {
 namespace {
 constexpr int side = 512;
+constexpr float linear_floor = .003f;
 constexpr size_t feature_count = 99;
 constexpr size_t output_count = 4;
 using Values = std::vector<double>;
+
+cv::Mat log_linear_bgr(const cv::Mat &image) {
+    std::array<float, 256> lookup{};
+    for (size_t i = 0; i < lookup.size(); ++i) {
+        const float value = static_cast<float>(i) / 255.f;
+        const float linear = value <= .04045f ? value / 12.92f : std::pow((value + .055f) / 1.055f, 2.4f);
+        lookup[i] = std::log(linear + linear_floor);
+    }
+    cv::Mat result(image.size(), CV_32FC3);
+    for (int y = 0; y < image.rows; ++y) {
+        const auto *input = image.ptr<unsigned char>(y);
+        auto *output = result.ptr<float>(y);
+        for (int x = 0; x < 3 * image.cols; ++x)
+            output[x] = lookup[input[x]];
+    }
+    return result;
+}
 
 template <size_t count>
 using Row = std::array<double, count>;
@@ -226,5 +244,45 @@ ExposureResult normalize_exposure(const cv::Mat &image, const std::filesystem::p
                                std::clamp(values[2], .24, .83)};
     const double black = std::clamp(values[3], 0., .06);
     return {correct(pixels, grid, gain, black), gain, black, evidence, grid, true};
+}
+
+cv::Mat match_candidate_tone(const cv::Mat &candidate, const cv::Mat &guide) {
+    for (const auto *image : {&candidate, &guide}) {
+        if (image->type() != CV_8UC3 || image->size() != cv::Size(side, side))
+            throw std::invalid_argument("Tone matching requires two aligned 512x512 BGR images");
+    }
+    const auto pixels = log_linear_bgr(candidate);
+    const cv::Mat delta = log_linear_bgr(guide) - pixels;
+    cv::Mat coarse, correction;
+    cv::resize(delta, coarse, {64, 64}, 0., 0., cv::INTER_AREA);
+    cv::GaussianBlur(coarse, coarse, {0, 0}, 6.);
+    cv::resize(coarse, correction, candidate.size(), 0., 0., cv::INTER_LINEAR);
+
+    cv::Mat result(candidate.size(), candidate.type());
+    for (int y = 0; y < side; ++y) {
+        const auto *input = pixels.ptr<cv::Vec3f>(y);
+        const auto *shift = correction.ptr<cv::Vec3f>(y);
+        auto *output = result.ptr<cv::Vec3b>(y);
+        const float dy = (static_cast<float>(y) - 297.f) / 207.f;
+        for (int x = 0; x < side; ++x) {
+            const float dx = (static_cast<float>(x) - 256.f) / 215.f;
+            const float radius = std::sqrt(dx * dx + dy * dy);
+            const float fade = std::clamp((radius - .67f) / .33f, 0.f, 1.f);
+            const float mix = .75f * (.5f + .5f * std::cos(static_cast<float>(CV_PI) * fade));
+            cv::Vec3f linear;
+            for (int channel = 0; channel < 3; ++channel) {
+                const float adjustment = mix * std::clamp(shift[x][channel], -.77f, .77f);
+                linear[channel] = std::max(std::exp(input[x][channel] + adjustment) - linear_floor, 0.f);
+            }
+            // Use one highlight scale for all channels to retain the corrected color.
+            const float highlight = std::max({1.f, linear[0], linear[1], linear[2]});
+            for (int channel = 0; channel < 3; ++channel) {
+                const float value = linear[channel] / highlight;
+                const float srgb = value <= .0031308f ? 12.92f * value : 1.055f * std::pow(value, 1.f / 2.4f) - .055f;
+                output[x][channel] = cv::saturate_cast<unsigned char>(srgb * 255.f);
+            }
+        }
+    }
+    return result;
 }
 }
