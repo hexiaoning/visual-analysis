@@ -118,6 +118,7 @@ void write_result(const fs::path &file, const Result &r, bool fit_duplicate, con
         {"codeformer", evidence(r.codeformer)},
         {"amd", evidence(r.amd)},
         {"regional_shift_px", shifts},
+        {"visible_shape_difference", r.visible_shape_difference},
         {"replay_supported", r.replay_supported},
         {"duplicate_eligible", r.duplicate_eligible},
         {"amd_fraction", nullable(r.amd_fraction)},

@@ -47,8 +47,8 @@ $exe = Join-Path $build.OutputDirectory 'PortraitCandidates.exe'
 
 ## 选择规则和输出
 
-- 默认保留 CodeFormer。只有 AMD 的回放误差不超过 CodeFormer 加 0.007，清晰度至少为 CodeFormer 的 96%，且扣除整体相似变换后至少一个五官区域的平均位移大于 3 像素，才同时展示 AMD。
-- 满足回放条件、五个区域平均位移均不超过 3 像素时，程序在共同的模糊和曝光模型下拟合 AMD 的混合系数。`--fit-duplicate` 开启后，系数大于 0.5 时展示 AMD，否则展示 CodeFormer。输出始终是原候选的像素。这个系数衡量重投影吻合度，身份保真度仍需用独立清晰图评价。
+- 默认保留 CodeFormer。同时展示 AMD 要求其回放误差不超过 CodeFormer 加 0.007，清晰度至少为 CodeFormer 的 96%，并有一个区域同时通过位移和像素检验。区域扣除整体相似变换后的平均位移须大于 3 像素。以主候选关键点覆盖区域外扩 8 像素计算亮度带通差异，原幅度差的均方根须达到 1.5 个灰阶，按局部带通强度归一化后的均方根须达到 0.25。`visible_shape_difference` 记录这两项检验的联合结果。
+- 满足回放条件且没有通过联合形状检验的区域时，程序在共同的模糊和曝光模型下拟合 AMD 的混合系数。`--fit-duplicate` 开启后，系数大于 0.5 时展示 AMD，否则展示 CodeFormer。输出始终是原候选的像素。这个系数衡量重投影吻合度，身份保真度仍需用独立清晰图评价。
 - `selection.json` 中 `selected` 是实际展示顺序，`previous_rule_selected` 是默认规则，`fitted_duplicate_rule_selected` 是启用近重复拟合时的顺序，`fit_duplicate_enabled` 记录本次开关。
 - `clarity` 是脸部带通响应的均方根，`clarity_vs_source` 是相对于输入的比值。`replay_error` 是在 128×128 亮度图上、脸部特征区域内测得的截断残差。曝光或特征区有效像素不足时误差为 `null`，对应回放图也为空。
 - `candidate-1.png` 和可能的 `candidate-2.png` 对应实际展示的候选。`observed-luminance.png` 与 `candidate-*-replay.png` 供直接核对观测和评分用回放。

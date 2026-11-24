@@ -50,6 +50,41 @@ std::array<double, 5> regional_shift(const std::vector<cv::Point2f> &candidate,
     return shift;
 }
 
+bool has_visible_shape_difference(const cv::Mat &primary, const cv::Mat &candidate,
+                                  const std::vector<cv::Point2f> &primary_points,
+                                  const std::array<double, 5> &shifts) {
+    if (*std::max_element(shifts.begin(), shifts.end()) <= 3.)
+        return false;
+
+    const auto structure = [](const cv::Mat &image) -> cv::Mat {
+        const cv::Mat gray = selection::grayscale(image);
+        return selection::filtered(gray, .85) - selection::filtered(gray, 3.4);
+    };
+    const cv::Mat primary_band = structure(primary);
+    const cv::Mat candidate_band = structure(candidate);
+    const cv::Rect image_bounds(0, 0, primary.cols, primary.rows);
+    for (size_t region = 0; region < regions.size(); ++region) {
+        if (shifts[region] <= 3.)
+            continue;
+        const auto [begin, end] = regions[region];
+        const std::vector<cv::Point2f> points(primary_points.begin() + begin, primary_points.begin() + end);
+        const cv::Rect bounds = cv::boundingRect(points);
+        const cv::Rect area = cv::Rect(bounds.x - 8, bounds.y - 8, bounds.width + 16, bounds.height + 16) & image_bounds;
+        if (area.empty())
+            continue;
+        const double pixel_count_sqrt = std::sqrt(double(area.area()));
+        const cv::Mat a = primary_band(area);
+        const cv::Mat b = candidate_band(area);
+        if (cv::norm(a, b, cv::NORM_L2) < (1.5 / 255.) * pixel_count_sqrt)
+            continue;
+        const double a_rms = std::max(.004, cv::norm(a, cv::NORM_L2) / pixel_count_sqrt);
+        const double b_rms = std::max(.004, cv::norm(b, cv::NORM_L2) / pixel_count_sqrt);
+        if (cv::norm(a / a_rms - b / b_rms, cv::NORM_L2) >= .25 * pixel_count_sqrt)
+            return true;
+    }
+    return false;
+}
+
 Evidence measure(const selection::Observation &observed, const cv::Mat &face, double raw_clarity) {
     const cv::Mat gray = selection::grayscale(face);
     const double clarity = selection::clarity(gray);
@@ -133,15 +168,14 @@ Result Selector::select(const cv::Mat &source, const cv::Mat &codeformer, const 
     r.relative_clarity = r.amd.clarity / std::max(1.e-8, r.codeformer.clarity);
     const auto primary_points = model_->points(codeformer);
     r.regional_shift = regional_shift(model_->points(amd), primary_points);
-    const double max_shift = *std::max_element(r.regional_shift.begin(), r.regional_shift.end());
+    r.visible_shape_difference = has_visible_shape_difference(codeformer, amd, primary_points, r.regional_shift);
     r.replay_supported = r.amd.replay_error && r.codeformer.replay_error &&
                          *r.amd.replay_error <= *r.codeformer.replay_error + .007;
     r.original_display = {Route::codeformer};
-    if (r.replay_supported && max_shift > 3. && r.relative_clarity >= .96)
+    if (r.replay_supported && r.visible_shape_difference && r.relative_clarity >= .96)
         r.original_display.push_back(Route::amd);
     r.fitted_display = r.original_display;
-    // Compare the existing pixels only after the candidates pass the replay and shape checks.
-    r.duplicate_eligible = r.replay_supported && max_shift <= 3.;
+    r.duplicate_eligible = r.replay_supported && !r.visible_shape_difference;
     if (r.duplicate_eligible) {
         r.amd_fraction = portrait_consensus::amd_fraction(source, codeformer, amd);
         if (*r.amd_fraction > .5)

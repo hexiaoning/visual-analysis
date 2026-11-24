@@ -26,6 +26,7 @@ struct Result {
     double relative_clarity;
     // Ordered jaw, nose, image-left eye, image-right eye, mouth.
     std::array<double, 5> regional_shift;
+    bool visible_shape_difference;
     bool replay_supported;
     bool duplicate_eligible;
     std::optional<double> amd_fraction;
