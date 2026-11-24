@@ -22,7 +22,7 @@ public:
         : path_(path), profile_(inferenceProfile(path)), usingGpu_(preferGpu && gpuAvailable()),
           useCpuArena_(preferGpu),
           session_(nullptr) {
-        if(usingGpu_ && intelGpuAvailable() && usesAttentionPipeline()) {
+        if(usingGpu_ && intelGpuAvailable() && (usesAttentionPipeline() || path_.stem()==L"rtdetr_v2_r50vd")) {
             try { openVino_=std::make_unique<OpenVinoModel>(path); }
             catch(const std::exception&) { }
         }

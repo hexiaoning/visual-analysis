@@ -233,6 +233,20 @@ LRESULT CALLBACK dispatch(HWND handle, UINT message, WPARAM wparam, LPARAM lpara
         info->ptMinTrackSize = {760, 400};
         return 0;
     }
+    case visual::loadSearchRestoration: {
+        if(state->work.valid() || !lparam) return FALSE;
+        const auto& selected=*reinterpret_cast<const visual::SearchRestorationInput*>(lparam);
+        if(selected.image.empty()) return FALSE;
+        SendMessageW(state->mode,CB_SETCURSEL,0,0);
+        state->original=selected.image;
+        state->videoSource.clear();
+        state->candidates.clear();
+        state->region=selected.region&cv::Rect(0,0,selected.image.cols,selected.image.rows);
+        if(state->region->empty()) state->region.reset();
+        SetWindowTextW(state->status,L"已加载命中画面，可按选区还原。");
+        refresh(handle,*state);
+        return TRUE;
+    }
     case WM_COMMAND:
         try {
             const auto command=LOWORD(wparam);
@@ -280,10 +294,11 @@ LRESULT CALLBACK dispatch(HWND handle, UINT message, WPARAM wparam, LPARAM lpara
                 } else if (!state->work.valid() && !state->original.empty()) {
                     SetTimer(handle, workerTimer, workerPollMs, nullptr);
                     const bool recall = SendMessageW(state->recall, BM_GETCHECK, 0, 0) == BST_CHECKED;
+                    const bool plate=plateMode(*state);
                     state->work = std::async(std::launch::async, [image = state->original, models = state->models,
-                                                                 region = state->region, recall] {
-                        if (region) return visual::restorePlate(image, *region);
-                        auto results = visual::restorePortraits({image}, visual::localPath(models), std::nullopt, recall);
+                                                                 region = state->region, recall, plate] {
+                        if (plate) return visual::restorePlate(image, *region);
+                        auto results = visual::restorePortraits({image}, visual::localPath(models), region, recall);
                         return std::move(results.front());
                     });
                     state->candidates.clear();
@@ -324,7 +339,7 @@ LRESULT CALLBACK dispatch(HWND handle, UINT message, WPARAM wparam, LPARAM lpara
     case WM_LBUTTONDOWN:
     case WM_MOUSEMOVE:
     case WM_LBUTTONUP: {
-        if (state->work.valid() || state->original.empty() || !plateMode(*state)) break;
+        if (state->work.valid() || state->original.empty() || videoMode(*state)) break;
         const auto area = fitImage(sourceArea(handle), state->original);
         if (IsRectEmpty(&area)) break;
         const POINT cursor{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
@@ -342,11 +357,11 @@ LRESULT CALLBACK dispatch(HWND handle, UINT message, WPARAM wparam, LPARAM lpara
                 auto region = cv::Rect(*state->dragStart, point);
                 state->dragStart.reset();
                 ReleaseCapture();
-                const bool validSize = region.width >= 16 && region.width <= 1024 &&
-                                       region.height >= 8 && region.height <= 512;
+                const bool validSize = !region.empty() &&
+                    (!plateMode(*state) || (region.width>=16 && region.width<=1024 && region.height>=8 && region.height<=512));
                 state->region = validSize ? std::optional(region) : std::nullopt;
                 state->candidates.clear();
-                SetWindowTextW(state->status, validSize ? L"已框选车牌，点击离线还原。"
+                SetWindowTextW(state->status, validSize ? L"已框选区域，点击离线还原。"
                     : L"车牌选区宽度须为 16～1024 像素，高度须为 8～512 像素。");
                 refresh(handle, *state);
             }

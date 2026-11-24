@@ -18,7 +18,7 @@ $Project = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).ProviderPa
 $BuildDirectory = (Resolve-Path -LiteralPath $BuildDirectory).ProviderPath
 $Report = Get-Content -LiteralPath $AcceptanceReport -Raw -Encoding UTF8 | ConvertFrom-Json
 $RequiredChecks = @("people", "annotations", "face_search", "visual_search", "semantic_search",
-    "object_detection", "video_plate", "portrait_video", "vehicle_public", "vehicle_offline", "portrait_standard", "portrait_recall", "trigger_capture", "gpu")
+    "object_detection", "video_plate", "portrait_video", "vehicle_public", "vehicle_offline", "portrait_standard", "portrait_recall", "face_video_tracking", "face_mixed_sources", "trigger_capture", "gpu")
 if (-not $Report.ok) { throw "Native acceptance is required before packaging." }
 foreach ($Check in $RequiredChecks) {
     if (-not $Report.checks.PSObject.Properties[$Check] -or -not $Report.checks.$Check) {

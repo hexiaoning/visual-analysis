@@ -332,35 +332,44 @@ bool PersonFilter::matches(std::string idCard) const {
     return (minimum<0 || age>=minimum) && (maximum<0 || age<=maximum);
 }
 
-Json matchGallery(Database& database,const Feature& query,const FaceSettings& config,const PersonFilter& filter,bool photoRank) {
+PreparedFaceGallery::PreparedFaceGallery(Database& database,const FaceSettings& config,const PersonFilter& filter)
+    :threshold_(config.matchThreshold),margin_(config.margin) {
     const auto rows=database.query(R"sql(
         SELECT p.id,p.name,p.id_card,s.image_path,s.embedding,s.embedding_dim,s.quality FROM face_samples s
         JOIN persons p ON p.id=s.person_id WHERE s.model_id=? AND
         (?='' OR EXISTS(SELECT 1 FROM person_libraries l WHERE l.person_id=p.id AND l.library_id=?))
     )sql",{config.modelId(),filter.library,filter.library});
-    struct Sample { Json record; Feature vector; double score; double quality; };
-    std::map<std::string,std::vector<Sample>> grouped;
     for (const auto& row:rows) {
         if(!filter.matches(row.at("id_card").get<std::string>())) continue;
         auto value=readFeature(row.at("embedding"),row.at("embedding_dim").get<size_t>());
-        if(value.empty() || value.size()!=query.size()) continue;
+        if(value.empty()) continue;
         try {value=normalized(std::move(value));} catch(const std::exception&) {continue;}
-        grouped[row.at("id").get<std::string>()].push_back({{{"person_id",row.at("id")},{"name",row.at("name")},
-            {"id_card",row.at("id_card")},{"image_path",row.at("image_path")}},value,similarity(query,value),
+        people_[row.at("id").get<std::string>()].push_back({{{"person_id",row.at("id")},{"name",row.at("name")},
+            {"id_card",row.at("id_card")},{"image_path",row.at("image_path")}},std::move(value),
             row.at("quality").get<double>()});
     }
+}
+
+Json PreparedFaceGallery::match(const Feature& query,bool photoRank) const {
+    struct Ranked {const Sample* sample;double score;};
     Json ranked=Json::array();
-    for(auto& [id,samples]:grouped) {
+    for(const auto& [id,records]:people_) {
+        std::vector<Ranked> samples;
+        samples.reserve(records.size());
+        for(const auto& sample:records) {
+            if(sample.feature.size()==query.size()) samples.push_back({&sample,similarity(query,sample.feature)});
+        }
+        if(samples.empty()) continue;
         std::stable_sort(samples.begin(),samples.end(),[](const auto& a,const auto& b){return a.score>b.score;});
-        auto output=samples.front().record;
+        auto output=samples.front().sample->record;
         double score=samples.front().score;
         if(!photoRank) {
             Feature centroid(query.size(),0);
             double mean=0, weights=0;
             for(size_t i=0;i<samples.size();++i) {
-                const auto& sample=samples[i];
-                for(size_t k=0;k<centroid.size();++k) centroid[k]+=sample.vector[k]*static_cast<float>(std::max(.1,sample.quality));
-                if(i<3) {const auto weight=std::max(.05,sample.quality); mean+=weight*sample.score; weights+=weight;}
+                const auto& sample=*samples[i].sample;
+                for(size_t k=0;k<centroid.size();++k) centroid[k]+=sample.feature[k]*static_cast<float>(std::max(.1,sample.quality));
+                if(i<3) {const auto weight=std::max(.05,sample.quality); mean+=weight*samples[i].score; weights+=weight;}
             }
             score=.70*score+.25*mean/weights+.05*similarity(query,normalized(std::move(centroid)));
         }
@@ -374,9 +383,13 @@ Json matchGallery(Database& database,const Feature& query,const FaceSettings& co
         const auto score=best.at("score").get<double>();
         const double margin=ranked.size()>1 ? score-ranked[1]["score"].get<double>() : 1.;
         best["margin"]=margin;
-        best["accepted"]=score>=config.matchThreshold && margin>=config.margin;
+        best["accepted"]=score>=threshold_ && margin>=margin_;
     }
     return ranked;
+}
+
+Json matchGallery(Database& database,const Feature& query,const FaceSettings& config,const PersonFilter& filter,bool photoRank) {
+    return PreparedFaceGallery(database,config,filter).match(query,photoRank);
 }
 
 Json peopleOperation(const std::string& action,const Json& payload,const fs::path& models,const std::atomic<bool>& cancel) {

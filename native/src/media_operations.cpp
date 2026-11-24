@@ -17,9 +17,22 @@
 #include <opencv2/calib3d.hpp>
 #include <opencv2/features2d.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/videoio.hpp>
 
 namespace visual {
 namespace fs=std::filesystem;
+
+std::shared_ptr<FaceEngine> FaceScanSession::engine(const fs::path& models,const Json& settings,
+                                                    const FaceSettings& config) {
+    if(!engine_ || modelDirectory_!=models || settings_!=settings) {
+        auto next=std::make_shared<FaceEngine>(models,config);
+        modelDirectory_=models;
+        settings_=settings;
+        engine_=std::move(next);
+    }
+    return engine_;
+}
+
 namespace {
 
 std::wstring extension(const fs::path& file) {
@@ -350,8 +363,10 @@ Json captureCrossings(const Json& request,ObjectDetector& detector,double thresh
                     const cv::Point2d center(object.box.x+object.box.width*.5,object.box.y+object.box.height*.5);
                     if(!trigger.observe(object.category,track,center,seconds)) continue;
                     if(!saved) {
-                        saved=*directory/(L"触发-"+std::to_wstring(++screenshots)+L".png");
-                        writePng(*saved,frame);
+                        const auto path=*directory/(L"触发-"+std::to_wstring(screenshots+1)+L".png");
+                        writePng(path,frame);
+                        saved=path;
+                        ++screenshots;
                     }
                     auto item=hit(source,index,seconds,object.box,object.score,objectName(object.category));
                     item["category_id"]=object.category;
@@ -466,87 +481,268 @@ Json objectScan(const Json& request,const fs::path& models,const std::atomic<boo
     return {{"frames",n},{"hits",results},{"failures",failures},{"cancelled",cancel.load()}};
 }
 
+struct FaceTrack {
+    struct Sample { Feature feature; double quality; };
+    int id{}, misses{}, count{}, confirmed{};
+    cv::Rect2d box, velocity;
+    std::vector<Sample> samples;
+    Feature lastFeature;
+    std::string candidate, recordedPerson;
+    std::optional<size_t> provisional;
+
+    double association(const FaceObservation& face) const {
+        const double horizon = 1. + .25 * std::min(misses, 2);
+        const cv::Rect2d predicted(box.x + velocity.x * horizon, box.y + velocity.y * horizon,
+            std::max(1., box.width + velocity.width * horizon),
+            std::max(1., box.height + velocity.height * horizon));
+        const cv::Rect2d observed(face.box);
+        const double intersection = (predicted & observed).area();
+        const double overlap = intersection / (predicted.area() + observed.area() - intersection);
+        const auto centroid = [](const auto& rectangle) { return (rectangle.tl() + rectangle.br()) * .5; };
+        const double distance = cv::norm(centroid(predicted) - centroid(observed)) /
+            std::hypot(predicted.width, predicted.height);
+        const double cosine = similarity(lastFeature, face.feature);
+        if (overlap < .06 && cosine < .35 && distance > .55) return 0.;
+        return .55 * overlap + .25 * std::max(cosine, 0.) + .20 * std::max(0., 1. - distance);
+    }
+
+    void add(const FaceObservation& face) {
+        const cv::Rect2d next(face.box);
+        if (count) {
+            velocity = {velocity.x * .65 + (next.x - box.x) * .35,
+                        velocity.y * .65 + (next.y - box.y) * .35,
+                        velocity.width * .65 + (next.width - box.width) * .35,
+                        velocity.height * .65 + (next.height - box.height) * .35};
+        }
+        box = next;
+        misses = 0;
+        ++count;
+        lastFeature = face.feature;
+        samples.push_back({face.feature, std::max(.05, double(face.quality))});
+        if (samples.size() > 32) {
+            std::stable_sort(samples.begin(), samples.end(), [](const auto& a, const auto& b) {
+                return a.quality > b.quality;
+            });
+            samples.resize(24);
+        }
+    }
+
+    Sample aggregate(int topK, double consistency) const {
+        std::vector<const Sample*> selected;
+        for (const auto& sample : samples) selected.push_back(&sample);
+        std::stable_sort(selected.begin(), selected.end(), [](const auto* a, const auto* b) {
+            return a->quality > b->quality;
+        });
+        selected.resize(std::min(selected.size(), size_t(topK)));
+        if (selected.size() >= 3) {
+            const auto averageAffinity = [&](const Sample* subject) {
+                double result = 0.;
+                for (const auto* other : selected) result += other->quality * similarity(subject->feature, other->feature);
+                return result;
+            };
+            const auto medoid = *std::max_element(selected.begin(), selected.end(), [&](const auto* a, const auto* b) {
+                return averageAffinity(a) < averageAffinity(b);
+            });
+            const auto consistent = [&](const Sample* other) {
+                return similarity(medoid->feature, other->feature) >= consistency;
+            };
+            if (std::count_if(selected.begin(), selected.end(), consistent) >= 2) {
+                std::erase_if(selected, [&](const auto* other) { return !consistent(other); });
+            }
+        }
+        Feature combined(lastFeature.size());
+        double weightedQuality = 0., weightSum = 0.;
+        for (const auto* item : selected) {
+            const auto weight = item->quality * item->quality;
+            for (size_t index = 0; index < combined.size(); ++index) {
+                combined[index] += static_cast<float>(item->feature[index] * weight);
+            }
+            weightedQuality += item->quality * weight;
+            weightSum += weight;
+        }
+        return {normalized(std::move(combined)), weightedQuality / weightSum};
+    }
+};
+
 Json faceScan(const Json& request,const fs::path& models,const std::atomic<bool>& cancel,
-              DetectionPreview* preview) {
+              DetectionPreview* preview,FaceScanSession* faceQueue) {
+    const bool camera=request.contains("camera");
+    cv::VideoCapture capture;
+    int cameraIndex{};
+    if(camera) {
+        cameraIndex=request.at("camera").get<int>();
+        if(cameraIndex<0 || cameraIndex>31 || !capture.open(cameraIndex,cv::CAP_DSHOW)) {
+            throw std::runtime_error("无法打开本机摄像头。请检查编号、驱动和 Windows 摄像头权限。");
+        }
+    }
     const auto stored=faceConfig();
     const auto config=FaceSettings::from(stored,models);
-    FaceEngine engine(models,config);
+    const auto engine=faceQueue?faceQueue->engine(models,stored,config):std::make_shared<FaceEngine>(models,config);
     Database db(dataHome()/L"data/faces.db");
     initializePeople(db);
-    const auto gallery=PersonFilter::from(request);
-    const auto interval=request.value("step",std::max(1,stored.value("frame_interval",1)));
+    const PreparedFaceGallery gallery(db,config,PersonFilter::from(request));
+    const auto interval=std::max(1,request.value("step",stored.value("frame_interval",1)));
     const auto minimum=std::max(1,stored.value("min_track_observations",3));
     const auto confirmations=std::max(1,stored.value("confirmation_matches",2));
+    const auto maximumMisses=std::max(0,stored.value("track_max_misses",5));
+    const auto topK=std::clamp(stored.value("track_top_k",8),1,32);
+    const auto consistency=std::clamp(stored.value("track_consistency_threshold",.20),-1.,1.);
     const auto session=newId();
     const auto snapshots=dataHome()/L"data/annotations"/wide(session);
     Json hits=Json::array(),errors=Json::array();
-    int trackId=0,processed=0;
-    for(const auto& path:sources(request)) {
-        if(cancel) break;
-        struct Track {
-            cv::Rect box;
-            int id{},last{},count{},confirmed{};
-            std::string person;
-            bool emitted{};
+    int trackId=0;
+    const auto inputs=camera?std::set{dataHome()/L"摄像头"/std::to_wstring(cameraIndex)}:sources(request);
+    int processed=0;
+    auto input=inputs.begin();
+    std::set<fs::path> visited;
+    while(!cancel) {
+        std::optional<fs::path> next;
+        if(input!=inputs.end()) next=*input++;
+        else if(faceQueue) next=faceQueue->next();
+        if(!next) break;
+        const auto& path=*next;
+        if(!visited.insert(path).second) continue;
+        std::vector<FaceTrack> tracks;
+        std::map<std::string,size_t> confirmedHits;
+        const bool video=camera || isVideo(path);
+        const auto discardSnapshot=[](const Json& prior) {
+            std::error_code ignored;
+            for(const auto* key:{"snapshot_path","face_path"}) {
+                fs::remove(textPath(prior.at(key).get<std::string>()),ignored);
+            }
         };
-        std::vector<Track> tracks;
-        try { sample(path,[&](const cv::Mat& pixels,int frame,double seconds){
+        const auto process=[&](const cv::Mat& pixels,int frame,double seconds){
             if(preview && !preview->wait(cancel)) return false;
-            std::erase_if(tracks,[&](const auto& item){return frame-item.last>12*interval;});
-            const auto observations=engine.faces(pixels);
-            for(const auto& observation:observations) {
-                if(cancel) return false;
-                const auto iou=[&](const Track& t){
-                    const double intersection=(observation.box&t.box).area();
-                    return t.last==frame ? 0. : intersection/std::max(1.,double(observation.box.area())+t.box.area()-intersection);
-                };
-                auto track=std::max_element(tracks.begin(),tracks.end(),[&](const auto& a,const auto& b){return iou(a)<iou(b);});
-                if(track==tracks.end() || iou(*track)<.22) {
-                    tracks.push_back({observation.box,++trackId,frame,0,0,{},false});
-                    track=std::prev(tracks.end());
+            const auto observations=engine->faces(pixels);
+            std::vector<std::pair<cv::Rect,bool>> screen;
+            struct Association { double score; size_t track, observation; };
+            std::vector<Association> associations;
+            for(size_t i=0;i<tracks.size();++i) {
+                for(size_t j=0;j<observations.size();++j) {
+                    const auto score=tracks[i].association(observations[j]);
+                    if(score>=.10) associations.push_back({score,i,j});
                 }
-                track->last=frame;
-                track->box=observation.box;
-                ++track->count;
-                const auto found=matchGallery(db,observation.feature,config,gallery);
-                if(found.empty()) continue;
+            }
+            std::stable_sort(associations.begin(),associations.end(),[](const auto& a,const auto& b) {
+                return a.score>b.score;
+            });
+            std::vector<std::optional<size_t>> assigned(observations.size());
+            std::vector<bool> seen(tracks.size());
+            for(const auto& match:associations) {
+                if(!seen[match.track] && !assigned[match.observation]) {
+                    seen[match.track]=true;
+                    assigned[match.observation]=match.track;
+                }
+            }
+            for(size_t index=0;index<tracks.size();++index) if(!seen[index]) ++tracks[index].misses;
+            for(size_t index=0;index<observations.size();++index) {
+                if(cancel) return false;
+                if(!assigned[index]) {
+                    assigned[index]=tracks.size();
+                    tracks.emplace_back();
+                    tracks.back().id=++trackId;
+                }
+                auto& track=tracks[*assigned[index]];
+                const auto& observation=observations[index];
+                track.add(observation);
+                screen.emplace_back(observation.box,!track.recordedPerson.empty());
+                if(video && track.count<minimum) continue;
+                const auto fused=track.aggregate(topK,consistency);
+                const auto found=gallery.match(fused.feature);
+                if(found.empty()) {
+                    track.candidate.clear();
+                    track.confirmed=0;
+                    continue;
+                }
                 const auto& best=found.front();
                 const auto person=best.at("person_id").get<std::string>();
-                if(track->person!=person) {track->person=person;track->confirmed=0;track->emitted=false;}
+                const auto candidate=best.value("accepted",false)?person:std::string{};
+                track.confirmed=candidate.empty()?0:(candidate==track.candidate?track.confirmed+1:1);
+                track.candidate=candidate;
                 const auto score=best.at("score").get<double>();
-                if(best.value("accepted",false)) ++track->confirmed;
-                if(track->emitted || (isVideo(path) && track->count<minimum)) continue;
-                if(hits.size()>=500) return false;
+                const bool accepted=!candidate.empty()&&(!video || track.confirmed>=confirmations);
+                if(accepted && person==track.recordedPerson) continue;
+                if(!accepted && (!track.recordedPerson.empty() ||
+                    (track.provisional && score<=hits.at(*track.provisional).at("score").get<double>()))) continue;
+                const auto previous=accepted?confirmedHits.find(person):confirmedHits.end();
+                if(previous!=confirmedHits.end() && score<=hits.at(previous->second).at("score").get<double>()) {
+                    if(track.provisional) {
+                        auto& prior=hits.at(*track.provisional);
+                        discardSnapshot(prior);
+                        prior=nullptr;
+                        track.provisional.reset();
+                    }
+                    track.recordedPerson=person;
+                    screen.back().second=true;
+                    continue;
+                }
+                if(!track.provisional && previous==confirmedHits.end() && hits.size()>=500) return false;
                 auto result=hit(path,frame,seconds,observation.box,score,"人员库相似候选");
-                const bool accepted=best.value("accepted",false)&&(isImage(path)||track->confirmed>=confirmations);
-                if(accepted) db.query("INSERT INTO recognition_events(person_id,source,track_id,score,quality,occurred_at) VALUES(?,?,?,?,?,?)",
-                    {person,pathText(path),track->id,score,observation.quality,utcTimestamp()});
                 result["candidate"]=best;
                 result["accepted"]=accepted;
                 result["session_id"]=session;
-                result["track_id"]=track->id;
+                result["track_id"]=track.id;
                 result["model_id"]=config.modelId();
-                result["quality"]=observation.quality;
+                result["quality"]=fused.quality;
+                result["observations"]=track.count;
+                if(camera) result["camera"]=cameraIndex;
                 fs::create_directories(snapshots);
-                const auto stem=std::to_wstring(track->id)+L"-"+std::to_wstring(frame);
+                const auto stem=std::to_wstring(track.id)+L"-"+std::to_wstring(frame);
                 writePng(snapshots/(stem+L"-frame.png"),pixels);
                 writePng(snapshots/(stem+L"-face.png"),pixels(observation.box));
                 result["snapshot_path"]=pathText(snapshots/(stem+L"-frame.png"));
                 result["face_path"]=pathText(snapshots/(stem+L"-face.png"));
-                hits.push_back(std::move(result));
-                track->emitted=true;
+                if(accepted) {
+                    db.query("INSERT INTO recognition_events(person_id,source,track_id,score,quality,occurred_at) VALUES(?,?,?,?,?,?)",
+                        {person,pathText(path),track.id,score,fused.quality,utcTimestamp()});
+                    track.recordedPerson=person;
+                    screen.back().second=true;
+                }
+                if(previous!=confirmedHits.end() && track.provisional) {
+                    auto& prior=hits.at(*track.provisional);
+                    discardSnapshot(prior);
+                    prior=nullptr;
+                    track.provisional.reset();
+                }
+                const auto position=previous!=confirmedHits.end()?previous->second:track.provisional.value_or(hits.size());
+                if(position==hits.size()) hits.push_back(std::move(result));
+                else {
+                    auto& prior=hits.at(position);
+                    discardSnapshot(prior);
+                    prior=std::move(result);
+                }
+                if(accepted) {
+                    confirmedHits.emplace(person,position);
+                    track.provisional.reset();
+                } else track.provisional=position;
             }
+            std::erase_if(tracks,[&](const auto& track){return track.misses>maximumMisses;});
             ++processed;
-            if(preview && preview->refreshDue() && !cancel) {
+            if(preview && preview->refreshDue()) {
                 auto marked=pixels.clone();
-                for(const auto& observation:observations) cv::rectangle(marked,observation.box,{255,200,70},2);
-                preview->update(marked,processed,static_cast<int>(observations.size()));
+                for(const auto& [box,accepted]:screen) {
+                    cv::rectangle(marked,box,accepted?cv::Scalar(65,210,50):cv::Scalar(255,200,70),2);
+                }
+                preview->update(marked,processed,static_cast<int>(screen.size()));
             }
             return !cancel;
-        },interval,cancel);} catch(const std::exception& error) {
+        };
+        try {
+            if(camera) {
+                const auto started=std::chrono::steady_clock::now();
+                for(int frame=0;!cancel;++frame) {
+                    if(preview && !preview->wait(cancel)) break;
+                    cv::Mat image;
+                    if(!capture.read(image) || image.empty()) throw std::runtime_error("摄像头未返回画面。");
+                    const auto seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count();
+                    if(frame%interval==0 && !process(image,frame,seconds)) break;
+                }
+            } else sample(path,process,interval,cancel);
+        } catch(const std::exception& error) {
             errors.push_back({{"source",pathText(path)},{"error",error.what()}});
         }
     }
+    hits.erase(std::remove_if(hits.begin(),hits.end(),[](const Json& item){return item.is_null();}),hits.end());
     return {{"session_id",session},{"hits",hits},{"failures",errors},{"cancelled",cancel.load()}};
 }
 
@@ -808,11 +1004,12 @@ Json exportHits(const Json& request,const std::atomic<bool>& cancel) {
 
 }
 
-Json mediaOperation(const std::string& action,const Json& request,const fs::path& models,const std::atomic<bool>& cancel,DetectionPreview* preview) {
+Json mediaOperation(const std::string& action,const Json& request,const fs::path& models,
+                    const std::atomic<bool>& cancel,DetectionPreview* preview,FaceScanSession* faceQueue) {
     if(action=="visual.search") return visualSearch(request,models,cancel,preview);
     if(action=="objects.scan") return objectScan(request,models,cancel,preview);
     if(action=="face.scan") {
-        auto result=faceScan(request,models,cancel,preview);
+        auto result=faceScan(request,models,cancel,preview,faceQueue);
         std::map<std::pair<std::string,std::string>,size_t> positions;
         Json hits=Json::array();
         for(auto& item:result.at("hits")) {

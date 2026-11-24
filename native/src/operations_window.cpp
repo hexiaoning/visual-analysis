@@ -11,6 +11,7 @@
 #include <iomanip>
 #include <memory>
 #include <sstream>
+#include <utility>
 
 #include <commdlg.h>
 #include <shlobj.h>
@@ -22,8 +23,9 @@ namespace {
 
 constexpr wchar_t windowClass[]=L"VisualAnalysisWorkflow";
 constexpr UINT_PTR timer=1;
+constexpr UINT_PTR sourceTimer=2;
 constexpr UINT chooseBase=200, actionBase=300, cancelAction=500, saveAction=501, exportHitsAction=502,
-    viewAction=503, playAction=504;
+    viewAction=503, playAction=504, pauseAction=505, restoreHitAction=506;
 
 enum class Box {Text,Media,Images,Json,Directory,Region,Line};
 struct Field {const char* key;const wchar_t* title;Box type=Box::Text;};
@@ -39,10 +41,11 @@ const std::array workflows{
             {"brand",L"已知品牌（可选）"},{"series",L"已知车系（可选）"}},
         {{"vehicle.analyze",L"识别并查询线上资料"}}},
     Workflow{L"人脸检索",{{"input",L"探测照片",Box::Images},{"reference",L"对比照片",Box::Images},
-            {"source",L"本机素材路径",Box::Media},{"step",L"抽帧间隔（可选）"},
+            {"source",L"图片／视频（可混选）",Box::Media},{"step",L"抽帧间隔（可选）"},
             {"library_id",L"人员库 ID（可选）"},{"sex",L"性别（男／女）"},{"region_prefix",L"地区码"},
-            {"min_age",L"最小年龄（可选）"},{"max_age",L"最大年龄（可选）"}},
-        {{"face.compare",L"两张照片对比"},{"face.gallery",L"照片检索人物"},{"face.scan",L"视频检索人员"}}},
+            {"min_age",L"最小年龄（可选）"},{"max_age",L"最大年龄（可选）"},{"camera",L"摄像头编号（默认 0）"}},
+        {{"face.compare",L"两张照片对比"},{"face.gallery",L"照片检索人物"},{"face.scan",L"开始检索"},
+         {"face.camera",L"打开摄像头"}}},
     Workflow{L"人车检测",{{"source",L"本机素材路径",Box::Media},{"threshold",L"置信度门槛（可选）"},
             {"output",L"截图保存目录",Box::Directory},{"target",L"类别（人／车／物体／全部）"},
             {"trigger_line",L"触发线（可选）",Box::Line},{"trigger_area",L"触发区域（可选）",Box::Region},
@@ -51,10 +54,10 @@ const std::array workflows{
     Workflow{L"以图搜索",{{"input",L"本机参考图",Box::Images},{"source",L"本机素材或文件夹",Box::Media},
             {"bbox",L"选区 x1 y1 x2 y2",Box::Region},{"mode",L"模式（人脸／外观）"},{"threshold",L"相似度门槛"},
             {"step",L"抽帧间隔"}},
-        {{"visual.search",L"执行搜索"}}},
+        {{"visual.search",L"执行搜索"},{"sources.folder",L"添加文件夹…"},{"sources.clear",L"清空范围"}}},
     Workflow{L"语义搜索",{{"text",L"目标描述"},{"source",L"本机素材或文件夹",Box::Media},
-            {"step",L"抽帧间隔（默认 25）"},{"threshold",L"相关度门槛"}},
-        {{"semantic.search",L"检索目标"}}},
+            {"category",L"类别（自动/人物/车辆）"},{"step",L"抽帧间隔（默认 25）"},{"threshold",L"相关度门槛"}},
+        {{"semantic.search",L"检索目标"},{"sources.folder",L"添加文件夹…"},{"sources.clear",L"清空范围"}}},
     Workflow{L"视频车牌",{{"source",L"本机车辆视频",Box::Media},{"frame_index",L"起始帧（从 0 开始）"},
             {"bbox",L"选区 x1 y1 x2 y2",Box::Region},{"count",L"跟踪帧数（默认 12）"},{"blur_length",L"拖影长度（像素）"},
             {"blur_angle",L"角度（0～179）"},{"output",L"输出目录",Box::Directory}},
@@ -88,6 +91,12 @@ struct Form {
     std::map<std::string,std::vector<fs::path>> selections;
     HWND result{},activity{},cancelButton{},save{},exportHits{},view{},play{},hitChoice{};
     Json last;
+    HWND pause{};
+    std::shared_ptr<FaceScanSession> faceSession,faceQueue;
+    std::vector<fs::path> deferredFaceSources;
+    std::wstring lastFaceSource;
+    fs::path galleryQuery;
+    HWND restoreHit{};
     std::shared_ptr<std::atomic<bool>> cancelFlag;
     std::shared_ptr<DetectionPreview> preview;
     int displayedFrame{};
@@ -142,6 +151,14 @@ Json viewable(const Form& form) {
     return Json::array();
 }
 
+void previewComparison(HWND owner,cv::Mat left,cv::Mat right,const wchar_t* caption) {
+    cv::resize(left,left,{std::max(1,cvRound(left.cols*(420./left.rows))),420});
+    cv::resize(right,right,{std::max(1,cvRound(right.cols*(420./right.rows))),420});
+    cv::Mat combined;
+    cv::hconcat(left,right,combined);
+    previewNative(owner,combined,caption,false);
+}
+
 void viewResult(HWND owner,const Form& form,bool play) {
     const auto rows=viewable(form);
     auto index=SendMessageW(form.hitChoice,CB_GETCURSEL,0,0);
@@ -151,28 +168,27 @@ void viewResult(HWND owner,const Form& form,bool play) {
         if(row.contains("source") && row.contains("bbox")) {
             const auto source=textPath(row["source"].get<std::string>());
             const auto first=row.value("frame_index",0);
-            const auto frame=frameAt(source,first);
+            const auto frame=row.contains("camera")?readImage(textPath(row.at("snapshot_path").get<std::string>())):frameAt(source,first);
             const auto area=readRect(row["bbox"]);
-            if(play && row.contains("seconds") && row["seconds"].is_number()) playNativeVideo(owner,source,first,frame,area);
+            if(play && !row.contains("camera") && row.contains("seconds") && row["seconds"].is_number()) playNativeVideo(owner,source,first,frame,area);
             else previewNative(owner,frame,L"命中的原始画面",false,area);
         } else if(row.contains("image_path")) {
-            previewNative(owner,readImage(textPath(row["image_path"].get<std::string>())),L"人员库候选原照",false);
+            auto photo=readImage(textPath(row["image_path"].get<std::string>()));
+            if(form.operation=="face.gallery" && !form.galleryQuery.empty()) {
+                previewComparison(owner,readImage(form.galleryQuery),std::move(photo),L"探测照片与人员库候选");
+            } else previewNative(owner,photo,L"人员库候选原照",false);
         } else if(row.contains("file")) {
             previewNative(owner,readImage(textPath(row["file"].get<std::string>())),L"车牌还原候选",false);
         }
     } else if(form.last.contains("preview")) {
         previewNative(owner,readImage(textPath(form.last["preview"].get<std::string>())),L"车牌视频起始帧",false);
     } else if(form.operation=="face.compare") {
-        auto a=readImage(fieldContent(form,"input")), b=readImage(fieldContent(form,"reference"));
-        cv::resize(a,a,{cvRound(a.cols*(420./a.rows)),420});
-        cv::resize(b,b,{cvRound(b.cols*(420./b.rows)),420});
-        cv::Mat joined;
-        cv::hconcat(a,b,joined);
-        previewNative(owner,joined,L"两张原始照片并排",false);
+        previewComparison(owner,readImage(fieldContent(form,"input")),readImage(fieldContent(form,"reference")),
+                          L"两张原始照片并排");
     }
 }
 
-std::vector<fs::path> chooseFiles(HWND owner,Box mode,bool save=false) {
+std::vector<fs::path> chooseFiles(HWND owner,Box mode,bool save=false,bool multiple=false) {
     if(mode==Box::Directory) {
         const auto apartment=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);
         if(FAILED(apartment) && apartment!=RPC_E_CHANGED_MODE) throw std::runtime_error("无法初始化目录选择器。");
@@ -209,7 +225,7 @@ std::vector<fs::path> chooseFiles(HWND owner,Box mode,bool save=false) {
     if(save) {dlg.lpstrDefExt=L"json";dlg.Flags|=OFN_OVERWRITEPROMPT;}
     else {
         dlg.Flags|=OFN_FILEMUSTEXIST;
-        if(mode==Box::Images) dlg.Flags|=OFN_ALLOWMULTISELECT;
+        if(multiple) dlg.Flags|=OFN_ALLOWMULTISELECT;
     }
     if(!(save?GetSaveFileNameW(&dlg):GetOpenFileNameW(&dlg))) return {};
     auto first=fs::path(choices.c_str());
@@ -256,6 +272,10 @@ std::wstring vehicleText(const Json& result) {
     return out.str();
 }
 
+std::wstring selectionLabel(const std::vector<fs::path>& paths) {
+    return paths.size()==1 ? paths.front().wstring() : L"已选择 "+std::to_wstring(paths.size())+L" 个文件";
+}
+
 Json input(Form& form,const std::string& action) {
     auto result=Json::object();
     const auto& selected=workflows[form.index];
@@ -263,15 +283,23 @@ Json input(Form& form,const std::string& action) {
         const auto key=std::string(selected.fields[index].key);
         auto text=content(form.fields[index]);
         if(text.empty()) continue;
+        if(key=="camera" && action!="face.camera") continue;
         if(key=="photos") {
             auto paths=Json::array();
             const auto found=form.selections.find(key);
-            if(found!=form.selections.end() && found->second.size()>1 && text==L"已选择 "+std::to_wstring(found->second.size())+L" 张照片") {
+            if(found!=form.selections.end() && found->second.size()>1 && text==selectionLabel(found->second)) {
                 for(const auto& file:found->second) paths.push_back(pathText(file));
             } else paths.push_back(utf8(text));
             result[key]=std::move(paths);
+        } else if(key=="source" && form.selections.contains(key) && form.selections.at(key).size()>1 &&
+                  text==selectionLabel(form.selections.at(key))) {
+            if(action=="objects.scan" && !fieldContent(form,"video_output").empty()) {
+                throw std::invalid_argument("导出标注视频时请选择一个视频文件。");
+            }
+            result["sources"]=Json::array();
+            for(const auto& file:form.selections.at(key)) result["sources"].push_back(pathText(file));
         } else if(key=="track_id" || key=="frame_index" || key=="step" || key=="count" ||
-                key=="blur_length" || key=="blur_angle" || key=="min_age" || key=="max_age") {
+                key=="blur_length" || key=="blur_angle" || key=="min_age" || key=="max_age" || key=="camera") {
             result[key]=std::stoi(text);
         } else if(key=="threshold") {
             result[key]=std::stod(text);
@@ -283,6 +311,11 @@ Json input(Form& form,const std::string& action) {
             if(text!=L"无" && text!=L"片段" && text!=L"整段") throw std::invalid_argument("导出媒体请选择无、片段或整段。");
             result["include_media"]=text!=L"无";
             result["full_video"]=text==L"整段";
+        } else if(key=="category") {
+            if(text!=L"自动" && text!=L"人物" && text!=L"车辆") {
+                throw std::invalid_argument("语义搜索类别请选择自动、人物或车辆。");
+            }
+            result[key]=text==L"人物"?"person":text==L"车辆"?"vehicle":"auto";
         } else if(key=="mode") {
             result[key]=text==L"人脸" ? "face" : "appearance";
         } else if(key=="target") {
@@ -305,7 +338,9 @@ Json input(Form& form,const std::string& action) {
             result[key]=array;
         } else result[key]=utf8(text);
     }
-    if(action=="vehicle.analyze" && (result.contains("brand") || result.contains("series"))) {
+    if(action=="face.camera" && !result.contains("camera")) {
+        result["camera"]=0;
+    } else if(action=="vehicle.analyze" && (result.contains("brand") || result.contains("series"))) {
         result["manual"]={{"brand",result.value("brand",std::string{})},{"series",result.value("series",std::string{})}};
     } else if(result.contains("output") && fs::is_directory(localPath(textPath(result["output"].get<std::string>())))) {
         result["output"]=pathText(textPath(result["output"].get<std::string>())/(L"分析结果-"+wide(newId()).substr(0,8)));
@@ -338,12 +373,14 @@ void layout(HWND handle,const Form& state) {
         MoveWindow(state.buttons[index],margin+int(index%columns)*139,y+int(index/columns)*31,134,26,TRUE);
     }
     y+=31*static_cast<int>((state.buttons.size()+columns-1)/columns)+4;
-    MoveWindow(state.activity,margin,y+5,client.right-2*margin-340,24,TRUE);
+    MoveWindow(state.activity,margin,y+5,client.right-2*margin-(state.pause?440:340),24,TRUE);
+    if(state.pause) MoveWindow(state.pause,client.right-margin-425,y,94,26,TRUE);
     MoveWindow(state.exportHits,client.right-margin-325,y,110,26,TRUE);
     MoveWindow(state.cancelButton,client.right-margin-211,y,94,26,TRUE);
     MoveWindow(state.save,client.right-margin-107,y,106,26,TRUE);
     y+=34;
-    MoveWindow(state.hitChoice,margin,y,client.right-2*margin-260,170,TRUE);
+    MoveWindow(state.hitChoice,margin,y,client.right-2*margin-(state.restoreHit?390:260),170,TRUE);
+    if(state.restoreHit) MoveWindow(state.restoreHit,client.right-margin-382,y,122,26,TRUE);
     MoveWindow(state.play,client.right-margin-252,y,122,26,TRUE);
     MoveWindow(state.view,client.right-margin-122,y,122,26,TRUE);
     y+=34;
@@ -352,13 +389,18 @@ void layout(HWND handle,const Form& state) {
 
 void buttons(Form& state,bool running) {
     for(auto button:state.buttons) EnableWindow(button,!running);
-    for(auto chooser:state.choosers) if(chooser) EnableWindow(chooser,!running);
+    const auto& fields=workflows[state.index].fields;
+    for(size_t i=0;i<state.choosers.size();++i) if(state.choosers[i]) {
+        EnableWindow(state.choosers[i],!running || (state.faceQueue && fields[i].key==std::string_view("source")));
+    }
     for(auto field:state.fields) EnableWindow(field,!running);
     EnableWindow(state.cancelButton,running);
+    if(state.pause) EnableWindow(state.pause,running && state.preview!=nullptr);
     EnableWindow(state.save,!running && !state.last.is_null());
     EnableWindow(state.exportHits,!running && state.last.contains("hits") && !state.last["hits"].empty());
     EnableWindow(state.view,!running && (!viewable(state).empty() || state.last.contains("preview") || state.operation=="face.compare"));
     EnableWindow(state.play,!running && state.last.contains("hits") && !state.last["hits"].empty());
+    if(state.restoreHit) EnableWindow(state.restoreHit,!running && !viewable(state).empty());
 }
 
 bool showsProcessingPreview(std::string_view action) {
@@ -366,23 +408,84 @@ bool showsProcessingPreview(std::string_view action) {
         action=="semantic.search" || action=="vehicle.analyze" || action=="plate.video";
 }
 
+void setSearchScope(Form& form,std::vector<fs::path> additions) {
+    auto& scope=form.selections["source"];
+    if(additions.empty() || fieldContent(form,"source")!=selectionLabel(scope)) scope.clear();
+    for(auto& path:additions) {
+        if(std::find(scope.begin(),scope.end(),path)==scope.end()) scope.push_back(std::move(path));
+    }
+    const auto& fields=workflows[form.index].fields;
+    for(size_t i=0;i<fields.size();++i) if(fields[i].key==std::string_view("source")) {
+        SetWindowTextW(form.fields[i],scope.empty()?L"":selectionLabel(scope).c_str());
+    }
+}
+
 void beginTask(HWND handle,Form& state,std::string action,Json request) {
+    state.galleryQuery=action=="face.gallery"?textPath(request.value("input",std::string{})):fs::path{};
     auto flag=std::make_shared<std::atomic<bool>>(false);
     state.preview=showsProcessingPreview(action)?std::make_shared<DetectionPreview>():nullptr;
+    state.faceQueue.reset();
+    if(action=="face.scan" && !request.contains("camera")) {
+        if(!state.faceSession) state.faceSession=std::make_shared<FaceScanSession>();
+        state.faceSession->beginBatch();
+        state.faceQueue=state.faceSession;
+        state.lastFaceSource=fieldContent(state,"source");
+    }
     state.displayedFrame=0;
     state.operation=action;
     state.pending=std::async(std::launch::async,[models=state.models,worker=state.worker,action=std::move(action),
-        request=std::move(request),flag,preview=state.preview] {
-        return runOperation(action,request,localPath(models),worker,*flag,preview.get());
+        request=std::move(request),flag,preview=state.preview,faceQueue=state.faceQueue] {
+        return runOperation(action,request,localPath(models),worker,*flag,preview.get(),faceQueue.get());
     });
     state.cancelFlag=flag;
     SetWindowTextW(state.activity,L"正在处理…");
     if(state.preview) {
+        if(state.pause) SetWindowTextW(state.pause,L"暂停");
         ShowWindow(state.result,SW_HIDE);
         InvalidateRect(handle,nullptr,TRUE);
     }
     buttons(state,true);
     SetTimer(handle,timer,state.preview?67:150,nullptr);
+}
+
+std::vector<fs::path> typedFaceSources(const std::wstring& text) {
+    const auto trim=[](std::wstring value) {
+        const auto first=value.find_first_not_of(L" \t\r\n\"");
+        const auto last=value.find_last_not_of(L" \t\r\n\"");
+        return first==std::wstring::npos?std::wstring{}:value.substr(first,last-first+1);
+    };
+    const auto value=trim(text);
+    if(value.empty()) return {};
+    if(fs::is_regular_file(localPath(value))) return {value};
+    std::vector<fs::path> paths;
+    size_t start=0;
+    for(size_t i=0;i<=value.size();++i) {
+        if(i<value.size() && value[i]!=L';' && value[i]!=L'\n') continue;
+        const auto part=trim(value.substr(start,i-start));
+        start=i+1;
+        if(part.empty()) continue;
+        if(!fs::is_regular_file(localPath(part))) return {};
+        paths.emplace_back(part);
+    }
+    return paths;
+}
+
+void submitFaceSources(HWND handle,Form& state,const std::vector<fs::path>& paths) {
+    std::vector<fs::path> local;
+    for(const auto& path:paths) local.push_back(localPath(path));
+    if(state.pending.valid()) {
+        if(!state.faceQueue || *state.cancelFlag) return;
+        if(!state.faceQueue->append(local)) {
+            state.deferredFaceSources.insert(state.deferredFaceSources.end(),local.begin(),local.end());
+        }
+        SetWindowTextW(state.activity,L"已将素材加入检索队列。");
+        return;
+    }
+    auto request=input(state,"face.scan");
+    request.erase("source");
+    request["sources"]=Json::array();
+    for(const auto& path:local) request["sources"].push_back(pathText(path));
+    beginTask(handle,state,"face.scan",std::move(request));
 }
 
 RECT previewArea(HWND handle,const Form& state) {
@@ -435,9 +538,11 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
         }
         state->activity=child(handle,L"STATIC",L"",0,0);
         state->cancelButton=child(handle,L"BUTTON",L"取消任务",WS_TABSTOP,cancelAction);
+        if(state->index==1 || state->index==2) state->pause=child(handle,L"BUTTON",L"暂停",WS_TABSTOP,pauseAction);
         state->save=child(handle,L"BUTTON",L"导出结果 JSON",WS_TABSTOP,saveAction);
         state->exportHits=child(handle,L"BUTTON",L"导出目标截图",WS_TABSTOP,exportHitsAction);
         state->view=child(handle,L"BUTTON",L"预览选中画面",WS_TABSTOP,viewAction);
+        if(state->index==3) state->restoreHit=child(handle,L"BUTTON",L"送去还原",WS_TABSTOP,restoreHitAction);
         state->play=child(handle,L"BUTTON",L"从命中帧播放",WS_TABSTOP,playAction);
         state->hitChoice=child(handle,L"COMBOBOX",L"",CBS_DROPDOWNLIST|WS_TABSTOP|WS_VSCROLL,600);
         state->result=child(handle,L"EDIT",L"",ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL|WS_VSCROLL|WS_TABSTOP,800);
@@ -465,11 +570,39 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
     case WM_COMMAND: {
         const auto id=LOWORD(wparam);
         try {
+            const auto& fields=workflows[state->index].fields;
+            if(state->index==1 && HIWORD(wparam)==EN_CHANGE && id>=700 && id<700+fields.size() &&
+               fields[id-700].key==std::string_view("source")) {
+                SetTimer(handle,sourceTimer,400,nullptr);
+                return 0;
+            }
             if(id==cancelAction && state->cancelFlag) {
                 *state->cancelFlag=true;
+                state->deferredFaceSources.clear();
+                if(state->pause) EnableWindow(state->pause,FALSE);
                 SetWindowTextW(state->activity,L"等待当前操作结束…");
+            } else if(id==pauseAction && state->preview && !*state->cancelFlag) {
+                const bool paused=!state->preview->paused.load();
+                state->preview->paused=paused;
+                SetWindowTextW(state->pause,paused?L"继续":L"暂停");
+                SetWindowTextW(state->activity,paused?L"已暂停。":L"继续检测…");
             } else if(id==saveAction && !state->last.is_null()) {
                 if(const auto paths=chooseFiles(handle,Box::Json,true);!paths.empty()) writeJson(paths.front(),state->last);
+            } else if(id==restoreHitAction && !state->pending.valid()) {
+                const auto hits=viewable(*state);
+                const auto index=std::max<LRESULT>(0,SendMessageW(state->hitChoice,CB_GETCURSEL,0,0));
+                if(static_cast<size_t>(index)<hits.size()) {
+                    const auto& hit=hits[index];
+                    const SearchRestorationInput result{frameAt(textPath(hit.at("source").get<std::string>()),
+                        hit.value("frame_index",0)),readRect(hit.at("bbox"))};
+                    const auto root=GetAncestor(handle,GA_ROOTOWNER);
+                    if(!SendMessageW(root,loadSearchRestoration,0,reinterpret_cast<LPARAM>(&result))) {
+                        throw std::runtime_error("图像还原窗口当前忙，请稍后重试。");
+                    }
+                    SetForegroundWindow(root);
+                    if(GetAncestor(handle,GA_ROOT)==handle) DestroyWindow(handle);
+                    return 0;
+                }
             } else if((id==viewAction || id==playAction) && !state->pending.valid()) {
                 viewResult(handle,*state,id==playAction);
             } else if(id==exportHitsAction && state->last.contains("hits") && !state->pending.valid()) {
@@ -496,7 +629,6 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
                         SetWindowTextW(state->fields[id-chooseBase],coordinates.c_str());
                         const std::string_view counterpart=field.type==Box::Line?"trigger_area":"trigger_line";
                         if(std::string_view(field.key)!="bbox") {
-                            const auto& fields=workflows[state->index].fields;
                             for(size_t i=0;i<fields.size();++i) {
                                 if(fields[i].key==counterpart) SetWindowTextW(state->fields[i],L"");
                             }
@@ -504,18 +636,31 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
                     }
                     return 0;
                 }
-                auto paths=chooseFiles(handle,field.type);
+                const auto key=std::string_view(field.key);
+                const bool multiple=key=="photos" || (key=="source" && state->index>=1 && state->index<=4);
+                auto paths=chooseFiles(handle,field.type,false,multiple);
                 if(!paths.empty()) {
+                    if(key=="source" && (state->index==3 || state->index==4)) {
+                        setSearchScope(*state,std::move(paths));
+                        return 0;
+                    }
                     state->selections[field.key]=paths;
-                    const auto shown=paths.size()==1 ? paths.front().wstring() : L"已选择 "+std::to_wstring(paths.size())+L" 张照片";
+                    const auto shown=selectionLabel(paths);
                     SetWindowTextW(state->fields[id-chooseBase],shown.c_str());
+                    if(state->index==1 && key=="source") submitFaceSources(handle,*state,paths);
                 }
             } else if(id>=actionBase && id<actionBase+state->buttons.size() && !state->pending.valid()) {
                 auto action=std::string(workflows[state->index].actions[id-actionBase].name);
+                if(action=="sources.folder" || action=="sources.clear") {
+                    if(action=="sources.clear") setSearchScope(*state,{});
+                    else if(auto folders=chooseFiles(handle,Box::Directory);!folders.empty()) setSearchScope(*state,std::move(folders));
+                    return 0;
+                }
                 if(action=="person.remove" || action=="person.sample.remove" || action=="library.remove") {
                     if(MessageBoxW(handle,L"确认移除所填 ID 对应的记录？",L"人员库",MB_OKCANCEL|MB_ICONQUESTION)!=IDOK) return 0;
                 }
                 auto request=input(*state,action);
+                if(action=="face.camera") action="face.scan";
                 if(action=="plate.preview") {request.erase("bbox"); action="plate.video";}
                 if(action=="associate" || action=="reject" || action=="undo_rejection" || action=="remove_association") {
                     request["action"]=action;
@@ -529,11 +674,26 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
         return 0;
     }
     case WM_TIMER:
+        if(wparam==sourceTimer) {
+            KillTimer(handle,sourceTimer);
+            if(!state->pending.valid()) {
+                const auto source=fieldContent(*state,"source");
+                try {
+                    if(source!=state->lastFaceSource) {
+                        const auto inputs=typedFaceSources(source);
+                        if(!inputs.empty()) submitFaceSources(handle,*state,inputs);
+                    }
+                } catch(const std::exception& error) {
+                    SetWindowTextW(state->activity,wide(error.what()).c_str());
+                }
+            }
+            return 0;
+        }
         if(wparam==timer && state->preview) {
             const auto frame=state->preview->current();
             if(frame.index!=state->displayedFrame) {
                 state->displayedFrame=frame.index;
-                if(!*state->cancelFlag) {
+                if(!state->preview->paused && !*state->cancelFlag) {
                     const auto status=L"已处理 "+std::to_wstring(frame.index)+L" 帧 · 当前 "+std::to_wstring(frame.detections)+L" 个目标";
                     SetWindowTextW(state->activity,status.c_str());
                 }
@@ -581,12 +741,19 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
                 ShowWindow(state->result,SW_SHOW);
             }
             state->cancelFlag.reset();
+            state->faceQueue.reset();
             buttons(*state,false);
+            if(!state->deferredFaceSources.empty()) {
+                const auto paths=std::exchange(state->deferredFaceSources,{});
+                try {submitFaceSources(handle,*state,paths);}
+                catch(const std::exception& error) {SetWindowTextW(state->activity,wide(error.what()).c_str());}
+            }
         }
         return 0;
     case WM_CLOSE:
         if(state->pending.valid()) {
             *state->cancelFlag=true;
+            state->deferredFaceSources.clear();
             SetWindowTextW(state->activity,L"正在结束当前操作，请稍候。");
             return 0;
         }

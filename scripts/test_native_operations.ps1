@@ -62,6 +62,26 @@ try {
     $Scanned = Invoke-NativeOperation "face.scan" @{ source = $FaceImage }
     Require (@($Scanned.hits).Count -gt 0 -and $Scanned.hits[0].accepted) "Gallery identification returned no accepted match."
     $Checks.face_search = $true
+    $TrackFixture = Join-Path $OutputDirectory "face-track.mkv"
+    & $FFmpeg -v error -loop 1 -framerate 5 -i $FaceImage -frames:v 6 -c:v ffv1 $TrackFixture
+    Require ($LASTEXITCODE -eq 0) "Could not generate the face track fixture."
+    $Track = Invoke-NativeOperation "face.scan" @{ source = $TrackFixture } "face-track"
+    Require (@($Track.hits).Count -eq 1 -and $Track.hits[0].accepted -and
+        $Track.hits[0].observations -ge 4 -and $Track.hits[0].candidate.person_id -eq $Person.id) "Fused video track did not upgrade to a confirmed match."
+    $RecurringFixture = Join-Path $OutputDirectory "face-track-recurring.mkv"
+    & $FFmpeg -v error -loop 1 -framerate 5 -i $FaceImage -vf 'drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill:enable=between(n\,4\,11)' -frames:v 16 -c:v ffv1 $RecurringFixture
+    Require ($LASTEXITCODE -eq 0) "Could not generate the recurring face fixture."
+    $Recurring = Invoke-NativeOperation "face.scan" @{ source = $RecurringFixture } "face-recurring"
+    Require (@($Recurring.failures).Count -eq 0 -and @($Recurring.hits).Count -eq 1 -and
+        $Recurring.hits[0].accepted -and $Recurring.hits[0].candidate.person_id -eq $Person.id -and
+        @(Get-ChildItem -LiteralPath (Split-Path -Parent $Recurring.hits[0].face_path) -File).Count -eq 2) "A confirmed person returning in the same video left duplicate candidates or snapshots."
+    $Checks.face_video_tracking = $true
+    $Mixed = Invoke-NativeOperation "face.scan" @{
+        sources = @($FaceImage, $TrackFixture); library_id = "default"
+    } "face-mixed-sources"
+    Require (@($Mixed.failures).Count -eq 0 -and @($Mixed.hits).Count -eq 2 -and
+        @($Mixed.hits | Where-Object accepted | Select-Object -ExpandProperty source -Unique).Count -eq 2) "Mixed image and video sources did not both match in one batch."
+    $Checks.face_mixed_sources = $true
     $Hit = $Scanned.hits[0]
     $Mark = Invoke-NativeOperation "annotation.write" @{
         session_id = $Hit.session_id; source = $Hit.source; track_id = $Hit.track_id; frame_index = $Hit.frame_index

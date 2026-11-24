@@ -38,12 +38,13 @@ DetectionPreview::Frame DetectionPreview::current() {
 }
 
 Json runOperation(const std::string& action,const Json& request,const std::filesystem::path& models,
-                  const std::filesystem::path& worker,const std::atomic<bool>& cancel,DetectionPreview* preview) {
+                  const std::filesystem::path& worker,const std::atomic<bool>& cancel,DetectionPreview* preview,
+                  FaceScanSession* faceQueue) {
     if(action=="vehicle.analyze") return analyzeVehicle(request,models,worker,cancel,preview);
     if(action=="plate.video") return plateVideo(request,cancel,preview);
     if(action=="semantic.search" || action=="visual.search" || action=="objects.scan" || action=="face.scan" ||
        action=="hits.export") {
-        return mediaOperation(action,request,models,cancel,preview);
+        return mediaOperation(action,request,models,cancel,preview,faceQueue);
     }
     return peopleOperation(action,request,models,cancel);
 }

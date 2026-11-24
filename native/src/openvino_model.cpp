@@ -39,7 +39,7 @@ Ports bindPorts(const std::vector<ov::Output<const ov::Node>>& ports) {
 
 struct OpenVinoModel::State {
     explicit State(const std::filesystem::path& path)
-        : model(core().compile_model(path.wstring(),"GPU",ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY))),
+        : model(compile(path)),
           request(model.create_infer_request()) {
         const auto devices=model.get_property(ov::execution_devices);
         if(devices.empty() || !std::ranges::all_of(devices,[](std::string_view name){return name.starts_with("GPU");})) {
@@ -47,6 +47,16 @@ struct OpenVinoModel::State {
         }
         inputs=bindPorts(model.inputs());
         outputs=bindPorts(model.outputs());
+    }
+
+    static ov::CompiledModel compile(const std::filesystem::path& path) {
+        const auto latency=ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY);
+        if(path.stem()==L"rtdetr_v2_r50vd") {
+            auto model=core().read_model(path.wstring());
+            model->reshape(ov::PartialShape{1,3,640,640});
+            return core().compile_model(model,"GPU",latency,ov::hint::inference_precision(ov::element::f32));
+        }
+        return core().compile_model(path.wstring(),"GPU",latency);
     }
 
     ov::CompiledModel model;

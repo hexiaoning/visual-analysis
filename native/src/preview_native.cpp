@@ -23,7 +23,7 @@ struct Viewer {
     cv::Point end;
     std::mutex mutex;
     cv::Mat next;
-    std::atomic<bool> cancel{};
+    std::atomic<bool> cancel{},paused{};
     std::jthread playback;
 };
 
@@ -121,6 +121,11 @@ LRESULT CALLBACK route(HWND window,UINT message,WPARAM wParam,LPARAM lParam) {
         return 0;
     }
     case WM_KEYDOWN:
+        if(wParam==VK_SPACE && view->playback.joinable()) {
+            view->paused=!view->paused.load();
+            SetWindowTextW(window,view->paused?L"已暂停 · 空格继续播放":L"源视频回看 · 空格暂停");
+            return 0;
+        }
         if(wParam==VK_ESCAPE) {DestroyWindow(window);return 0;}
         break;
     case WM_DESTROY:
@@ -193,8 +198,16 @@ void playNativeVideo(HWND owner,const std::filesystem::path& source,int first,
                     startTime=seconds;start=steady_clock::now();
                     return !state.cancel;
                 }
-                const auto due=start+duration_cast<steady_clock::duration>(duration<double>(seconds-*startTime));
-                while(!state.cancel && steady_clock::now()<due) std::this_thread::sleep_for(milliseconds(10));
+                const auto offset=duration_cast<steady_clock::duration>(duration<double>(seconds-*startTime));
+                while(!state.cancel) {
+                    if(state.paused) {
+                        const auto pausedAt=steady_clock::now();
+                        while(state.paused && !state.cancel) std::this_thread::sleep_for(milliseconds(10));
+                        start+=steady_clock::now()-pausedAt;
+                    }
+                    if(steady_clock::now()>=start+offset) break;
+                    std::this_thread::sleep_for(milliseconds(10));
+                }
                 if(state.cancel) return false;
                 cv::Mat converted;
                 cv::cvtColor(frame,converted,cv::COLOR_BGR2BGRA);
@@ -204,7 +217,7 @@ void playNativeVideo(HWND owner,const std::filesystem::path& source,int first,
             },1,state.cancel,first);
         } catch(const std::exception&) {}
     });
-    try {showViewer(owner,state,L"从命中帧播放本机源视频");}
+    try {showViewer(owner,state,L"从命中帧播放本机源视频 · 空格暂停");}
     catch(...) {state.cancel=true;throw;}
 }
 }
