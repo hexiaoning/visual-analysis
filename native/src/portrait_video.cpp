@@ -2,6 +2,7 @@
 #include "local_images.h"
 
 #include <array>
+#include <climits>
 #include <cerrno>
 #include <chrono>
 #include <cmath>
@@ -308,7 +309,8 @@ void render(const fs::path& source,const fs::path& temporary,const FrameProcesso
 
 }
 
-int visitVideo(const fs::path& path,const FrameVisitor& visitor,int interval,const std::atomic<bool>& cancel,int firstFrame,const FrameSelector& select) {
+int visitVideo(const fs::path& path,const FrameVisitor& visitor,int interval,const std::atomic<bool>& cancel,
+               int firstFrame,const FrameSelector& select,std::atomic<int>* totalFrames) {
     if(interval<1) throw std::invalid_argument("抽帧间隔必须大于 0。");
     const auto source=localPath(path);
     if(!fs::is_regular_file(source)) throw std::invalid_argument("请选择本机视频。");
@@ -328,6 +330,12 @@ int visitVideo(const fs::path& path,const FrameVisitor& visitor,int interval,con
     check(avcodec_open2(decoder.context,codec,nullptr),"打开视频解码器失败。");
     const auto orientation=rotation(track->codecpar);
     const double frameRate=av_q2d(av_guess_frame_rate(reader.context,const_cast<AVStream*>(track),nullptr));
+    if(totalFrames && *totalFrames==0) {
+        const double duration=track->duration>0?track->duration*av_q2d(track->time_base):
+            reader.context->duration>0?double(reader.context->duration)/AV_TIME_BASE:0.;
+        const double estimate=track->nb_frames>0?double(track->nb_frames):std::ceil(duration*frameRate);
+        if(std::isfinite(estimate) && estimate>0.) *totalFrames=static_cast<int>(std::min(estimate,double(INT_MAX)));
+    }
     Frame frame;
     Packet packet;
     Scaler scaler;
@@ -368,6 +376,7 @@ int visitVideo(const fs::path& path,const FrameVisitor& visitor,int interval,con
         if(status!=AVERROR_EOF) check(status,"视频提前结束。");
         check(avcodec_send_packet(decoder.context,nullptr),"结束视频解码失败。");
         receive();
+        if(totalFrames && !cancel && !stopped) *totalFrames=frames;
     }
     if(!frames && !cancel) throw std::runtime_error("视频无可读画面。");
     return frames;
