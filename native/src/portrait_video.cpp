@@ -117,8 +117,9 @@ cv::Mat imageFromFrame(const AVFrame& frame, Scaler& scaler, int orientation) {
     cv::Mat pixels(frame.height,frame.width,CV_8UC3);
     uint8_t* planes[4]{pixels.data};
     int strides[4]{static_cast<int>(pixels.step)};
-    check(sws_scale(scaler.context,frame.data,frame.linesize,0,frame.height,planes,strides),
-          "Video pixel conversion failed.");
+    const auto rows=sws_scale(scaler.context,frame.data,frame.linesize,0,frame.height,planes,strides);
+    check(rows,"Video pixel conversion failed.");
+    if(rows!=frame.height) throw std::runtime_error("视频画面像素转换不完整。");
     if(orientation) {
         constexpr std::array<int,4> rotations{0,cv::ROTATE_90_COUNTERCLOCKWISE,cv::ROTATE_180,cv::ROTATE_90_CLOCKWISE};
         cv::rotate(pixels,pixels,rotations[orientation]);
@@ -139,6 +140,12 @@ void openVideo(Input& reader,const fs::path& source,AVIOInterruptCB callbacks) {
     check(avformat_find_stream_info(reader.context,nullptr),"Cannot read the video tracks.");
 }
 
+int64_t videoStart(const AVFormatContext& input,const AVStream& track) {
+    if(track.start_time!=AV_NOPTS_VALUE) return track.start_time;
+    if(input.start_time!=AV_NOPTS_VALUE) return av_rescale_q(input.start_time,AV_TIME_BASE_Q,track.time_base);
+    return 0;
+}
+
 void render(const fs::path& source,const fs::path& temporary,const FrameProcessor& transform,
             VideoProgress& progress,bool archive,std::optional<std::pair<double,double>> clip={}) {
     Input reader;
@@ -147,6 +154,7 @@ void render(const fs::path& source,const fs::path& temporary,const FrameProcesso
     const auto videoIndex = av_find_best_stream(reader.context, AVMEDIA_TYPE_VIDEO, -1, -1, &decoder, 0);
     check(videoIndex, "No decodable video stream.");
     auto* video = reader.context->streams[videoIndex];
+    const auto sourceStart=videoStart(*reader.context,*video);
     Codec decoding{avcodec_alloc_context3(decoder)};
     if (!decoding.context) throw std::bad_alloc();
     check(avcodec_parameters_to_context(decoding.context, video->codecpar), "Invalid video properties.");
@@ -238,7 +246,7 @@ void render(const fs::path& source,const fs::path& temporary,const FrameProcesso
                 throw std::runtime_error("A source frame is missing its presentation timestamp.");
             }
             if(clip) {
-                const auto time=frame.data->best_effort_timestamp*av_q2d(video->time_base);
+                const auto time=(frame.data->best_effort_timestamp-sourceStart)*av_q2d(video->time_base);
                 if(time<clip->first) {av_frame_unref(frame.data);continue;}
                 if(time>clip->second) {clipDone=true;return;}
                 if(!firstTimestamp) firstTimestamp=frame.data->best_effort_timestamp;
@@ -262,7 +270,7 @@ void render(const fs::path& source,const fs::path& temporary,const FrameProcesso
                 check(sws_scale(outputScaler.context,planes,strikes,0,padded.rows,output.data->data,output.data->linesize),
                     "Cannot convert the MP4 frame.");
             }
-            output.data->pts=av_rescale_q(frame.data->best_effort_timestamp-firstTimestamp.value_or(0),
+            output.data->pts=av_rescale_q(frame.data->best_effort_timestamp-firstTimestamp.value_or(archive?0:sourceStart),
                                          video->time_base,encoding.context->time_base);
             output.data->duration=av_rescale_q(frame.data->duration,video->time_base,encoding.context->time_base);
             sendFrame(output.data);
@@ -300,7 +308,7 @@ void render(const fs::path& source,const fs::path& temporary,const FrameProcesso
 
 }
 
-int visitVideo(const fs::path& path,const FrameVisitor& visitor,int interval,const std::atomic<bool>& cancel) {
+int visitVideo(const fs::path& path,const FrameVisitor& visitor,int interval,const std::atomic<bool>& cancel,int firstFrame) {
     if(interval<1) throw std::invalid_argument("抽帧间隔必须大于 0。");
     const auto source=localPath(path);
     if(!fs::is_regular_file(source)) throw std::invalid_argument("请选择本机视频。");
@@ -311,10 +319,12 @@ int visitVideo(const fs::path& path,const FrameVisitor& visitor,int interval,con
     const auto videoIndex=av_find_best_stream(reader.context,AVMEDIA_TYPE_VIDEO,-1,-1,&codec,0);
     check(videoIndex,"无法找到视频轨。");
     const auto* track=reader.context->streams[videoIndex];
+    const auto sourceStart=videoStart(*reader.context,*track);
     Codec decoder{avcodec_alloc_context3(codec)};
     if(!decoder.context) throw std::bad_alloc();
     check(avcodec_parameters_to_context(decoder.context,track->codecpar),"读取视频参数失败。");
     decoder.context->thread_count=2;
+    decoder.context->pkt_timebase=track->time_base;
     check(avcodec_open2(decoder.context,codec,nullptr),"打开视频解码器失败。");
     const auto orientation=rotation(track->codecpar);
     const double frameRate=av_q2d(av_guess_frame_rate(reader.context,const_cast<AVStream*>(track),nullptr));
@@ -323,7 +333,7 @@ int visitVideo(const fs::path& path,const FrameVisitor& visitor,int interval,con
     Scaler scaler;
     if(!frame.data || !packet.data) throw std::bad_alloc();
     int frames=0;
-    double previous=-1;
+    std::optional<double> previous;
     bool stopped=false;
     auto receive=[&]{
         while(!cancel && !stopped) {
@@ -331,14 +341,14 @@ int visitVideo(const fs::path& path,const FrameVisitor& visitor,int interval,con
             if(status==AVERROR(EAGAIN) || status==AVERROR_EOF) return;
             check(status,"读取视频帧失败。");
             const auto index=frames++;
-            if(index%interval==0) {
-                auto seconds=frame.data->best_effort_timestamp==AV_NOPTS_VALUE ? -1. :
-                    frame.data->best_effort_timestamp*av_q2d(track->time_base);
-                if(!std::isfinite(seconds) || seconds<=previous) {
-                    if(!(frameRate>0 && std::isfinite(frameRate))) throw std::runtime_error("视频缺少有效时间戳。");
-                    seconds=index/frameRate;
-                }
-                previous=seconds;
+            const auto timestamp=frame.data->best_effort_timestamp;
+            auto seconds=timestamp==AV_NOPTS_VALUE ? -1. : (timestamp-sourceStart)*av_q2d(track->time_base);
+            if(!std::isfinite(seconds) || seconds<0 || (previous && seconds<=*previous)) {
+                if(frameRate>0 && std::isfinite(frameRate)) seconds=previous ? *previous+1./frameRate : 0.;
+                else if(index%interval==0 && index>=firstFrame) throw std::runtime_error("视频缺少有效时间戳。");
+            }
+            if(seconds>=0 && (!previous || seconds>*previous)) previous=seconds;
+            if(index%interval==0 && index>=firstFrame) {
                 stopped=!visitor(imageFromFrame(*frame.data,scaler,orientation),index,seconds);
             }
             av_frame_unref(frame.data);

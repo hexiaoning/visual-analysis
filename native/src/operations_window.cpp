@@ -88,6 +88,8 @@ struct Form {
     HWND result{},activity{},cancelButton{},save{},exportHits{},view{},play{},hitChoice{};
     Json last;
     std::shared_ptr<std::atomic<bool>> cancelFlag;
+    std::shared_ptr<DetectionPreview> preview;
+    int displayedFrame{};
     std::future<Json> pending;
     std::string operation;
 };
@@ -127,7 +129,7 @@ cv::Mat frameAt(const fs::path& path,int index) {
         if(index!=position) return true;
         result=frame.clone();
         return false;
-    },1,cancel);
+    },1,cancel,index);
     if(result.empty()) throw std::runtime_error("源文件没有对应的视频画面。");
     return result;
 }
@@ -354,15 +356,55 @@ void buttons(Form& state,bool running) {
     EnableWindow(state.play,!running && state.last.contains("hits") && !state.last["hits"].empty());
 }
 
+bool showsProcessingPreview(std::string_view action) {
+    return action=="face.scan" || action=="objects.scan" || action=="visual.search" ||
+        action=="semantic.search" || action=="vehicle.analyze" || action=="plate.video";
+}
+
 void beginTask(HWND handle,Form& state,std::string action,Json request) {
     auto flag=std::make_shared<std::atomic<bool>>(false);
+    state.preview=showsProcessingPreview(action)?std::make_shared<DetectionPreview>():nullptr;
+    state.displayedFrame=0;
     state.operation=action;
     state.pending=std::async(std::launch::async,[models=state.models,worker=state.worker,action=std::move(action),
-        request=std::move(request),flag] {return runOperation(action,request,localPath(models),worker,*flag);});
+        request=std::move(request),flag,preview=state.preview] {
+        return runOperation(action,request,localPath(models),worker,*flag,preview.get());
+    });
     state.cancelFlag=flag;
     SetWindowTextW(state.activity,L"正在处理…");
+    if(state.preview) {
+        ShowWindow(state.result,SW_HIDE);
+        InvalidateRect(handle,nullptr,TRUE);
+    }
     buttons(state,true);
-    SetTimer(handle,timer,150,nullptr);
+    SetTimer(handle,timer,state.preview?67:150,nullptr);
+}
+
+RECT previewArea(HWND handle,const Form& state) {
+    RECT area{};
+    GetWindowRect(state.result,&area);
+    MapWindowPoints(nullptr,handle,reinterpret_cast<POINT*>(&area),2);
+    return area;
+}
+
+void paintProcessingPreview(HDC dc,RECT area,const cv::Mat& image) {
+    FillRect(dc,&area,GetSysColorBrush(COLOR_WINDOW));
+    if(image.empty()) {
+        DrawTextW(dc,L"等待处理画面…",-1,&area,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+        return;
+    }
+    const auto scale=std::min(double(area.right-area.left)/image.cols,double(area.bottom-area.top)/image.rows);
+    if(scale<=0.) return;
+    const int width=cvRound(image.cols*scale),height=cvRound(image.rows*scale);
+    BITMAPINFO bitmap{};
+    bitmap.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);
+    bitmap.bmiHeader.biWidth=image.cols;
+    bitmap.bmiHeader.biHeight=-image.rows;
+    bitmap.bmiHeader.biPlanes=1;
+    bitmap.bmiHeader.biBitCount=32;
+    SetStretchBltMode(dc,HALFTONE);
+    StretchDIBits(dc,(area.left+area.right-width)/2,(area.top+area.bottom-height)/2,width,height,
+        0,0,image.cols,image.rows,image.data,&bitmap,DIB_RGB_COLORS,SRCCOPY);
 }
 
 LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
@@ -401,7 +443,17 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
     }
     case WM_SIZE:
         if(state->result) layout(handle,*state);
+        if(state->preview) InvalidateRect(handle,nullptr,TRUE);
         return 0;
+    case WM_PAINT:
+        if(state->preview) {
+            PAINTSTRUCT paint{};
+            const auto dc=BeginPaint(handle,&paint);
+            paintProcessingPreview(dc,previewArea(handle,*state),state->preview->current().image);
+            EndPaint(handle,&paint);
+            return 0;
+        }
+        break;
     case WM_GETMINMAXINFO:
         reinterpret_cast<MINMAXINFO*>(lparam)->ptMinTrackSize={700,630};
         return 0;
@@ -460,6 +512,18 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
         return 0;
     }
     case WM_TIMER:
+        if(wparam==timer && state->preview) {
+            const auto frame=state->preview->current();
+            if(frame.index!=state->displayedFrame) {
+                state->displayedFrame=frame.index;
+                if(!*state->cancelFlag) {
+                    const auto status=L"已处理 "+std::to_wstring(frame.index)+L" 帧 · 当前 "+std::to_wstring(frame.detections)+L" 个目标";
+                    SetWindowTextW(state->activity,status.c_str());
+                }
+                const auto area=previewArea(handle,*state);
+                InvalidateRect(handle,&area,FALSE);
+            }
+        }
         if(wparam==timer && state->pending.valid() &&
            state->pending.wait_for(std::chrono::seconds(0))==std::future_status::ready) {
             KillTimer(handle,timer);
@@ -494,6 +558,10 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
             } catch(const std::exception& error) {
                 SetWindowTextW(state->activity,L"操作未完成。");
                 SetWindowTextW(state->result,wide(error.what()).c_str());
+            }
+            if(state->preview) {
+                state->preview.reset();
+                ShowWindow(state->result,SW_SHOW);
             }
             state->cancelFlag.reset();
             buttons(*state,false);

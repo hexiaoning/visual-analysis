@@ -166,8 +166,7 @@ void playNativeVideo(HWND owner,const std::filesystem::path& source,int first,
         std::optional<double> startTime;
         auto start=steady_clock::now();
         try {
-            visitVideo(source,[&](const cv::Mat& frame,int index,double seconds){
-                if(index<first) return !state.cancel;
+            visitVideo(source,[&](const cv::Mat& frame,int,double seconds){
                 if(!startTime) {
                     startTime=seconds;start=steady_clock::now();
                     return !state.cancel;
@@ -180,7 +179,7 @@ void playNativeVideo(HWND owner,const std::filesystem::path& source,int first,
                 std::lock_guard lock(state.mutex);
                 state.next=std::move(converted);
                 return true;
-            },1,state.cancel);
+            },1,state.cancel,first);
         } catch(const std::exception&) {}
     });
     try {showViewer(owner,state,L"从命中帧播放本机源视频");}

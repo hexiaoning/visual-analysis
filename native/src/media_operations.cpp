@@ -57,10 +57,10 @@ std::set<fs::path> sources(const Json& input) {
     return result;
 }
 
-void sample(const fs::path& path,const FrameVisitor& visitor,int interval,const std::atomic<bool>& cancel) {
+void sample(const fs::path& path,const FrameVisitor& visitor,int interval,const std::atomic<bool>& cancel, int firstFrame=0) {
     if(cancel) return;
     if(isImage(path)) visitor(readImage(path),0,-1.);
-    else visitVideo(path,visitor,interval,cancel);
+    else visitVideo(path,visitor,interval,cancel,firstFrame);
 }
 
 std::optional<fs::path> outputDirectory(const Json& request) {
@@ -173,7 +173,8 @@ Json faceConfig() {
     return fs::exists(path)?readJson(path):Json::object();
 }
 
-Json visualSearch(const Json& request,const fs::path& models,const std::atomic<bool>& cancel) {
+Json visualSearch(const Json& request,const fs::path& models,const std::atomic<bool>& cancel,
+                    DetectionPreview* preview) {
     auto query=readImage(textPath(request.at("input").get<std::string>()));
     if(request.contains("bbox")) {
         const auto rect=readRect(request.at("bbox"));
@@ -190,9 +191,11 @@ Json visualSearch(const Json& request,const fs::path& models,const std::atomic<b
         target=engine->reference(query).feature;
     } else appearance=std::make_unique<AppearanceMatcher>(query);
     Json matches=Json::array(),failures=Json::array();
+    int processed=0;
     for(const auto& source:sources(request)) {
         if(cancel) break;
         try {sample(source,[&](const cv::Mat& pixels,int frame,double seconds){
+            const auto prior=matches.size();
             if(face) {
                 for(const auto& found:engine->faces(pixels)) {
                     const auto score=similarity(target,found.feature);
@@ -201,6 +204,10 @@ Json visualSearch(const Json& request,const fs::path& models,const std::atomic<b
             } else {
                 const auto match=appearance->find(pixels);
                 if(match.score>=threshold && !match.box.empty()) matches.push_back(hit(source,frame,seconds,match.box,match.score,match.method));
+            }
+            ++processed;
+            if(preview && preview->refreshDue() && seconds>=0 && !cancel) {
+                preview->update(pixels,processed,static_cast<int>(matches.size()-prior));
             }
             if(matches.size()>1000) rank(matches);
             return !cancel;
@@ -212,7 +219,8 @@ Json visualSearch(const Json& request,const fs::path& models,const std::atomic<b
     return {{"hits",matches},{"failures",failures},{"cancelled",cancel.load()}};
 }
 
-Json objectScan(const Json& request,const fs::path& models,const std::atomic<bool>& cancel) {
+Json objectScan(const Json& request,const fs::path& models,const std::atomic<bool>& cancel,
+                DetectionPreview* preview) {
     ObjectDetector detector(models);
     const auto threshold=std::clamp(request.value("threshold",.5),.05,.99);
     const bool people=request.value("people",true),vehicles=request.value("vehicles",true);
@@ -224,8 +232,12 @@ Json objectScan(const Json& request,const fs::path& models,const std::atomic<boo
         const auto first=localPath(textPath(request.at("source").get<std::string>()));
         const auto target=localPath(textPath(video));
         renderObjectVideo(first,target,[&](const cv::Mat& frame){
+            if(preview && !preview->wait(cancel)) return std::pair{frame,0};
             const auto found=detector.detect(frame,threshold,people,vehicles);
-            return std::pair{markObjects(frame,found),static_cast<int>(found.size())};
+            auto marked=markObjects(frame,found);
+            const auto count=static_cast<int>(found.size());
+            if(preview && preview->refreshDue()) preview->update(marked,progress.frames.load()+1,count);
+            return std::pair{std::move(marked),count};
         },progress);
         return {{"frames",progress.frames.load()},{"detections",progress.faces.load()},{"cancelled",cancel.load()},
                 {"output",cancel.load()?Json(nullptr):Json(pathText(target))}};
@@ -236,6 +248,7 @@ Json objectScan(const Json& request,const fs::path& models,const std::atomic<boo
     for(const auto& source:sources(request)) {
         if(cancel) break;
         try {sample(source,[&](const cv::Mat& frame,int index,double seconds){
+            if(preview && !preview->wait(cancel)) return false;
             ++n;
             auto detections=detector.detect(frame,threshold,people,vehicles);
             for(size_t i=0;i<detections.size();++i) {
@@ -249,8 +262,12 @@ Json objectScan(const Json& request,const fs::path& models,const std::atomic<boo
                 }
                 if(results.size()<2000) results.push_back(std::move(item));
             }
-            if(output && request.value("marked_frames",false)) {
-                writePng(*output/(std::to_wstring(n)+L"-marked.png"),markObjects(frame,detections));
+            const bool saveMarked=output && request.value("marked_frames",false);
+            const bool refresh=preview && preview->refreshDue();
+            if(refresh || saveMarked) {
+                const auto marked=markObjects(frame,detections);
+                if(refresh) preview->update(marked,n,static_cast<int>(detections.size()));
+                if(saveMarked) writePng(*output/(std::to_wstring(n)+L"-marked.png"),marked);
             }
             return !cancel;
         },request.value("step",1),cancel);} catch(const std::exception& error) {
@@ -261,7 +278,8 @@ Json objectScan(const Json& request,const fs::path& models,const std::atomic<boo
     return {{"frames",n},{"hits",results},{"failures",failures},{"cancelled",cancel.load()}};
 }
 
-Json faceScan(const Json& request,const fs::path& models,const std::atomic<bool>& cancel) {
+Json faceScan(const Json& request,const fs::path& models,const std::atomic<bool>& cancel,
+              DetectionPreview* preview) {
     const auto stored=faceConfig();
     const auto config=FaceSettings::from(stored,models);
     FaceEngine engine(models,config);
@@ -274,7 +292,7 @@ Json faceScan(const Json& request,const fs::path& models,const std::atomic<bool>
     const auto session=newId();
     const auto snapshots=dataHome()/L"data/annotations"/wide(session);
     Json hits=Json::array(),errors=Json::array();
-    int trackId=0;
+    int trackId=0,processed=0;
     for(const auto& path:sources(request)) {
         if(cancel) break;
         struct Track {
@@ -285,8 +303,10 @@ Json faceScan(const Json& request,const fs::path& models,const std::atomic<bool>
         };
         std::vector<Track> tracks;
         try { sample(path,[&](const cv::Mat& pixels,int frame,double seconds){
+            if(preview && !preview->wait(cancel)) return false;
             std::erase_if(tracks,[&](const auto& item){return frame-item.last>12*interval;});
-            for(auto& observation:engine.faces(pixels)) {
+            const auto observations=engine.faces(pixels);
+            for(const auto& observation:observations) {
                 if(cancel) return false;
                 const auto iou=[&](const Track& t){
                     const double intersection=(observation.box&t.box).area();
@@ -327,6 +347,12 @@ Json faceScan(const Json& request,const fs::path& models,const std::atomic<bool>
                 result["face_path"]=pathText(snapshots/(stem+L"-face.png"));
                 hits.push_back(std::move(result));
                 track->emitted=true;
+            }
+            ++processed;
+            if(preview && preview->refreshDue() && !cancel) {
+                auto marked=pixels.clone();
+                for(const auto& observation:observations) cv::rectangle(marked,observation.box,{255,200,70},2);
+                preview->update(marked,processed,static_cast<int>(observations.size()));
             }
             return !cancel;
         },interval,cancel);} catch(const std::exception& error) {
@@ -450,7 +476,8 @@ std::string signature(const fs::path& source) {
     return std::to_string(fs::file_size(source))+":"+std::to_string(fs::last_write_time(source).time_since_epoch().count());
 }
 
-Json semanticSearch(const Json& request,const fs::path& models,const std::atomic<bool>& cancel) {
+Json semanticSearch(const Json& request,const fs::path& models,const std::atomic<bool>& cancel,
+                    DetectionPreview* preview) {
     SemanticEncoder encoder(models);
     const auto query=describe(request,encoder);
     const auto interval=std::clamp(request.value("step",25),1,10000);
@@ -464,13 +491,15 @@ Json semanticSearch(const Json& request,const fs::path& models,const std::atomic
             frame_index INTEGER NOT NULL,seconds REAL,bbox TEXT NOT NULL,category TEXT NOT NULL,features BLOB NOT NULL);
         CREATE INDEX IF NOT EXISTS object_sources ON objects(source_id,category);
     )sql");
-    constexpr auto pipeline="chinese-clip-b16-felixdu-47080d16-fp32-parts-v1:objects-native-v1";
+    constexpr auto imagePipeline="chinese-clip-b16-felixdu-47080d16-fp32-parts-v1:objects-native-v1";
+    const auto videoPipeline=std::string(imagePipeline)+":video-frame-reader-v2";
     std::unique_ptr<ObjectDetector> detector;
     Json results=Json::array(),failures=Json::array();
-    int reused=0,indexed=0;
+    int reused=0,indexed=0,processed=0;
     for(const auto& source:sources(request)) {
         if(cancel) break;
         try {
+            const std::string pipeline=isVideo(source)?videoPipeline:imagePipeline;
             const auto stamp=signature(source);
             auto cached=index.query("SELECT id,signature FROM sources WHERE path=? AND pipeline=? AND step=?",
                 {pathText(source),pipeline,interval});
@@ -481,17 +510,24 @@ Json semanticSearch(const Json& request,const fs::path& models,const std::atomic
             } else {
                 if(!detector) detector=std::make_unique<ObjectDetector>(models);
                 Transaction batch(index);
-                index.query("DELETE FROM sources WHERE path=? AND pipeline=? AND step=?",{pathText(source),pipeline,interval});
+                index.query("DELETE FROM sources WHERE path=? AND pipeline IN (?,?) AND step=?",
+                    {pathText(source),pipeline,imagePipeline,interval});
                 index.query("INSERT INTO sources(path,signature,pipeline,step) VALUES(?,?,?,?)",
                     {pathText(source),stamp,pipeline,interval});
                 id=index.lastId();
                 sample(source,[&](const cv::Mat& frame,int frameIndex,double seconds){
-                    for(const auto& item:detector->detect(frame,.35,true,true)) {
+                    auto detected=detector->detect(frame,.35,true,true);
+                    for(const auto& item:detected) {
                         if(cancel) return false;
                         const auto person=item.category==0;
                         const auto feature=objectFeatures(frame(item.box),person,encoder);
                         index.query("INSERT INTO objects VALUES(?,?,?,?,?,?)",{id,frameIndex,seconds<0?Json(nullptr):Json(seconds),
                             rectJson(item.box).dump(),person?"person":"vehicle",featureBlob(feature)});
+                    }
+                    ++processed;
+                    if(preview && preview->refreshDue() && seconds>=0 && !cancel) {
+                        std::erase_if(detected,[&](const auto& item){return (item.category==0)!=query.person;});
+                        preview->update(markObjects(frame,detected),processed,static_cast<int>(detected.size()));
                     }
                     return !cancel;
                 },interval,cancel);
@@ -544,7 +580,7 @@ Json exportHits(const Json& request,const std::atomic<bool>& cancel) {
                     }
                 }
                 return frame<frames.rbegin()->first && !cancel;
-            },1,cancel);
+            },1,cancel,frames.begin()->first);
         } catch(const std::exception& error) {failures.push_back({{"source",pathText(source)},{"error",error.what()}});}
     }
     return {{"screenshots",count},{"output",pathText(*directory)},{"failed",failures},{"cancelled",cancel.load()}};
@@ -552,11 +588,11 @@ Json exportHits(const Json& request,const std::atomic<bool>& cancel) {
 
 }
 
-Json mediaOperation(const std::string& action,const Json& request,const fs::path& models,const std::atomic<bool>& cancel) {
-    if(action=="visual.search") return visualSearch(request,models,cancel);
-    if(action=="objects.scan") return objectScan(request,models,cancel);
-    if(action=="face.scan") return faceScan(request,models,cancel);
-    if(action=="semantic.search") return semanticSearch(request,models,cancel);
+Json mediaOperation(const std::string& action,const Json& request,const fs::path& models,const std::atomic<bool>& cancel,DetectionPreview* preview) {
+    if(action=="visual.search") return visualSearch(request,models,cancel,preview);
+    if(action=="objects.scan") return objectScan(request,models,cancel,preview);
+    if(action=="face.scan") return faceScan(request,models,cancel,preview);
+    if(action=="semantic.search") return semanticSearch(request,models,cancel,preview);
     if(action=="hits.export") return exportHits(request,cancel);
     throw std::invalid_argument("未知多媒体操作。");
 }

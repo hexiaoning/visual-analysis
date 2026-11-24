@@ -102,7 +102,7 @@ bool fuse(const cv::Mat& reference,const cv::Mat& next,cv::Mat& sums,cv::Mat& we
 
 }
 
-Json plateVideo(const Json& request,const std::atomic<bool>& cancel) {
+Json plateVideo(const Json& request,const std::atomic<bool>& cancel,DetectionPreview* processingPreview) {
     const auto source=localPath(textPath(request.at("source").get<std::string>()));
     const int anchor=request.value("frame_index",0), count=request.value("count",12);
     const int blur=request.value("blur_length",0), angle=request.value("blur_angle",0);
@@ -116,7 +116,6 @@ Json plateVideo(const Json& request,const std::atomic<bool>& cancel) {
     std::vector<Observation> frames;
     std::string notice;
     visitVideo(source,[&](const cv::Mat& frame,int index,double seconds){
-        if(index<anchor) return !cancel;
         if(index==anchor) {
             anchorFrame=frame.clone();
             if(preview) return false;
@@ -131,8 +130,13 @@ Json plateVideo(const Json& request,const std::atomic<bool>& cancel) {
             if(box.empty()) {notice="目标遮挡、切换或跟踪不明确。";return false;}
             frames.push_back(observe(frame,box,index,seconds));
         }
+        if(processingPreview && processingPreview->refreshDue() && !cancel) {
+            auto marked=frame.clone();
+            cv::rectangle(marked,box,{255,200,70},2);
+            processingPreview->update(marked,index-anchor+1,1);
+        }
         return !cancel && index-anchor+1<count;
-    },1,cancel);
+    },1,cancel,anchor);
     if(cancel) return Json::object();
     if(anchorFrame.empty()) throw std::runtime_error("起始帧超出视频长度。");
     const auto target=localPath(textPath(request.at("output").get<std::string>()));

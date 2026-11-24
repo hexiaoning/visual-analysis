@@ -1,5 +1,6 @@
 #include "vehicle.h"
 #include "local_images.h"
+#include "operations.h"
 #include "portrait_video.h"
 
 #include <algorithm>
@@ -54,26 +55,30 @@ double intersection(cv::Rect a,cv::Rect b) {
 }
 
 std::vector<Feature> vehicleViews(const fs::path& path,const fs::path& models,SemanticEncoder& encoder,
-                                  const std::atomic<bool>& cancel) {
+                                  const std::atomic<bool>& cancel,DetectionPreview* preview) {
     ObjectDetector detector(models);
     cv::Rect previous;
-    int missed=0;
+    int missed=0,processed=0;
     std::vector<Feature> views;
+    const bool video=!imagePath(path);
     const auto examine=[&](const cv::Mat& frame,int,double) {
+        ++processed;
         auto objects=detector.detect(frame,.5,false,true);
         std::erase_if(objects,[](const auto& object){return object.category!=2 && object.category!=3 && object.category!=5 && object.category!=7;});
         const auto select=[&](const ObjectObservation& object) {return previous.empty()?double(object.box.area()):intersection(previous,object.box);};
         const auto found=std::max_element(objects.begin(),objects.end(),[&](const auto& a,const auto& b){return select(a)<select(b);});
         if(found==objects.end() || (!previous.empty() && select(*found)<.15)) {
-            return previous.empty() || ++missed<=3;
+            if(video && preview && preview->refreshDue() && !cancel) preview->update(frame,processed,0);
+            return !cancel && (previous.empty() || ++missed<=3);
         }
         previous=found->box;
         missed=0;
         views.push_back(encoder.image(frame(previous)));
+        if(video && preview && preview->refreshDue() && !cancel) preview->update(frame,processed,1);
         return views.size()<8 && !cancel;
     };
-    if(imagePath(path)) examine(readImage(path),0,0.);
-    else visitVideo(path,examine,5,cancel);
+    if(video) visitVideo(path,examine,5,cancel);
+    else examine(readImage(path),0,0.);
     return views;
 }
 
@@ -218,10 +223,11 @@ std::vector<Feature> decodeReferences(const Json& record,SemanticEncoder& encode
 
 }
 
-Json analyzeVehicle(const Json& request,const fs::path& models,const fs::path& worker,const std::atomic<bool>& cancel) {
+Json analyzeVehicle(const Json& request,const fs::path& models,const fs::path& worker,
+                    const std::atomic<bool>& cancel,DetectionPreview* preview) {
     auto source=localPath(textPath(request.at("input").get<std::string>()));
     SemanticEncoder encoder(models);
-    const auto views=vehicleViews(source,models,encoder,cancel);
+    const auto views=vehicleViews(source,models,encoder,cancel,preview);
     if(views.empty() && !cancel) throw std::runtime_error("未找到可用于比对的车辆，请使用车身可见的图片或视频。");
     if(cancel) return Json::object();
     auto matches=localMatches(request,views,encoder,cancel);

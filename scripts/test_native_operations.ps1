@@ -7,6 +7,7 @@ param(
     [Parameter(Mandatory)][string]$CaseDirectory,
     [Parameter(Mandatory)][string]$OutputDirectory,
     [Parameter(Mandatory)][string]$FFprobe,
+    [string]$FFmpeg = (Join-Path (Split-Path -Parent $FFprobe) "ffmpeg.exe"),
     [string]$ExpectedVehicleSeries = "海鸥"
 )
 
@@ -93,6 +94,19 @@ try {
     Require ($Semantic.indexed_sources -eq 1 -and @($Semantic.hits).Count -ge 1 -and $SemanticAgain.reused_sources -eq 1) "Chinese semantic search or persistent index failed."
     $Shots = Invoke-NativeOperation "hits.export" @{ hits = $Semantic.hits; output = (Join-Path $OutputDirectory "semantic-screenshots") }
     Require ($Shots.screenshots -ge 1) "Search result screenshot export failed."
+    $SemanticVideo = Join-Path $OutputDirectory "semantic-reordered.mp4"
+    & $FFmpeg -v error -loop 1 -framerate 5 -i $VehicleImage -vf 'scale=trunc(iw/2)*2:trunc(ih/2)*2' `
+        -frames:v 5 -c:v mpeg4 -pix_fmt yuv420p -bf 2 -output_ts_offset 120 $SemanticVideo
+    Require ($LASTEXITCODE -eq 0) "Could not generate the semantic video fixture."
+    $VideoQuery = @{ source = $SemanticVideo; text = "汽车"; threshold = -.5; step = 2 }
+    $VideoIndex = Invoke-NativeOperation "semantic.search" $VideoQuery "semantic-video"
+    $VideoHit = @($VideoIndex.hits | Where-Object frame_index -eq 2)
+    Require ($VideoIndex.indexed_sources -eq 1 -and $VideoHit.Count -gt 0 -and
+        [Math]::Abs($VideoHit[0].seconds - .4) -lt .001) "Semantic video hit is missing or is not relative to the video start."
+    $VideoShot = Invoke-NativeOperation "hits.export" @{
+        hits = @($VideoHit[0]); output = (Join-Path $OutputDirectory "semantic-video-screenshots")
+    } "semantic-video-export"
+    Require ($VideoShot.screenshots -eq 1) "Semantic video screenshot export failed."
     $Checks.semantic_search = $true
     $Plate = Invoke-NativeOperation "plate.video" @{
         source = $FaceVideo; frame_index = 0; bbox = @(30, 25, 170, 95); count = 4

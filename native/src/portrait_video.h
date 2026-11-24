@@ -20,7 +20,7 @@ void restorePortraitVideo(const std::filesystem::path& source, const std::filesy
 
 using FrameVisitor = std::function<bool(const cv::Mat&, int, double)>;
 int visitVideo(const std::filesystem::path& source, const FrameVisitor& visitor, int interval,
-               const std::atomic<bool>& cancel);
+               const std::atomic<bool>& cancel, int firstFrame=0);
 using FrameProcessor = std::function<std::pair<cv::Mat,int>(const cv::Mat&)>;
 void renderObjectVideo(const std::filesystem::path& source,const std::filesystem::path& target,
                        const FrameProcessor& transform,VideoProgress& progress);
