@@ -55,7 +55,8 @@ class ObjectDetector {
 public:
     explicit ObjectDetector(const std::filesystem::path& models);
     ~ObjectDetector();
-    std::vector<ObjectObservation> detect(const cv::Mat& image, double threshold, bool people, bool vehicles);
+    std::vector<ObjectObservation> detect(const cv::Mat& image, double threshold, bool people, bool vehicles,
+                                          bool otherObjects=false);
 private:
     struct State;
     std::unique_ptr<State> state_;

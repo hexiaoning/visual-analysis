@@ -2,7 +2,9 @@
 
 | 组件 | 上游与用途 |
 | --- | --- |
-| ONNX Runtime 1.24.4 | Microsoft MIT，原生本机 CPU 推理。 |
+| ONNX Runtime DirectML 1.24.4 | Microsoft MIT，随包提供 DirectML 和 CPU 执行后端。 |
+| DirectML 1.15.4 | Microsoft DirectX 12 机器学习运行库，随包附许可证及第三方声明。 |
+| OpenVINO 2026.4.1 | Apache-2.0，Intel GPU 的中文图文模型推理。 |
 | OpenCV 4.13.0 | Apache-2.0，图像解码、几何对齐、光流和局部特征。 |
 | FFmpeg 8.1 LGPL shared | FFmpeg C API，动态库版。构建版本 n8.1.3-39-g660b5aa7db-20261121。[FFmpeg 源码](https://github.com/FFmpeg/FFmpeg/tree/660b5aa7db) · [Windows 构建配方](https://github.com/FFmpeg-Builds/FFmpeg-Builds) |
 | nlohmann/json 3.12.0 | MIT，构建时使用单头文件。[上游发行版](https://github.com/nlohmann/json/releases/tag/v3.12.0) |

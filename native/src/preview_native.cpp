@@ -16,7 +16,9 @@ constexpr wchar_t className[]=L"VisualAnalysisImagePreview";
 struct Viewer {
     cv::Mat pixels;
     bool select{},closed{};
+    bool selectLine{};
     std::optional<cv::Rect> answer,overlay;
+    std::optional<VideoLine> line;
     std::optional<cv::Point> drag;
     cv::Point end;
     std::mutex mutex;
@@ -61,8 +63,13 @@ LRESULT CALLBACK route(HWND window,UINT message,WPARAM wParam,LPARAM lParam) {
             auto pen=CreatePen(PS_SOLID,2,RGB(0,190,245));
             const auto oldPen=SelectObject(dc,pen);
             const auto oldBrush=SelectObject(dc,GetStockObject(NULL_BRUSH));
-            Rectangle(dc,frame.left+cvRound(area->x*sx),frame.top+cvRound(area->y*sy),
-                frame.left+cvRound(area->br().x*sx),frame.top+cvRound(area->br().y*sy));
+            if(view->selectLine && view->drag) {
+                MoveToEx(dc,frame.left+cvRound(view->drag->x*sx),frame.top+cvRound(view->drag->y*sy),nullptr);
+                LineTo(dc,frame.left+cvRound(view->end.x*sx),frame.top+cvRound(view->end.y*sy));
+            } else {
+                Rectangle(dc,frame.left+cvRound(area->x*sx),frame.top+cvRound(area->y*sy),
+                    frame.left+cvRound(area->br().x*sx),frame.top+cvRound(area->br().y*sy));
+            }
             SelectObject(dc,oldBrush);SelectObject(dc,oldPen);DeleteObject(pen);
         }
         EndPaint(window,&paint);
@@ -94,10 +101,16 @@ LRESULT CALLBACK route(HWND window,UINT message,WPARAM wParam,LPARAM lParam) {
         } else if(view->drag) {
             view->end=pos;
             if(message==WM_LBUTTONUP) {
-                const cv::Rect region(*view->drag,pos);
+                const auto start=*view->drag;
                 view->drag.reset();
                 ReleaseCapture();
-                if(region.width>0 && region.height>0) {
+                if(view->selectLine && start!=pos) {
+                    view->line=VideoLine{start,pos};
+                    DestroyWindow(window);
+                    return 0;
+                }
+                const cv::Rect region(start,pos);
+                if(!view->selectLine && !region.empty()) {
                     view->answer=region;
                     DestroyWindow(window);
                     return 0;
@@ -154,6 +167,15 @@ std::optional<cv::Rect> previewNative(HWND owner,const cv::Mat& image,const wcha
     cv::cvtColor(image,state.pixels,cv::COLOR_BGR2BGRA);
     showViewer(owner,state,caption);
     return state.answer;
+}
+
+std::optional<VideoLine> selectNativeLine(HWND owner,const cv::Mat& image) {
+    if(image.empty()) throw std::runtime_error("没有可预览的画面。");
+    Viewer state;
+    state.select=state.selectLine=true;
+    cv::cvtColor(image,state.pixels,cv::COLOR_BGR2BGRA);
+    showViewer(owner,state,L"在画面上拖动鼠标绘制触发线");
+    return state.line;
 }
 
 void playNativeVideo(HWND owner,const std::filesystem::path& source,int first,

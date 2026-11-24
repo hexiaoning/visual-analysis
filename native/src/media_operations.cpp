@@ -3,6 +3,7 @@
 #include "people.h"
 #include "person_tracks.h"
 #include "portrait_video.h"
+#include "video_trigger.h"
 
 #include <algorithm>
 #include <array>
@@ -290,12 +291,105 @@ Json visualSearch(const Json& request,const fs::path& models,const std::atomic<b
     return {{"hits",matches},{"failures",failures},{"cancelled",cancel.load()}};
 }
 
+Json captureCrossings(const Json& request,ObjectDetector& detector,double threshold,bool people,bool vehicles,
+                      bool otherObjects,const std::atomic<bool>& cancel,DetectionPreview* preview) {
+    const bool hasLine=request.contains("trigger_line"),hasArea=request.contains("trigger_area");
+    if(hasLine && hasArea) throw std::invalid_argument("请选择触发线或触发区域中的一种。");
+    std::optional<VideoLine> line;
+    cv::Rect area;
+    if(hasLine) {
+        const auto& values=request.at("trigger_line");
+        if(!values.is_array() || values.size()!=4) throw std::invalid_argument("触发线需要四个端点坐标。");
+        const auto coordinates=values.get<std::array<int,4>>();
+        line=VideoLine{{coordinates[0],coordinates[1]},{coordinates[2],coordinates[3]}};
+        if(line->start==line->end) throw std::invalid_argument("触发线需要两个不同的端点。");
+    } else {
+        area=readRect(request.at("trigger_area"));
+        if(area.empty()) throw std::invalid_argument("触发区域必须有宽度和高度。");
+    }
+    const auto videos=sources(request);
+    if(std::any_of(videos.begin(),videos.end(),[](const auto& source){return !isVideo(source);})) {
+        throw std::invalid_argument("触发截图需要视频文件。");
+    }
+    const auto directory=outputDirectory(request);
+    if(!directory) throw std::invalid_argument("请选择触发截图的保存目录。");
+    Json hits=Json::array(),failures=Json::array();
+    int frames=0,screenshots=0;
+    for(const auto& source:videos) {
+        if(cancel) break;
+        VideoTrigger trigger(line,area);
+        std::map<int,PersonTracks> trackers;
+        try {
+            visitVideo(source,[&](const cv::Mat& frame,int index,double seconds){
+                if(preview && !preview->wait(cancel)) return false;
+                const cv::Rect bounds(0,0,frame.cols,frame.rows);
+                const auto onFrame=[&](cv::Point point) {
+                    return point.x>=0 && point.y>=0 && point.x<=frame.cols && point.y<=frame.rows;
+                };
+                if(line ? !onFrame(line->start) || !onFrame(line->end) : (area&bounds)!=area) {
+                    throw std::invalid_argument("触发线或区域超出源视频画面。");
+                }
+                const auto found=detector.detect(frame,threshold,people,vehicles,otherObjects);
+                if(cancel) return false;
+                ++frames;
+                trigger.advance(seconds);
+                std::map<int,std::vector<PersonObservation>> byClass;
+                for(const auto& object:found) {
+                    byClass[object.category].push_back({object.box,
+                        object.category==0?clothingAppearance(frame,object.box):Feature{}});
+                }
+                std::map<int,std::vector<size_t>> trackIds;
+                for(const auto& [category,observations]:byClass) {
+                    auto& tracker=trackers.try_emplace(category,.40).first->second;
+                    trackIds[category]=tracker.update(observations,seconds);
+                }
+                std::map<int,size_t> offset;
+                std::optional<fs::path> saved;
+                for(const auto& object:found) {
+                    const auto track=trackIds.at(object.category)[offset[object.category]++];
+                    const cv::Point2d center(object.box.x+object.box.width*.5,object.box.y+object.box.height*.5);
+                    if(!trigger.observe(object.category,track,center,seconds)) continue;
+                    if(!saved) {
+                        saved=*directory/(L"触发-"+std::to_wstring(++screenshots)+L".png");
+                        writePng(*saved,frame);
+                    }
+                    auto item=hit(source,index,seconds,object.box,object.score,objectName(object.category));
+                    item["category_id"]=object.category;
+                    item["track_id"]=track;
+                    item["image"]=pathText(*saved);
+                    item["trigger"]=line?"line":"area";
+                    hits.push_back(std::move(item));
+                }
+                if(preview && preview->refreshDue()) {
+                    auto marked=markObjects(frame,found);
+                    const cv::Scalar color(50,245,50);
+                    if(line) cv::line(marked,line->start,line->end,color,2,cv::LINE_AA);
+                    else cv::rectangle(marked,area,color,2);
+                    preview->update(marked,frames,static_cast<int>(found.size()));
+                }
+                return !cancel;
+            },1,cancel);
+        } catch(const std::exception& error) {
+            failures.push_back({{"source",pathText(source)},{"error",error.what()}});
+        }
+    }
+    writeJson(*directory/L"检测结果.json",hits);
+    return {{"frames",frames},{"screenshots",screenshots},{"hits",hits},{"failures",failures},
+        {"output",pathText(*directory)},{"cancelled",cancel.load()}};
+}
+
 Json objectScan(const Json& request,const fs::path& models,const std::atomic<bool>& cancel,
                 DetectionPreview* preview) {
     ObjectDetector detector(models);
     const auto threshold=std::clamp(request.value("threshold",.5),.05,.99);
     const bool people=request.value("people",true),vehicles=request.value("vehicles",true);
-    if(!people && !vehicles) throw std::invalid_argument("请至少选择人或车辆。");
+    const bool trigger=request.contains("trigger_line") || request.contains("trigger_area");
+    const bool otherObjects=request.value("other_objects",trigger && !request.contains("people") && !request.contains("vehicles"));
+    if(!people && !vehicles && !otherObjects) throw std::invalid_argument("请至少选择人、车辆或物体中的一种。");
+    if(trigger) {
+        if(!request.value("video_output",std::string{}).empty()) throw std::invalid_argument("请分开运行触发截图和标注视频导出。");
+        return captureCrossings(request,detector,threshold,people,vehicles,otherObjects,cancel,preview);
+    }
     if(const auto video=request.value("video_output",std::string{});!video.empty()) {
         if(!request.value("output",std::string{}).empty()) throw std::invalid_argument("请分开导出标注视频和目标截图。");
         VideoProgress progress;
@@ -304,7 +398,7 @@ Json objectScan(const Json& request,const fs::path& models,const std::atomic<boo
         const auto target=localPath(textPath(video));
         renderObjectVideo(first,target,[&](const cv::Mat& frame){
             if(preview && !preview->wait(cancel)) return std::pair{frame,0};
-            const auto found=detector.detect(frame,threshold,people,vehicles);
+            const auto found=detector.detect(frame,threshold,people,vehicles,otherObjects);
             auto marked=markObjects(frame,found);
             const auto count=static_cast<int>(found.size());
             if(preview && preview->refreshDue()) preview->update(marked,progress.frames.load()+1,count);
@@ -326,7 +420,7 @@ Json objectScan(const Json& request,const fs::path& models,const std::atomic<boo
             sample(source,[&](const cv::Mat& frame,int index,double seconds){
                 if(preview && !preview->wait(cancel)) return false;
                 ++n;
-                auto detections=detector.detect(frame,threshold,people,vehicles);
+                auto detections=detector.detect(frame,threshold,people,vehicles,otherObjects);
                 std::vector<PersonObservation> observations;
                 if(video) {
                     for(const auto& found:detections) {

@@ -25,7 +25,7 @@ constexpr UINT_PTR timer=1;
 constexpr UINT chooseBase=200, actionBase=300, cancelAction=500, saveAction=501, exportHitsAction=502,
     viewAction=503, playAction=504;
 
-enum class Box {Text,Media,Images,Json,Directory,Region};
+enum class Box {Text,Media,Images,Json,Directory,Region,Line};
 struct Field {const char* key;const wchar_t* title;Box type=Box::Text;};
 struct Action {const char* name;const wchar_t* label;};
 struct Workflow {
@@ -44,7 +44,8 @@ const std::array workflows{
             {"min_age",L"最小年龄（可选）"},{"max_age",L"最大年龄（可选）"}},
         {{"face.compare",L"两张照片对比"},{"face.gallery",L"照片检索人物"},{"face.scan",L"视频检索人员"}}},
     Workflow{L"人车检测",{{"source",L"本机素材路径",Box::Media},{"threshold",L"置信度门槛（可选）"},
-            {"output",L"截图保存目录",Box::Directory},{"target",L"类别（人／车／全部）"},
+            {"output",L"截图保存目录",Box::Directory},{"target",L"类别（人／车／物体／全部）"},
+            {"trigger_line",L"触发线（可选）",Box::Line},{"trigger_area",L"触发区域（可选）",Box::Region},
             {"video_output",L"标注视频 MP4 路径"}},
         {{"objects.scan",L"开始检测"}}},
     Workflow{L"以图搜索",{{"input",L"本机参考图",Box::Images},{"source",L"本机素材或文件夹",Box::Media},
@@ -285,13 +286,17 @@ Json input(Form& form,const std::string& action) {
         } else if(key=="mode") {
             result[key]=text==L"人脸" ? "face" : "appearance";
         } else if(key=="target") {
-            result["people"]=text!=L"车";
-            result["vehicles"]=text!=L"人";
-        } else if(key=="bbox") {
+            if(text!=L"人" && text!=L"车" && text!=L"物体" && text!=L"全部") {
+                throw std::invalid_argument("类别请选择人、车、物体或全部。");
+            }
+            result["people"]=text==L"人" || text==L"全部";
+            result["vehicles"]=text==L"车" || text==L"全部";
+            result["other_objects"]=text==L"物体" || text==L"全部";
+        } else if(key=="bbox" || key=="trigger_area" || key=="trigger_line") {
             std::wistringstream coordinates(text);
             auto array=Json::array();
             for(int value;coordinates>>value;) array.push_back(value);
-            if(array.size()!=4) throw std::invalid_argument("选区需要四个空格分隔的整数。");
+            if(array.size()!=4 || !coordinates.eof()) throw std::invalid_argument("坐标需要四个空格分隔的整数。");
             result[key]=std::move(array);
         } else if(key=="library_ids") {
             std::wistringstream names(text);
@@ -423,7 +428,7 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
             state->captions.push_back(child(handle,L"STATIC",field.title,0,0));
             state->fields.push_back(child(handle,L"EDIT",L"",ES_AUTOHSCROLL|WS_TABSTOP,700+index));
             state->choosers.push_back(field.type==Box::Text ? nullptr :
-                child(handle,L"BUTTON",field.type==Box::Region?L"框选…":L"选择…",WS_TABSTOP,chooseBase+index));
+                child(handle,L"BUTTON",field.type==Box::Line?L"画线…":field.type==Box::Region?L"框选…":L"选择…",WS_TABSTOP,chooseBase+index));
         }
         for(size_t index=0;index<workflow.actions.size();++index) {
             state->buttons.push_back(child(handle,L"BUTTON",workflow.actions[index].label,WS_TABSTOP,actionBase+index));
@@ -474,16 +479,28 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
                 }
             } else if(id>=chooseBase && id<chooseBase+state->fields.size()) {
                 const auto field=workflows[state->index].fields[id-chooseBase];
-                if(field.type==Box::Region) {
+                if(field.type==Box::Region || field.type==Box::Line) {
                     const auto image=fieldContent(*state,"input");
                     const auto time=fieldContent(*state,"frame_index");
                     const auto path=image.empty()?fieldContent(*state,"source"):image;
                     if(path.empty()) throw std::invalid_argument("请先选择参考图或源视频。");
                     const auto pixels=frameAt(path,time.empty()?0:std::stoi(time));
-                    if(const auto region=previewNative(handle,pixels,L"在画面上拖动鼠标框选",true)) {
-                        const auto coordinates=std::to_wstring(region->x)+L" "+std::to_wstring(region->y)+L" "
-                            +std::to_wstring(region->br().x)+L" "+std::to_wstring(region->br().y);
+                    std::optional<VideoLine> points;
+                    if(field.type==Box::Line) points=selectNativeLine(handle,pixels);
+                    else if(const auto region=previewNative(handle,pixels,L"在画面上拖动鼠标框选",true)) {
+                        points=VideoLine{region->tl(),region->br()};
+                    }
+                    if(points) {
+                        const auto coordinates=std::to_wstring(points->start.x)+L" "+std::to_wstring(points->start.y)+L" "
+                            +std::to_wstring(points->end.x)+L" "+std::to_wstring(points->end.y);
                         SetWindowTextW(state->fields[id-chooseBase],coordinates.c_str());
+                        const std::string_view counterpart=field.type==Box::Line?"trigger_area":"trigger_line";
+                        if(std::string_view(field.key)!="bbox") {
+                            const auto& fields=workflows[state->index].fields;
+                            for(size_t i=0;i<fields.size();++i) {
+                                if(fields[i].key==counterpart) SetWindowTextW(state->fields[i],L"");
+                            }
+                        }
                     }
                     return 0;
                 }

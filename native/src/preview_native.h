@@ -1,5 +1,6 @@
 #pragma once
 
+#include "video_trigger.h"
 #include <optional>
 #include <filesystem>
 #include <Windows.h>
@@ -8,6 +9,7 @@
 namespace visual {
 std::optional<cv::Rect> previewNative(HWND owner,const cv::Mat& image,const wchar_t* caption,
                                      bool select,std::optional<cv::Rect> overlay={});
+std::optional<VideoLine> selectNativeLine(HWND owner,const cv::Mat& image);
 void playNativeVideo(HWND owner,const std::filesystem::path& source,int first,
                      const cv::Mat& initial,cv::Rect initialTarget);
 }

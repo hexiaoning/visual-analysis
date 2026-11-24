@@ -4,9 +4,10 @@ param(
     [Parameter(Mandatory)][string]$AcceptanceReport,
     [Parameter(Mandatory)][string]$CrtDirectory,
     [Parameter(Mandatory)][string]$OnnxRuntimeDirectory,
+    [Parameter(Mandatory)][string]$DirectMlDirectory,
     [Parameter(Mandatory)][string]$OpenCvDirectory,
     [Parameter(Mandatory)][string]$FFmpegDirectory,
-    [string]$Version = "2.13.0",
+    [string]$Version = "2.13.1",
     [switch]$SkipBaiduUpload
 )
 
@@ -17,7 +18,7 @@ $Project = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).ProviderPa
 $BuildDirectory = (Resolve-Path -LiteralPath $BuildDirectory).ProviderPath
 $Report = Get-Content -LiteralPath $AcceptanceReport -Raw -Encoding UTF8 | ConvertFrom-Json
 $RequiredChecks = @("people", "annotations", "face_search", "visual_search", "semantic_search",
-    "object_detection", "video_plate", "portrait_video", "vehicle_public", "vehicle_offline", "portrait_standard", "portrait_recall")
+    "object_detection", "video_plate", "portrait_video", "vehicle_public", "vehicle_offline", "portrait_standard", "portrait_recall", "trigger_capture", "gpu")
 if (-not $Report.ok) { throw "Native acceptance is required before packaging." }
 foreach ($Check in $RequiredChecks) {
     if (-not $Report.checks.PSObject.Properties[$Check] -or -not $Report.checks.$Check) {
@@ -62,6 +63,8 @@ if ((Test-Path -LiteralPath $Stage) -or (Test-Path -LiteralPath $Archive) -or (T
 
 New-Item -ItemType Directory -Path $Stage | Out-Null
 $Payload = @("VisualAnalysis.exe", "VehicleCatalogueWorker.exe", "onnxruntime.dll", "opencv_world4130.dll",
+    "onnxruntime_providers_shared.dll", "DirectML.dll", "openvino.dll", "openvino_onnx_frontend.dll",
+    "openvino_intel_gpu_plugin.dll", "tbb12.dll", "tbbmalloc.dll", "tbbbind_2_5.dll",
     "avcodec-62.dll", "avformat-62.dll", "avutil-60.dll", "swresample-6.dll", "swscale-9.dll")
 foreach ($File in $Payload) {
     $RuntimeSource = Join-Path $BuildDirectory $File
@@ -95,6 +98,8 @@ New-Item -ItemType Directory -Path $Licenses | Out-Null
 Copy-Item -Path (Join-Path $Project "packaging\licenses\*") -Destination $Licenses
 Copy-Item -LiteralPath (Join-Path $OnnxRuntimeDirectory "LICENSE") -Destination (Join-Path $Licenses "ONNX-Runtime.txt")
 Copy-Item -LiteralPath (Join-Path $OnnxRuntimeDirectory "ThirdPartyNotices.txt") -Destination (Join-Path $Licenses "ONNX-Runtime-ThirdParty.txt")
+Copy-Item -LiteralPath (Join-Path $DirectMlDirectory "LICENSE.txt") -Destination (Join-Path $Licenses "DirectML.txt")
+Copy-Item -LiteralPath (Join-Path $DirectMlDirectory "ThirdPartyNotices.txt") -Destination (Join-Path $Licenses "DirectML-ThirdParty.txt")
 Copy-Item -LiteralPath (Join-Path $OpenCvDirectory "LICENSE") -Destination (Join-Path $Licenses "OpenCV.txt")
 Copy-Item -LiteralPath (Join-Path $FFmpegDirectory "LICENSE.txt") -Destination (Join-Path $Licenses "FFmpeg-LGPL.txt")
 Copy-Item -LiteralPath (Join-Path $Project "README.md") -Destination (Join-Path $Stage "使用说明.md")
@@ -114,7 +119,7 @@ Copy-Item -LiteralPath $AcceptanceReport -Destination (Join-Path $Stage "验收�
 
 $Manifest = [ordered]@{
     application = "Visual Analysis"; version = $Version; source_commit = $Commit
-    runtime = "Win32 x64"; release_created_at = [DateTime]::UtcNow.ToString("o")
+    runtime = "Win32 x64 / DirectML / OpenVINO GPU"; release_created_at = [DateTime]::UtcNow.ToString("o")
 }
 $Manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Stage "release-info.json") -Encoding UTF8
 $Files = @(Get-ChildItem -LiteralPath $Stage -Recurse -File | Sort-Object FullName)

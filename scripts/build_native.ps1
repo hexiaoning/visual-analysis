@@ -2,6 +2,8 @@
 param(
     [Parameter(Mandatory)][string]$OutputDirectory,
     [Parameter(Mandatory)][string]$OnnxRuntimeDirectory,
+    [Parameter(Mandatory)][string]$DirectMlDirectory,
+    [Parameter(Mandatory)][string]$OpenVinoDirectory,
     [Parameter(Mandatory)][string]$OpenCvDirectory,
     [Parameter(Mandatory)][string]$FFmpegDirectory,
     [Parameter(Mandatory)][string]$JsonIncludeDirectory,
@@ -48,6 +50,7 @@ $Arguments = @(
     "/external:W0", "/external:I$OrtHeaders", "/external:I$OpenCvHeaders",
     "/external:I$FFmpegDirectory\include",
     "/external:I$JsonIncludeDirectory",
+    "/external:I$OpenVinoDirectory\include",
     "/I$MsvcDirectory\include", "/I$SdkHeaders\ucrt", "/I$SdkHeaders\shared", "/I$SdkHeaders\um",
     "/Fo$Objects\", "/Fe$Executable", (Join-Path $Sources "app.cpp"),
     (Join-Path $Sources "local_images.cpp"), (Join-Path $Sources "portrait.cpp"), (Join-Path $Sources "plate.cpp"),
@@ -56,12 +59,13 @@ $Arguments = @(
     (Join-Path $Sources "people.cpp"),
     (Join-Path $Sources "vehicle.cpp"), (Join-Path $Sources "operations.cpp"), (Join-Path $Sources "operations_window.cpp"),
     (Join-Path $Sources "media_operations.cpp"), (Join-Path $Sources "plate_video.cpp"),
-    (Join-Path $Sources "preview_native.cpp"),
+    (Join-Path $Sources "preview_native.cpp"), (Join-Path $Sources "inference_backend.cpp"),
+    (Join-Path $Sources "openvino_model.cpp"),
     "/link", "/subsystem:windows", "/incremental:no", "/libpath:$MsvcDirectory\lib\x64",
     "/libpath:$SdkLink\ucrt\x64", "/libpath:$SdkLink\um\x64",
-    $OrtLibrary, $OpenCvLib[0].FullName, "/libpath:$FFmpegDirectory\lib",
+    $OrtLibrary, $OpenCvLib[0].FullName, (Join-Path $OpenVinoDirectory "libs\openvino.lib"), "/libpath:$FFmpegDirectory\lib",
     "user32.lib", "gdi32.lib", "comdlg32.lib", "shell32.lib", "bcrypt.lib", "winsqlite3.lib", "normaliz.lib",
-    "crypt32.lib", "ole32.lib", "uuid.lib"
+    "crypt32.lib", "ole32.lib", "uuid.lib", "dxgi.lib", "d3d12.lib"
 )
 $Arguments += @($MediaLibraries | ForEach-Object { "$_.lib" })
 & $Cl @Arguments
@@ -77,9 +81,16 @@ if ($LASTEXITCODE -ne 0) {
 }
 $Libraries = @(
     (Join-Path $OrtNative "onnxruntime.dll"),
+    (Join-Path $OrtNative "onnxruntime_providers_shared.dll"),
+    (Join-Path $DirectMlDirectory "bin\x64-win\DirectML.dll"),
     (Join-Path $OpenCvNative ("bin\" + $OpenCvLib[0].BaseName + ".dll"))
 )
 Copy-Item -LiteralPath $Libraries -Destination $Output -Force
+$IntelLibraries = @("openvino.dll", "openvino_onnx_frontend.dll", "openvino_intel_gpu_plugin.dll",
+    "tbb12.dll", "tbbmalloc.dll", "tbbbind_2_5.dll")
+foreach ($File in $IntelLibraries) {
+    Copy-Item -LiteralPath (Join-Path $OpenVinoDirectory "libs\$File") -Destination $Output -Force
+}
 foreach ($Name in $MediaLibraries + "swresample") {
     $Library = @(Get-ChildItem -LiteralPath (Join-Path $FFmpegDirectory "bin") -Filter "$Name-*.dll" -File)
     if ($Library.Count -ne 1) {

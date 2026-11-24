@@ -17,6 +17,11 @@ $Executable = (Resolve-Path -LiteralPath $Executable).ProviderPath
 New-Item -ItemType Directory -Path $OutputDirectory -ErrorAction Stop | Out-Null
 $OutputDirectory = (Resolve-Path -LiteralPath $OutputDirectory).ProviderPath
 $PreviousHome = $env:FACE_MATCHING_HOME
+$PreviousProfile = $env:VISUAL_ANALYSIS_GPU_PROFILE
+$PreviousBackend = $env:VISUAL_ANALYSIS_BACKEND
+$env:VISUAL_ANALYSIS_GPU_PROFILE = Join-Path $OutputDirectory "inference-profiles"
+$env:VISUAL_ANALYSIS_BACKEND = $null
+New-Item -ItemType Directory -Path $env:VISUAL_ANALYSIS_GPU_PROFILE | Out-Null
 $env:FACE_MATCHING_HOME = Join-Path $OutputDirectory "app-home"
 New-Item -ItemType Directory -Path $env:FACE_MATCHING_HOME | Out-Null
 $Checks = [ordered]@{}
@@ -27,9 +32,13 @@ function Invoke-NativeOperation([string]$Name, [hashtable]$Request, [string]$Id 
     $InputFile = Join-Path $OutputDirectory "$Id-request.json"
     $Report = Join-Path $OutputDirectory "$Id-report.json"
     $Request | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $InputFile -Encoding UTF8
-    $Run = Start-Process -FilePath $Program -WindowStyle Hidden -Wait -PassThru -ArgumentList @(
-        "--native-operation", $Name, "--request", (Quote-Argument $InputFile), "--report", (Quote-Argument $Report)
-    )
+    $Backend = $env:VISUAL_ANALYSIS_BACKEND
+    if ($Id -notin "face.compare", "region-trigger", "semantic-first") { $env:VISUAL_ANALYSIS_BACKEND = "cpu" }
+    try {
+        $Run = Start-Process -FilePath $Program -WindowStyle Hidden -Wait -PassThru -ArgumentList @(
+            "--native-operation", $Name, "--request", (Quote-Argument $InputFile), "--report", (Quote-Argument $Report)
+        )
+    } finally { $env:VISUAL_ANALYSIS_BACKEND = $Backend }
     if (-not (Test-Path -LiteralPath $Report -PathType Leaf)) { throw "Missing $Name report, exit $($Run.ExitCode)." }
     $Value = Get-Content -LiteralPath $Report -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($Run.ExitCode -ne 0 -or -not $Value.ok) { throw "$Name failed. $($Value.error)" }
@@ -97,6 +106,19 @@ try {
         $TrackHits.Count -lt $ObjectVideo.detections -and $TrackHits.Count -eq $TrackFiles.Count -and
         @($TrackHits | Select-Object -ExpandProperty track_id -Unique).Count -eq $TrackHits.Count) "Video person tracks returned duplicate crops or no matching screenshots."
     $Checks.object_detection = $true
+    $RegionFixture = Join-Path $OutputDirectory "trigger-static.mkv"
+    & $FFmpeg -v error -i $FaceVideo -map 0:v:0 -an -vf 'select=eq(n\,0),loop=loop=3:size=1:start=0,setpts=N/(5*TB)' -frames:v 4 -c:v ffv1 $RegionFixture
+    Require ($LASTEXITCODE -eq 0) "Could not generate the region trigger fixture."
+    $Dimensions = (& $FFprobe -v error -select_streams v:0 -show_entries stream=width,height -of json $RegionFixture |
+        ConvertFrom-Json).streams[0]
+    $Trigger = Invoke-NativeOperation "objects.scan" @{
+        source = $RegionFixture; people = $true; vehicles = $false
+        trigger_area = @(0, 0, $Dimensions.width, $Dimensions.height)
+        output = (Join-Path $OutputDirectory "trigger-capture")
+    } "region-trigger"
+    Require ($Trigger.frames -eq 4 -and $Trigger.screenshots -eq 1 -and @($Trigger.failures).Count -eq 0 -and
+        @($Trigger.hits).Count -gt 0 -and @($Trigger.hits | Where-Object frame_index -ne 0).Count -eq 0) "A stationary target did not create exactly one region screenshot."
+    $Checks.trigger_capture = $true
     $SemanticPayload = @{ source = $VehicleImage; text = "汽车"; threshold = -.5 }
     $Semantic = Invoke-NativeOperation "semantic.search" $SemanticPayload "semantic-first"
     $SemanticAgain = Invoke-NativeOperation "semantic.search" $SemanticPayload "semantic-reuse"
@@ -124,9 +146,12 @@ try {
     Require ($Plate.tracked -ge 1 -and @($Plate.candidates).Count -ge 1) "Multi-frame restoration did not produce a candidate."
     $Checks.video_plate = $true
     $Restored = Join-Path $OutputDirectory "portrait-video.mkv"
-    $Video = Start-Process -FilePath $Executable -WindowStyle Hidden -Wait -PassThru -ArgumentList @(
-        "--restore-portrait-video", (Quote-Argument $FaceVideo), "--video-output", (Quote-Argument $Restored)
-    )
+    $env:VISUAL_ANALYSIS_BACKEND = "cpu"
+    try {
+        $Video = Start-Process -FilePath $Executable -WindowStyle Hidden -Wait -PassThru -ArgumentList @(
+            "--restore-portrait-video", (Quote-Argument $FaceVideo), "--video-output", (Quote-Argument $Restored)
+        )
+    } finally { $env:VISUAL_ANALYSIS_BACKEND = $null }
     Require ($Video.ExitCode -eq 0 -and (Test-Path -LiteralPath $Restored -PathType Leaf)) "Portrait video restoration failed."
     $VideoTimesBefore = @(& $FFprobe -v error -select_streams v -show_entries 'frame=pts_time' -of csv=p=0 $FaceVideo)
     $VideoTimesAfter = @(& $FFprobe -v error -select_streams v -show_entries 'frame=pts_time' -of csv=p=0 $Restored)
@@ -167,7 +192,9 @@ try {
             "--case-output", (Quote-Argument (Join-Path $OutputDirectory "case-images")),
             "--report", (Quote-Argument $CaseReport))
         if ($Mode -eq "recall") { $Arguments += "--prefer-recall" }
-        $Run = Start-Process -FilePath $Executable -WindowStyle Hidden -Wait -PassThru -ArgumentList $Arguments
+        if ($Mode -eq "recall") { $env:VISUAL_ANALYSIS_BACKEND = "cpu" }
+        try { $Run = Start-Process -FilePath $Executable -WindowStyle Hidden -Wait -PassThru -ArgumentList $Arguments }
+        finally { $env:VISUAL_ANALYSIS_BACKEND = $null }
         Require ($Run.ExitCode -eq 0) "Native portrait cases failed in $Mode mode."
         $Report = Get-Content -LiteralPath $CaseReport -Raw -Encoding UTF8 | ConvertFrom-Json
         Require ($Report.ok -and @($Report.cases).Count -eq 3) "Portrait case report is incomplete in $Mode mode."
@@ -194,13 +221,44 @@ try {
     foreach ($Library in (Get-ChildItem -LiteralPath (Split-Path -Parent $Executable) -File -Filter "*.dll")) {
         $NativeRuntime[$Library.Name] = (Get-FileHash -Algorithm SHA256 -LiteralPath $Library.FullName).Hash.ToLowerInvariant()
     }
+    $Gpu = [ordered]@{}
+    $IntelGpuRuns = [ordered]@{}
+    $Profiles = @(Get-ChildItem -LiteralPath $env:VISUAL_ANALYSIS_GPU_PROFILE -File)
+    foreach ($Name in @("scrfd_10g_bnkps", "glintr100", "rtdetr_v2_r50vd", "chinese_clip_vision",
+                        "chinese_clip_text", "gfpgan-v1.4-fp32", "pcflow-bfr-fp32")) {
+        $Completed = @($Profiles | Where-Object Name -Like "$Name-*.gpu")
+        $Counts = foreach ($File in $Completed) {
+            $Prefix = [IO.Path]::GetFileNameWithoutExtension($File.Name)
+            if ($Profiles.Name -contains "$Prefix.fallback") { continue }
+            foreach ($Trace in ($Profiles | Where-Object Name -Like "${Prefix}_*.json")) {
+                $Profile = Get-Content -LiteralPath $Trace.FullName -Raw -Encoding UTF8
+                [regex]::Matches($Profile, '"provider"\s*:\s*"DmlExecutionProvider"').Count
+            }
+        }
+        $Gpu[$Name] = [int](($Counts | Measure-Object -Sum).Sum)
+        $IntelRuns = foreach ($File in ($Profiles | Where-Object Name -Like "$Name-*.ovgpu")) {
+            if($Profiles.Name -notcontains "$($File.BaseName).fallback") {
+                [int](Get-Content -LiteralPath $File.FullName -Raw -Encoding ASCII)
+            }
+        }
+        $IntelGpuRuns[$Name] = [int](($IntelRuns | Measure-Object -Sum).Sum)
+        Require (($Gpu[$Name] -gt 0) -or ($IntelGpuRuns[$Name] -gt 0)) "No completed GPU inference was recorded for $Name."
+    }
+    $Checks.gpu = $true
     [ordered]@{
         ok = $true; exe_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $Executable).Hash.ToLowerInvariant()
         worker_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path (Split-Path -Parent $Executable) "VehicleCatalogueWorker.exe")).Hash.ToLowerInvariant()
         models = $Digest
         native_runtime = $NativeRuntime
+        directml_node_events = $Gpu
+        openvino_gpu_runs = $IntelGpuRuns
+        display_adapters = @(Get-CimInstance Win32_VideoController | Select-Object Name,DriverVersion)
         finished = [DateTime]::UtcNow.ToString("o"); checks = $Checks
     } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $OutputDirectory "acceptance.json") -Encoding UTF8
     $Checks
 }
-finally { $env:FACE_MATCHING_HOME = $PreviousHome }
+finally {
+    $env:FACE_MATCHING_HOME = $PreviousHome
+    $env:VISUAL_ANALYSIS_GPU_PROFILE = $PreviousProfile
+    $env:VISUAL_ANALYSIS_BACKEND = $PreviousBackend
+}

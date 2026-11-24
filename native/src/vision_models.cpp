@@ -119,7 +119,7 @@ std::vector<std::wstring> basicTokens(const std::string& text) {
 
 std::string objectName(int category) {
     const auto* found = objectClass(category);
-    return found ? found->chinese : std::string{};
+    return found ? found->chinese : "物体";
 }
 
 cv::Mat markObjects(const cv::Mat& frame,std::span<const ObjectObservation> objects) {
@@ -141,7 +141,8 @@ struct ObjectDetector::State {
 ObjectDetector::ObjectDetector(const fs::path& models) : state_(std::make_unique<State>(models)) {}
 ObjectDetector::~ObjectDetector() = default;
 
-std::vector<ObjectObservation> ObjectDetector::detect(const cv::Mat& image,double threshold,bool people,bool vehicles) {
+std::vector<ObjectObservation> ObjectDetector::detect(const cv::Mat& image,double threshold,bool people,bool vehicles,
+                                                      bool otherObjects) {
     if (image.empty()) return {};
     auto outputs = state_->model.run(cv::dnn::blobFromImage(image,1./255,{640,640},{},true));
     const auto& names = state_->model.outputNames();
@@ -163,7 +164,8 @@ std::vector<ObjectObservation> ObjectDetector::detect(const cv::Mat& image,doubl
         const auto* score = values+row*80;
         if (!std::all_of(score,score+80,[](float n){return std::isfinite(n);})) continue;
         const auto category = int(std::max_element(score,score+80)-score);
-        if (!objectClass(category) || !(category == 0 ? people : vehicles)) continue;
+        const bool enabled=category==0 ? people : objectClass(category) ? vehicles : otherObjects;
+        if (!enabled) continue;
         const double confidence = 1/(1+std::exp(-std::clamp(double(score[category]),-80.,80.)));
         if (confidence < threshold) continue;
         const auto* p = coordinates+row*4;

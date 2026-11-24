@@ -1,4 +1,5 @@
 #include "local_images.h"
+#include "inference_backend.h"
 #include "portrait_video.h"
 #include "operations.h"
 #include "operations_window.h"
@@ -427,7 +428,8 @@ int showWindow(HINSTANCE module, int show, const fs::path& models) {
     for(size_t index=0;index<visual::workflowNames().size();++index) {
         AppendMenuW(menu,MF_STRING,firstWorkflow+index,visual::workflowNames()[index]);
     }
-    const auto handle = CreateWindowExW(0, className, L"Visual Analysis · 图像还原",
+    const auto caption=L"Visual Analysis · "+visual::inferenceBackendLabel();
+    const auto handle = CreateWindowExW(0, className, caption.c_str(),
         WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 1060, 700, nullptr, menu, module, &state);
     if (!handle) {
         DestroyMenu(menu);
