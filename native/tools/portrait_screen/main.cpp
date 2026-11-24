@@ -127,7 +127,7 @@ json frequencies(const std::vector<cv::Point2f>& values) {
     return result;
 }
 
-json run(const json& rows, const fs::path& output) {
+json run(const json& rows, const fs::path& output, bool writeNarrow) {
     json audit = json::object();
     for (auto entry = rows.begin(); entry != rows.end(); ++entry) {
         const auto& key = entry.key();
@@ -159,6 +159,13 @@ json run(const json& rows, const fs::path& output) {
                       {"midbandRatio", result.midbandRatio}, {"baseCoarseError", result.baseCoarseError},
                       {"phaseCoarseError", result.phaseCoarseError}, {"detectMs", ms(detected - start)},
                       {"sampleMs", ms(sampled - detected)}, {"selectMs", ms(stop - sampled)}};
+        if (writeNarrow) {
+            const auto begin = Clock::now();
+            const auto narrow = peaks.periods.empty() ? raw.clone() : alignedPhase(
+                native, visual::screen::subtractCoherentCarrier(native, peaks), raw, data.at("transport"), affine);
+            audit[key]["subtractMs"] = ms(Clock::now() - begin);
+            writeImage(out / L"narrow.png", narrow);
+        }
         std::cout << key << ": " << (result.usePhase ? "phase" : "previous") << '\n';
     }
     return audit;
@@ -175,10 +182,12 @@ int wmain(int argc, wchar_t** argv) {
         if (!manifest) {
             throw std::runtime_error("Cannot open the manifest");
         }
-        const auto rows = json::parse(manifest).at("rows");
+        const auto config = json::parse(manifest);
+        const auto& rows = config.at("rows");
         if (!rows.is_object() || rows.empty()) {
             throw std::invalid_argument("The manifest must contain at least one named sample");
         }
+        const bool writeNarrow = config.value("writeNarrow", false);
         const fs::path output(argv[2]);
         if (!output.parent_path().empty()) {
             fs::create_directories(output.parent_path());
@@ -187,7 +196,7 @@ int wmain(int argc, wchar_t** argv) {
             throw std::runtime_error("Choose a new output directory for this run");
         }
         cv::setNumThreads(1);
-        const auto results = run(rows, output);
+        const auto results = run(rows, output, writeNarrow);
         const auto pending = output / L"results.pending.json";
         std::ofstream report(pending, std::ios::binary);
         report << results.dump(2) << '\n';

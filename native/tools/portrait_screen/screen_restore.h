@@ -13,6 +13,7 @@ struct Peaks {
 
 Peaks detect(const cv::Mat& nativeBgr);
 cv::Mat averagePeriods(const cv::Mat& nativeBgr, const Peaks& peaks);
+cv::Mat subtractCoherentCarrier(const cv::Mat& nativeBgr, const Peaks& peaks);
 
 struct Selection {
     bool usePhase{};

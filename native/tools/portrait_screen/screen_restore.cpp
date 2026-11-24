@@ -42,6 +42,70 @@ cv::Mat gaussian(const cv::Mat& image, double radius) {
     return result;
 }
 
+cv::Mat linearBgr(const cv::Mat& image) {
+    static const cv::Mat lut = [] {
+        cv::Mat table(1, 256, CV_32F);
+        for (int i = 0; i < 256; ++i) {
+            const float value = i / 255.f;
+            table.at<float>(i) = value <= .04045f ? value / 12.92f : std::pow((value + .055f) / 1.055f, 2.4f);
+        }
+        return table;
+    }();
+    cv::Mat linear;
+    cv::LUT(image, lut, linear);
+    return linear;
+}
+
+unsigned char srgbByte(float value) {
+    const float clipped = std::clamp(value, 0.f, 1.f);
+    const float encoded = clipped <= .0031308f ? 12.92f * clipped : 1.055f * std::pow(clipped, 1.f / 2.4f) - .055f;
+    return cv::saturate_cast<unsigned char>(encoded * 255.f);
+}
+
+void carrierComponents(cv::Size shape, cv::Point2f frequency, cv::Mat& cosine, cv::Mat& sine) {
+    cosine.create(shape, CV_32FC3);
+    sine.create(shape, CV_32FC3);
+    for (int y = 0; y < shape.height; ++y) {
+        auto* real = cosine.ptr<cv::Vec3f>(y);
+        auto* imaginary = sine.ptr<cv::Vec3f>(y);
+        for (int x = 0; x < shape.width; ++x) {
+            const float angle = static_cast<float>(2. * pi) * (frequency.x * x + frequency.y * y);
+            real[x] = cv::Vec3f::all(std::cos(angle));
+            imaginary[x] = cv::Vec3f::all(std::sin(angle));
+        }
+    }
+}
+
+void subtractCarrier(cv::Mat& scene, cv::Point2f frequency) {
+    cv::Mat cosine, sine;
+    carrierComponents(scene.size(), frequency, cosine, sine);
+    const cv::Mat local = scene - gaussian(scene, 2.);
+    const cv::Mat real = 2.f * gaussian(local.mul(cosine), 10.);
+    const cv::Mat imaginary = 2.f * gaussian(local.mul(sine), 10.);
+    const cv::Mat smoothReal = gaussian(real, 16.);
+    const cv::Mat smoothImaginary = gaussian(imaginary, 16.);
+    cv::Mat amplitude, smoothAmplitude;
+    cv::sqrt(real.mul(real) + imaginary.mul(imaginary), amplitude);
+    cv::sqrt(smoothReal.mul(smoothReal) + smoothImaginary.mul(smoothImaginary), smoothAmplitude);
+    const cv::Mat localAmplitude = gaussian(amplitude, 16.);
+    for (int y = 0; y < scene.rows; ++y) {
+        auto* sceneRow = scene.ptr<float>(y);
+        const auto* a = real.ptr<float>(y);
+        const auto* b = imaginary.ptr<float>(y);
+        const auto* c = cosine.ptr<float>(y);
+        const auto* s = sine.ptr<float>(y);
+        const auto* amp = amplitude.ptr<float>(y);
+        const auto* coherenceNumerator = smoothAmplitude.ptr<float>(y);
+        const auto* coherenceDenominator = localAmplitude.ptr<float>(y);
+        for (int x = 0; x < 3 * scene.cols; ++x) {
+            const float coherence = coherenceNumerator[x] / std::max(coherenceDenominator[x], 1.e-6f);
+            const float confidence = std::clamp((coherence - .26f) / .49f, 0.f, 1.f)
+                * std::clamp((amp[x] - .0015f) / .003f, 0.f, 1.f);
+            sceneRow[x] -= .9f * confidence * (a[x] * c[x] + b[x] * s[x]);
+        }
+    }
+}
+
 std::vector<int> positions(int length) {
     std::vector<int> values;
     for (int i = 0; i <= length - tileSide; i += stride) {
@@ -357,13 +421,8 @@ cv::Mat averagePeriods(const cv::Mat& image, const Peaks& peaks) {
         }
         shifts = std::move(next);
     }
-    cv::Mat lut(1, 256, CV_32F);
-    for (int i = 0; i < 256; ++i) {
-        const float v = i / 255.f;
-        lut.at<float>(i) = v <= .04045f ? v / 12.92f : std::pow((v + .055f) / 1.055f, 2.4f);
-    }
-    cv::Mat linear, sampled;
-    cv::LUT(image, lut, linear);
+    const cv::Mat linear = linearBgr(image);
+    cv::Mat sampled;
     cv::Mat accumulated = cv::Mat::zeros(image.size(), CV_32FC3), coordinates(image.size(), CV_32FC2);
     for (auto shift : shifts) {
         for (int y = 0; y < image.rows; ++y) {
@@ -382,12 +441,35 @@ cv::Mat averagePeriods(const cv::Mat& image, const Peaks& peaks) {
         const auto* avg = accumulated.ptr<float>(y);
         auto* dst = output.ptr<unsigned char>(y);
         for (int x = 0; x < 3 * image.cols; ++x) {
-            const float v = std::clamp(src[x] + .86f * (avg[x] / count - src[x]), 0.f, 1.f);
-            const float srgb = v <= .0031308f ? 12.92f * v : 1.055f * std::pow(v, 1.f / 2.4f) - .055f;
-            dst[x] = cv::saturate_cast<unsigned char>(srgb * 255.f);
+            dst[x] = srgbByte(src[x] + .86f * (avg[x] / count - src[x]));
         }
     }
     return output;
+}
+
+cv::Mat subtractCoherentCarrier(const cv::Mat& image, const Peaks& peaks) {
+    checkBgr(image);
+    if (peaks.periods.empty()) {
+        return image.clone();
+    }
+    if (peaks.periods.size() > 2) {
+        throw std::invalid_argument("At most two screen directions can be subtracted");
+    }
+    cv::Mat scene = linearBgr(image);
+    for (const auto frequency : peaks.periods) {
+        if (cv::norm(frequency) >= .105) {
+            subtractCarrier(scene, frequency);
+        }
+    }
+    cv::Mat result(image.size(), CV_8UC3);
+    for (int y = 0; y < image.rows; ++y) {
+        const auto* input = scene.ptr<float>(y);
+        auto* output = result.ptr<unsigned char>(y);
+        for (int x = 0; x < 3 * image.cols; ++x) {
+            output[x] = srgbByte(input[x]);
+        }
+    }
+    return result;
 }
 
 Selection selectBase(const cv::Mat& raw, const cv::Mat& previous, const cv::Mat& phase,
