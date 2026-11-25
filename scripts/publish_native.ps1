@@ -7,7 +7,7 @@ param(
     [Parameter(Mandatory)][string]$DirectMlDirectory,
     [Parameter(Mandatory)][string]$OpenCvDirectory,
     [Parameter(Mandatory)][string]$FFmpegDirectory,
-    [string]$Version = "2.13.1",
+    [string]$Version = "2.14.0",
     [switch]$SkipBaiduUpload
 )
 
@@ -18,7 +18,7 @@ $Project = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).ProviderPa
 $BuildDirectory = (Resolve-Path -LiteralPath $BuildDirectory).ProviderPath
 $Report = Get-Content -LiteralPath $AcceptanceReport -Raw -Encoding UTF8 | ConvertFrom-Json
 $RequiredChecks = @("people", "annotations", "face_search", "visual_search", "semantic_search",
-    "object_detection", "video_plate", "portrait_video", "vehicle_public", "vehicle_offline", "portrait_standard", "portrait_recall", "face_video_tracking", "face_mixed_sources", "trigger_capture", "gpu")
+    "object_detection", "video_plate", "plate_recognition", "incident_screen", "portrait_video", "vehicle_public", "vehicle_offline", "portrait_standard", "portrait_recall", "face_video_tracking", "face_mixed_sources", "trigger_capture", "gpu")
 if (-not $Report.ok) { throw "Native acceptance is required before packaging." }
 foreach ($Check in $RequiredChecks) {
     if (-not $Report.checks.PSObject.Properties[$Check] -or -not $Report.checks.$Check) {
@@ -83,7 +83,8 @@ foreach ($File in $CrtFiles) {
 $ModelStage = Join-Path $Stage "models"
 New-Item -ItemType Directory -Path $ModelStage | Out-Null
 $ModelNames = @("scrfd_10g_bnkps.onnx", "glintr100.onnx", "rtdetr_v2_r50vd.onnx", "chinese_clip_text.onnx",
-    "chinese_clip_vision.onnx", "chinese_clip_vocab.txt", "pcflow-bfr-fp32.onnx", "gfpgan-v1.4-fp32.onnx")
+    "chinese_clip_vision.onnx", "chinese_clip_vocab.txt", "pcflow-bfr-fp32.onnx", "gfpgan-v1.4-fp32.onnx",
+    "y5fu_640x_sim.onnx", "rpv3_mdict_160_r3.onnx")
 foreach ($File in $ModelNames) {
     $ModelSource = Join-Path $BuildDirectory "models\$File"
     $AcceptedHash = $Report.models.PSObject.Properties[$File]

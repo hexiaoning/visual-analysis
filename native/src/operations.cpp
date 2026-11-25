@@ -3,6 +3,8 @@
 #include "vehicle.h"
 #include "media_operations.h"
 #include "plate_video.h"
+#include "plate_recognition.h"
+#include "incident_screen.h"
 
 #include <algorithm>
 #include <thread>
@@ -41,6 +43,8 @@ Json runOperation(const std::string& action,const Json& request,const std::files
                   const std::filesystem::path& worker,const std::atomic<bool>& cancel,DetectionPreview* preview,
                   FaceScanSession* faceQueue) {
     if(action=="vehicle.analyze") return analyzeVehicle(request,models,worker,cancel,preview);
+    if(action=="incident.screen" || action=="incident.export" || action=="incident.rules") return incidentOperation(action,request,cancel);
+    if(action=="plate.recognize") return recognizePlates(request,models,cancel,preview);
     if(action=="plate.video") return plateVideo(request,cancel,preview);
     if(action=="semantic.search" || action=="visual.search" || action=="objects.scan" || action=="face.scan" ||
        action=="hits.export") {

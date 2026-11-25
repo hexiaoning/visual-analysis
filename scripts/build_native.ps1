@@ -10,6 +10,7 @@ param(
     [Parameter(Mandatory)][string]$MsvcDirectory,
     [Parameter(Mandatory)][string]$WindowsSdkDirectory,
     [string]$ModelDirectory,
+    [string]$PlateModelDirectory,
     [string]$WindowsSdkVersion = "10.0.26100.0"
 )
 
@@ -51,13 +52,14 @@ $Arguments = @(
     "/external:I$FFmpegDirectory\include",
     "/external:I$JsonIncludeDirectory",
     "/external:I$OpenVinoDirectory\include",
-    "/I$MsvcDirectory\include", "/I$SdkHeaders\ucrt", "/I$SdkHeaders\shared", "/I$SdkHeaders\um",
+    "/I$MsvcDirectory\include", "/I$SdkHeaders\ucrt", "/I$SdkHeaders\shared", "/I$SdkHeaders\um", "/external:I$SdkHeaders\winrt",
     "/Fo$Objects\", "/Fe$Executable", (Join-Path $Sources "app.cpp"),
     (Join-Path $Sources "local_images.cpp"), (Join-Path $Sources "portrait.cpp"), (Join-Path $Sources "plate.cpp"),
     (Join-Path $Sources "portrait_video.cpp"),
     (Join-Path $Sources "storage.cpp"), (Join-Path $Sources "vision_models.cpp"),
     (Join-Path $Sources "people.cpp"),
     (Join-Path $Sources "vehicle.cpp"), (Join-Path $Sources "operations.cpp"), (Join-Path $Sources "operations_window.cpp"),
+    (Join-Path $Sources "incident_screen.cpp"), (Join-Path $Sources "plate_recognition.cpp"),
     (Join-Path $Sources "media_operations.cpp"), (Join-Path $Sources "plate_video.cpp"),
     (Join-Path $Sources "preview_native.cpp"), (Join-Path $Sources "inference_backend.cpp"),
     (Join-Path $Sources "openvino_model.cpp"),
@@ -65,7 +67,7 @@ $Arguments = @(
     "/libpath:$SdkLink\ucrt\x64", "/libpath:$SdkLink\um\x64",
     $OrtLibrary, $OpenCvLib[0].FullName, (Join-Path $OpenVinoDirectory "libs\openvino.lib"), "/libpath:$FFmpegDirectory\lib",
     "user32.lib", "gdi32.lib", "comdlg32.lib", "shell32.lib", "bcrypt.lib", "winsqlite3.lib", "normaliz.lib",
-    "crypt32.lib", "ole32.lib", "uuid.lib", "dxgi.lib", "d3d12.lib"
+    "crypt32.lib", "ole32.lib", "oleaut32.lib", "uuid.lib", "dxgi.lib", "d3d12.lib"
 )
 $Arguments += @($MediaLibraries | ForEach-Object { "$_.lib" })
 & $Cl @Arguments
@@ -115,6 +117,22 @@ if ($ModelDirectory) {
         $Source = Join-Path $ModelDirectory $Name
         if ((Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash -ine $Models[$Name]) {
             throw "Native model SHA-256 verification failed for $Name."
+        }
+        Copy-Item -LiteralPath $Source -Destination $ModelOutput -Force
+    }
+}
+if ($ModelDirectory -or $PlateModelDirectory) {
+    $PlateSource = if ($PlateModelDirectory) { $PlateModelDirectory } else { $ModelDirectory }
+    $PlateModels = @{
+        "y5fu_640x_sim.onnx" = "0306de937471b87f56eb3f5620815e7e7058f8ab7428e0734fc64627cc4d716c"
+        "rpv3_mdict_160_r3.onnx" = "35521a46fd8beaa6fd942f969bc666f4ef5c8433d2082eae002e6c94c5d307a2"
+    }
+    $ModelOutput = Join-Path $Output "models"
+    New-Item -ItemType Directory -Path $ModelOutput -Force | Out-Null
+    foreach ($Name in $PlateModels.Keys) {
+        $Source = Join-Path $PlateSource $Name
+        if ((Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash -ine $PlateModels[$Name]) {
+            throw "Plate model SHA-256 verification failed for $Name."
         }
         Copy-Item -LiteralPath $Source -Destination $ModelOutput -Force
     }

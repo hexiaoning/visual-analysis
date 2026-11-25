@@ -25,9 +25,9 @@ constexpr wchar_t windowClass[]=L"VisualAnalysisWorkflow";
 constexpr UINT_PTR timer=1;
 constexpr UINT_PTR sourceTimer=2;
 constexpr UINT chooseBase=200, actionBase=300, cancelAction=500, saveAction=501, exportHitsAction=502,
-    viewAction=503, playAction=504, pauseAction=505, restoreHitAction=506;
+    viewAction=503, playAction=504, pauseAction=505;
 
-enum class Box {Text,Media,Images,Json,Directory,Region,Line};
+enum class Box {Text,Media,Images,Json,Workbook,Directory,Region,Line};
 struct Field {const char* key;const wchar_t* title;Box type=Box::Text;};
 struct Action {const char* name;const wchar_t* label;};
 struct Workflow {
@@ -40,13 +40,11 @@ const std::array workflows{
     Workflow{L"车型识别",{{"input",L"车辆图片／视频",Box::Media},{"catalogue",L"本机参考库（可选）",Box::Json},
             {"brand",L"已知品牌（可选）"},{"series",L"已知车系（可选）"}},
         {{"vehicle.analyze",L"识别并查询线上资料"}}},
-    Workflow{L"人脸检索",{{"input",L"探测照片",Box::Images},{"reference",L"对比照片",Box::Images},
-            {"source",L"图片／视频（可混选）",Box::Media},{"step",L"抽帧间隔（可选）"},
+    Workflow{L"人像检索",{{"source",L"图片／视频（可混选）",Box::Media},{"step",L"抽帧间隔（可选）"},
             {"library_id",L"人员库 ID（可选）"},{"sex",L"性别（男／女）"},{"region_prefix",L"地区码"},
             {"min_age",L"最小年龄（可选）"},{"max_age",L"最大年龄（可选）"},{"camera",L"摄像头编号（默认 0）"}},
-        {{"face.compare",L"两张照片对比"},{"face.gallery",L"照片检索人物"},{"face.scan",L"开始检索"},
-         {"face.camera",L"打开摄像头"}}},
-    Workflow{L"人车检测",{{"source",L"本机素材路径",Box::Media},{"threshold",L"置信度门槛（可选）"},
+        {{"face.scan",L"开始检索"},{"face.camera",L"打开摄像头"}}},
+    Workflow{L"目标检测",{{"source",L"本机素材路径",Box::Media},{"threshold",L"置信度门槛（可选）"},
             {"output",L"截图保存目录",Box::Directory},{"target",L"类别（人／车／物体／全部）"},
             {"trigger_line",L"触发线（可选）",Box::Line},{"trigger_area",L"触发区域（可选）",Box::Region},
             {"video_output",L"标注视频 MP4 路径"}},
@@ -58,10 +56,10 @@ const std::array workflows{
     Workflow{L"语义搜索",{{"text",L"目标描述"},{"source",L"本机素材或文件夹",Box::Media},
             {"category",L"类别（自动/人物/车辆）"},{"step",L"抽帧间隔（默认 25）"},{"threshold",L"相关度门槛"}},
         {{"semantic.search",L"检索目标"},{"sources.folder",L"添加文件夹…"},{"sources.clear",L"清空范围"}}},
-    Workflow{L"视频车牌",{{"source",L"本机车辆视频",Box::Media},{"frame_index",L"起始帧（从 0 开始）"},
-            {"bbox",L"选区 x1 y1 x2 y2",Box::Region},{"count",L"跟踪帧数（默认 12）"},{"blur_length",L"拖影长度（像素）"},
-            {"blur_angle",L"角度（0～179）"},{"output",L"输出目录",Box::Directory}},
-        {{"plate.preview",L"导出起始帧"},{"plate.video",L"还原车牌"}}},
+    Workflow{L"车牌识别",{{"source",L"本机图片／视频",Box::Media},{"frame_index",L"起始帧（可选，从 0 起）"},
+            {"bbox",L"手动框选（可选）",Box::Region},{"step",L"视频抽帧间隔（可选）"},
+            {"output",L"结果保存目录",Box::Directory}},
+        {{"plate.recognize",L"识别车牌"}}},
     Workflow{L"人员库",{{"id",L"人员或库的 ID"},{"name",L"姓名／库名"},{"id_card",L"身份证号"},
             {"photos",L"录入照片（可多选）",Box::Images},{"library_ids",L"所属库 ID（空格分隔）"},
             {"library_id",L"检索库 ID"},{"sex",L"性别（男／女）"},{"region_prefix",L"地区码"},
@@ -81,7 +79,13 @@ const std::array workflows{
             {"min_quality",L"最低人脸质量"},{"enrollment_min_quality",L"最低录入质量"},
             {"mirror_augmentation",L"镜像增强（1 或 0）"}},
         {{"settings.load",L"读取现有设置"},{"settings.save",L"保存设置"}}},
+    Workflow{L"双照比对",{{"input",L"探测照片",Box::Images},{"reference",L"对比照片",Box::Images}},
+        {{"face.compare",L"比对两张照片"}}},
+    Workflow{L"警情筛选",{{"source",L"当日警情 Excel",Box::Workbook},{"rules_path",L"筛选规则 JSON（可选）",Box::Json}},
+        {{"incident.screen",L"筛选并复核"},{"incident.export",L"导出筛选 Excel"},{"incident.rules",L"保存默认规则…"}}},
+    Workflow{L"人像还原",{},{}},
 };
+static_assert(workflows.size()==static_cast<size_t>(WorkflowPage::Count));
 
 struct Form {
     fs::path models,worker;
@@ -96,7 +100,6 @@ struct Form {
     std::vector<fs::path> deferredFaceSources;
     std::wstring lastFaceSource;
     fs::path galleryQuery;
-    HWND restoreHit{};
     std::shared_ptr<std::atomic<bool>> cancelFlag;
     std::shared_ptr<DetectionPreview> preview;
     int displayedFrame{};
@@ -145,6 +148,7 @@ cv::Mat frameAt(const fs::path& path,int index) {
 }
 
 Json viewable(const Form& form) {
+    if(form.operation=="incident.screen" || form.last.contains("export_request")) return Json::array();
     if(form.last.contains("hits") && form.last["hits"].is_array()) return form.last["hits"];
     if(form.operation=="face.gallery") return form.last;
     if(form.operation=="plate.video" && form.last.contains("candidates")) return form.last["candidates"];
@@ -165,7 +169,14 @@ void viewResult(HWND owner,const Form& form,bool play) {
     if(index<0) index=0;
     if(index<static_cast<LRESULT>(rows.size())) {
         const auto& row=rows[index];
-        if(row.contains("source") && row.contains("bbox")) {
+        if(form.operation=="plate.recognize") {
+            auto original=readImage(textPath(row.at("original").get<std::string>()));
+            const auto label=wide(row.value("name",std::string("车牌")));
+            if(row.contains("restored")) {
+                previewComparison(owner,std::move(original),readImage(textPath(row.at("restored").get<std::string>())),
+                                  (label+L" · 左原始，右还原").c_str());
+            } else previewNative(owner,original,(label+L" · 原始车牌").c_str(),false);
+        } else if(row.contains("source") && row.contains("bbox")) {
             const auto source=textPath(row["source"].get<std::string>());
             const auto first=row.value("frame_index",0);
             const auto frame=row.contains("camera")?readImage(textPath(row.at("snapshot_path").get<std::string>())):frameAt(source,first);
@@ -219,10 +230,11 @@ std::vector<fs::path> chooseFiles(HWND owner,Box mode,bool save=false,bool multi
     dlg.lpstrFile=choices.data();
     dlg.nMaxFile=static_cast<DWORD>(choices.size());
     dlg.Flags=OFN_EXPLORER|OFN_NOCHANGEDIR|OFN_PATHMUSTEXIST;
-    dlg.lpstrFilter=mode==Box::Json ? L"JSON 文件\0*.json\0\0" : mode==Box::Images ?
+    dlg.lpstrFilter=mode==Box::Workbook ? L"Excel 工作簿\0*.xlsx\0\0" :
+        mode==Box::Json ? L"JSON 文件\0*.json\0\0" : mode==Box::Images ?
         L"图片\0*.jpg;*.jpeg;*.png;*.webp;*.bmp;*.tif;*.tiff\0\0" :
         L"图片和视频\0*.jpg;*.jpeg;*.png;*.webp;*.bmp;*.mp4;*.mkv;*.mov;*.avi;*.webm;*.ts;*.wmv\0所有文件\0*.*\0\0";
-    if(save) {dlg.lpstrDefExt=L"json";dlg.Flags|=OFN_OVERWRITEPROMPT;}
+    if(save) {dlg.lpstrDefExt=mode==Box::Workbook?L"xlsx":L"json";dlg.Flags|=OFN_OVERWRITEPROMPT;}
     else {
         dlg.Flags|=OFN_FILEMUSTEXIST;
         if(multiple) dlg.Flags|=OFN_ALLOWMULTISELECT;
@@ -363,8 +375,8 @@ void layout(HWND handle,const Form& state) {
     constexpr int margin=14;
     int y=margin;
     for(size_t index=0;index<state.fields.size();++index) {
-        MoveWindow(state.captions[index],margin,y+4,146,23,TRUE);
-        MoveWindow(state.fields[index],margin+150,y,client.right-2*margin-228,25,TRUE);
+        MoveWindow(state.captions[index],margin,y+4,178,23,TRUE);
+        MoveWindow(state.fields[index],margin+182,y,client.right-2*margin-260,25,TRUE);
         if(state.choosers[index]) MoveWindow(state.choosers[index],client.right-margin-70,y,70,25,TRUE);
         y+=32;
     }
@@ -379,8 +391,7 @@ void layout(HWND handle,const Form& state) {
     MoveWindow(state.cancelButton,client.right-margin-211,y,94,26,TRUE);
     MoveWindow(state.save,client.right-margin-107,y,106,26,TRUE);
     y+=34;
-    MoveWindow(state.hitChoice,margin,y,client.right-2*margin-(state.restoreHit?390:260),170,TRUE);
-    if(state.restoreHit) MoveWindow(state.restoreHit,client.right-margin-382,y,122,26,TRUE);
+    MoveWindow(state.hitChoice,margin,y,client.right-2*margin-260,170,TRUE);
     MoveWindow(state.play,client.right-margin-252,y,122,26,TRUE);
     MoveWindow(state.view,client.right-margin-122,y,122,26,TRUE);
     y+=34;
@@ -388,8 +399,12 @@ void layout(HWND handle,const Form& state) {
 }
 
 void buttons(Form& state,bool running) {
-    for(auto button:state.buttons) EnableWindow(button,!running);
-    const auto& fields=workflows[state.index].fields;
+    const auto& workflow=workflows[state.index];
+    for(size_t i=0;i<state.buttons.size();++i) {
+        const auto action=std::string_view(workflow.actions[i].name);
+        EnableWindow(state.buttons[i],!running && (action!="incident.export" || state.last.contains("export_request")));
+    }
+    const auto& fields=workflow.fields;
     for(size_t i=0;i<state.choosers.size();++i) if(state.choosers[i]) {
         EnableWindow(state.choosers[i],!running || (state.faceQueue && fields[i].key==std::string_view("source")));
     }
@@ -397,15 +412,15 @@ void buttons(Form& state,bool running) {
     EnableWindow(state.cancelButton,running);
     if(state.pause) EnableWindow(state.pause,running && state.preview!=nullptr);
     EnableWindow(state.save,!running && !state.last.is_null());
-    EnableWindow(state.exportHits,!running && state.last.contains("hits") && !state.last["hits"].empty());
+    const bool mediaHits=state.operation!="plate.recognize" && !state.last.contains("export_request") && state.last.contains("hits") && !state.last["hits"].empty();
+    EnableWindow(state.exportHits,!running && mediaHits);
     EnableWindow(state.view,!running && (!viewable(state).empty() || state.last.contains("preview") || state.operation=="face.compare"));
-    EnableWindow(state.play,!running && state.last.contains("hits") && !state.last["hits"].empty());
-    if(state.restoreHit) EnableWindow(state.restoreHit,!running && !viewable(state).empty());
+    EnableWindow(state.play,!running && mediaHits);
 }
 
 bool showsProcessingPreview(std::string_view action) {
     return action=="face.scan" || action=="objects.scan" || action=="visual.search" ||
-        action=="semantic.search" || action=="vehicle.analyze" || action=="plate.video";
+        action=="semantic.search" || action=="vehicle.analyze" || action=="plate.recognize";
 }
 
 void setSearchScope(Form& form,std::vector<fs::path> additions) {
@@ -536,17 +551,26 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
         for(size_t index=0;index<workflow.actions.size();++index) {
             state->buttons.push_back(child(handle,L"BUTTON",workflow.actions[index].label,WS_TABSTOP,actionBase+index));
         }
-        state->activity=child(handle,L"STATIC",L"",0,0);
+        const bool plate=state->index==static_cast<size_t>(WorkflowPage::PlateRecognition);
+        const bool incident=state->index==static_cast<size_t>(WorkflowPage::IncidentScreen);
+        state->activity=child(handle,L"STATIC",incident?L"使用可自定义的纳入、排除规则。":L"",0,0);
         state->cancelButton=child(handle,L"BUTTON",L"取消任务",WS_TABSTOP,cancelAction);
         if(state->index==1 || state->index==2) state->pause=child(handle,L"BUTTON",L"暂停",WS_TABSTOP,pauseAction);
         state->save=child(handle,L"BUTTON",L"导出结果 JSON",WS_TABSTOP,saveAction);
         state->exportHits=child(handle,L"BUTTON",L"导出目标截图",WS_TABSTOP,exportHitsAction);
-        state->view=child(handle,L"BUTTON",L"预览选中画面",WS_TABSTOP,viewAction);
-        if(state->index==3) state->restoreHit=child(handle,L"BUTTON",L"送去还原",WS_TABSTOP,restoreHitAction);
+        state->view=child(handle,L"BUTTON",plate?L"查看车牌图像":L"预览选中画面",WS_TABSTOP,viewAction);
         state->play=child(handle,L"BUTTON",L"从命中帧播放",WS_TABSTOP,playAction);
         state->hitChoice=child(handle,L"COMBOBOX",L"",CBS_DROPDOWNLIST|WS_TABSTOP|WS_VSCROLL,600);
         state->result=child(handle,L"EDIT",L"",ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL|WS_VSCROLL|WS_TABSTOP,800);
         SendMessageW(state->result,EM_SETLIMITTEXT,4*1024*1024,0);
+        if(plate || incident) {
+            ShowWindow(state->exportHits,SW_HIDE);
+            ShowWindow(state->play,SW_HIDE);
+        }
+        if(incident) {
+            ShowWindow(state->view,SW_HIDE);
+            ShowWindow(state->hitChoice,SW_HIDE);
+        }
         buttons(*state,false);
         layout(handle,*state);
         return 0;
@@ -571,6 +595,14 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
         const auto id=LOWORD(wparam);
         try {
             const auto& fields=workflows[state->index].fields;
+            if(state->index==static_cast<size_t>(WorkflowPage::IncidentScreen) && HIWORD(wparam)==EN_CHANGE &&
+               id>=700 && id<700+fields.size() && state->last.contains("export_request")) {
+                state->last=nullptr;
+                SetWindowTextW(state->result,L"");
+                SetWindowTextW(state->activity,L"来源或规则已更新，请重新筛选。");
+                buttons(*state,false);
+                return 0;
+            }
             if(state->index==1 && HIWORD(wparam)==EN_CHANGE && id>=700 && id<700+fields.size() &&
                fields[id-700].key==std::string_view("source")) {
                 SetTimer(handle,sourceTimer,400,nullptr);
@@ -588,21 +620,6 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
                 SetWindowTextW(state->activity,paused?L"已暂停。":L"继续检测…");
             } else if(id==saveAction && !state->last.is_null()) {
                 if(const auto paths=chooseFiles(handle,Box::Json,true);!paths.empty()) writeJson(paths.front(),state->last);
-            } else if(id==restoreHitAction && !state->pending.valid()) {
-                const auto hits=viewable(*state);
-                const auto index=std::max<LRESULT>(0,SendMessageW(state->hitChoice,CB_GETCURSEL,0,0));
-                if(static_cast<size_t>(index)<hits.size()) {
-                    const auto& hit=hits[index];
-                    const SearchRestorationInput result{frameAt(textPath(hit.at("source").get<std::string>()),
-                        hit.value("frame_index",0)),readRect(hit.at("bbox"))};
-                    const auto root=GetAncestor(handle,GA_ROOTOWNER);
-                    if(!SendMessageW(root,loadSearchRestoration,0,reinterpret_cast<LPARAM>(&result))) {
-                        throw std::runtime_error("图像还原窗口当前忙，请稍后重试。");
-                    }
-                    SetForegroundWindow(root);
-                    if(GetAncestor(handle,GA_ROOT)==handle) DestroyWindow(handle);
-                    return 0;
-                }
             } else if((id==viewAction || id==playAction) && !state->pending.valid()) {
                 viewResult(handle,*state,id==playAction);
             } else if(id==exportHitsAction && state->last.contains("hits") && !state->pending.valid()) {
@@ -660,12 +677,26 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
                     if(MessageBoxW(handle,L"确认移除所填 ID 对应的记录？",L"人员库",MB_OKCANCEL|MB_ICONQUESTION)!=IDOK) return 0;
                 }
                 auto request=input(*state,action);
+                if(action=="incident.rules") {
+                    if(const auto paths=chooseFiles(handle,Box::Json,true);!paths.empty()) {
+                        request={{"output",pathText(paths.front())}};
+                    } else return 0;
+                }
+                if(action=="incident.export") {
+                    if(!state->last.contains("export_request")) {
+                        throw std::runtime_error("请先筛选并核对警情。");
+                    }
+                    if(const auto paths=chooseFiles(handle,Box::Workbook,true);!paths.empty()) {
+                        request=state->last.at("export_request");
+                        request["output"]=pathText(paths.front());
+                    } else return 0;
+                }
                 if(action=="face.camera") action="face.scan";
-                if(action=="plate.preview") {request.erase("bbox"); action="plate.video";}
                 if(action=="associate" || action=="reject" || action=="undo_rejection" || action=="remove_association") {
                     request["action"]=action;
                     action="annotation.write";
                 }
+                if(action=="incident.screen") state->last=nullptr;
                 beginTask(handle,*state,std::move(action),std::move(request));
             }
         } catch(const std::exception& error) {
@@ -705,7 +736,14 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
            state->pending.wait_for(std::chrono::seconds(0))==std::future_status::ready) {
             KillTimer(handle,timer);
             try {
-                state->last=state->pending.get();
+                auto result=state->pending.get();
+                if((state->operation=="incident.export" || state->operation=="incident.rules") && state->last.contains("export_request")) {
+                    SetWindowTextW(state->activity,state->operation=="incident.export"?L"已导出筛选 Excel。":L"已保存默认规则。");
+                    state->cancelFlag.reset();
+                    buttons(*state,false);
+                    return 0;
+                }
+                state->last=std::move(result);
                 SendMessageW(state->hitChoice,CB_RESETCONTENT,0,0);
                 const auto rows=viewable(*state);
                 for(size_t i=0;i<rows.size();++i) {
@@ -718,7 +756,10 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
                     SendMessageW(state->hitChoice,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(label.c_str()));
                 }
                 if(!rows.empty()) SendMessageW(state->hitChoice,CB_SETCURSEL,0,0);
-                const auto description=state->operation=="vehicle.analyze" ? vehicleText(state->last) : wide(state->last.dump(2));
+                const auto description=state->operation=="vehicle.analyze"?vehicleText(state->last):
+                    state->operation=="incident.screen"?wide(state->last.value("review_text",std::string{})):
+                    state->operation=="plate.recognize"?wide(state->last.value("review_text",std::string{})):
+                    wide(state->last.dump(2));
                 SetWindowTextW(state->result,description.c_str());
                 SetWindowTextW(state->activity,*state->cancelFlag?L"操作已结束。":L"处理完成。");
                 if(state->operation=="settings.load") {
@@ -769,17 +810,12 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
 
 }
 
-std::span<const wchar_t* const> workflowNames() {
-    static const auto names=[]{
-        std::array<const wchar_t*,workflows.size()> list{};
-        for(size_t index=0;index<list.size();++index) list[index]=workflows[index].name;
-        return list;
-    }();
-    return names;
+const wchar_t* workflowName(WorkflowPage workflow) {
+    return workflows.at(static_cast<size_t>(workflow)).name;
 }
 
-void openWorkflow(HWND parent,const fs::path& models,const fs::path& worker,size_t workflow) {
-    if(workflow>=workflows.size()) throw std::invalid_argument("未知功能入口。");
+HWND createWorkflowPage(HWND parent,const fs::path& models,const fs::path& worker,WorkflowPage workflow) {
+    const auto index=static_cast<size_t>(workflow);
     WNDCLASSW type{};
     type.hInstance=GetModuleHandleW(nullptr);
     type.lpfnWndProc=handler;
@@ -787,16 +823,23 @@ void openWorkflow(HWND parent,const fs::path& models,const fs::path& worker,size
     type.hCursor=LoadCursorW(nullptr,IDC_ARROW);
     type.hbrBackground=GetSysColorBrush(COLOR_BTNFACE);
     if(!RegisterClassW(&type) && GetLastError()!=ERROR_CLASS_ALREADY_EXISTS) throw std::runtime_error("无法注册功能窗口。");
+
     auto state=std::make_unique<Form>();
     state->models=models;
     state->worker=worker;
-    state->index=workflow;
-    const auto title=std::wstring(L"Visual Analysis · ")+workflows[workflow].name;
-    const auto handle=CreateWindowExW(WS_EX_CONTROLPARENT,windowClass,title.c_str(),WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT,CW_USEDEFAULT,1000,760,parent,nullptr,type.hInstance,state.get());
-    if(!handle) throw std::runtime_error("无法打开功能窗口。");
+    state->index=index;
+    const auto handle=CreateWindowExW(WS_EX_CONTROLPARENT,windowClass,workflowName(workflow),WS_CHILD|WS_CLIPCHILDREN,
+        0,0,0,0,parent,nullptr,type.hInstance,state.get());
+    if(!handle) throw std::runtime_error("无法打开功能页面。");
     state.release()->adopted=true;
-    ShowWindow(handle,SW_SHOWNORMAL);
+    return handle;
+}
+
+bool cancelWorkflow(HWND handle) {
+    const auto* state=reinterpret_cast<const Form*>(GetWindowLongPtrW(handle,GWLP_USERDATA));
+    if(!state || !state->pending.valid()) return false;
+    SendMessageW(handle,WM_CLOSE,0,0);
+    return true;
 }
 
 }

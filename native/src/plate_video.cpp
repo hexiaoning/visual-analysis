@@ -102,6 +102,29 @@ bool fuse(const cv::Mat& reference,const cv::Mat& next,cv::Mat& sums,cv::Mat& we
 
 }
 
+cv::Rect trackPlateRegion(const cv::Mat& image,const cv::Mat& reference,cv::Rect previous) {
+    if(reference.empty()) return {};
+    return track(image,gray(reference),previous);
+}
+
+cv::Mat fusePlateFrames(const cv::Mat& reference,const std::vector<cv::Mat>& donors) {
+    if(donors.empty()) return {};
+    cv::Mat sums;
+    reference.convertTo(sums,CV_32F);
+    cv::Mat weights(reference.size(),CV_32F,cv::Scalar(1));
+    size_t used=1;
+    for(const auto& donor:donors) {
+        if(donor.size()==reference.size() && fuse(reference,donor,sums,weights,float(.5/std::sqrt(used)))) ++used;
+    }
+    if(used<2) return {};
+    auto combined=reference.clone();
+    for(int y=0;y<combined.rows;++y) for(int x=0;x<combined.cols;++x) {
+        const auto rgb=sums.at<cv::Vec3f>(y,x)/weights.at<float>(y,x);
+        for(int c=0;c<3;++c) combined.at<cv::Vec3b>(y,x)[c]=cv::saturate_cast<uchar>(rgb[c]);
+    }
+    return combined;
+}
+
 Json plateVideo(const Json& request,const std::atomic<bool>& cancel,DetectionPreview* processingPreview) {
     const auto source=localPath(textPath(request.at("source").get<std::string>()));
     const int anchor=request.value("frame_index",0), count=request.value("count",12);

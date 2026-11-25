@@ -8,7 +8,11 @@ param(
     [Parameter(Mandatory)][string]$OutputDirectory,
     [Parameter(Mandatory)][string]$FFprobe,
     [string]$FFmpeg = (Join-Path (Split-Path -Parent $FFprobe) "ffmpeg.exe"),
-    [string]$ExpectedVehicleSeries = "海鸥"
+    [string]$ExpectedVehicleSeries = "海鸥",
+    [string]$PlateImage,
+    [string]$ExpectedPlate,
+    [string]$IncidentWorkbook,
+    [string]$ExpectedIncidentCategory = "涉赌"
 )
 
 $ErrorActionPreference = "Stop"
@@ -165,6 +169,40 @@ try {
     }
     Require ($Plate.tracked -ge 1 -and @($Plate.candidates).Count -ge 1) "Multi-frame restoration did not produce a candidate."
     $Checks.video_plate = $true
+    if ($PlateImage -or $ExpectedPlate) {
+        Require ([bool]$PlateImage -and [bool]$ExpectedPlate) "Pass both PlateImage and ExpectedPlate."
+        $PlateResult = Invoke-NativeOperation "plate.recognize" @{
+            source = $PlateImage; output = (Join-Path $OutputDirectory "plate-recognition-image")
+        } "plate-recognition-image"
+        $PlateHit = @($PlateResult.hits | Where-Object { $_.accepted -and $_.number -ceq $ExpectedPlate })
+        Require ($PlateHit.Count -eq 1 -and (Test-Path -LiteralPath $PlateHit[0].original -PathType Leaf) -and
+            (Test-Path -LiteralPath $PlateHit[0].restored -PathType Leaf)) "Plate recognition did not preserve the expected number and both plate images."
+        $PlateVideo = Join-Path $OutputDirectory "plate-recognition-video.mkv"
+        & $FFmpeg -v error -loop 1 -framerate 5 -i $PlateImage -an -frames:v 5 -c:v ffv1 $PlateVideo
+        Require ($LASTEXITCODE -eq 0) "Could not generate the plate video fixture."
+        $VideoResult = Invoke-NativeOperation "plate.recognize" @{
+            source = $PlateVideo; step = 1; output = (Join-Path $OutputDirectory "plate-recognition-video")
+        } "plate-recognition-video"
+        $VideoPlateHit = @($VideoResult.hits | Where-Object { $_.accepted -and $_.number -ceq $ExpectedPlate })
+        Require ($VideoPlateHit.Count -eq 1 -and $VideoPlateHit[0].observations -ge 2) "The plate track did not consolidate observations across video frames."
+        $Checks.plate_recognition = $true
+    }
+    if ($IncidentWorkbook) {
+        $WorkbookHash = (Get-FileHash -LiteralPath $IncidentWorkbook -Algorithm SHA256).Hash
+        $Incidents = Invoke-NativeOperation "incident.screen" @{ source = $IncidentWorkbook }
+        $ExpectedIncident = @($Incidents.hits | Where-Object { $_.status -eq "命中" -and $_.categories -ccontains $ExpectedIncidentCategory })
+        Require ($Incidents.total -ge 1 -and $ExpectedIncident.Count -ge 1 -and @($ExpectedIncident[0].evidence).Count -ge 1) "Incident screening did not classify the expected workbook row."
+        $FilteredWorkbook = Join-Path $OutputDirectory "警情筛选.xlsx"
+        $ExportedIncidents = Invoke-NativeOperation "incident.export" @{
+            source = $IncidentWorkbook; output = $FilteredWorkbook; source_stamp = $Incidents.export_request.source_stamp
+        }
+        Require (Test-Path -LiteralPath $FilteredWorkbook -PathType Leaf) "No filtered incident workbook was created."
+        $RoundTrip = Invoke-NativeOperation "incident.screen" @{ source = $FilteredWorkbook } "incident-round-trip"
+        Require ($ExportedIncidents.exported -eq ($Incidents.matched + $Incidents.review) -and
+            $RoundTrip.total -eq $ExportedIncidents.exported -and
+            (Get-FileHash -LiteralPath $IncidentWorkbook -Algorithm SHA256).Hash -eq $WorkbookHash) "Incident workbook totals or source preservation changed on export."
+        $Checks.incident_screen = $true
+    }
     $Restored = Join-Path $OutputDirectory "portrait-video.mkv"
     $env:VISUAL_ANALYSIS_BACKEND = "cpu"
     try {
