@@ -196,8 +196,10 @@ ReplayChoice choose_by_replay(const Result &result) {
         return ReplayChoice::primary;
     if (result.duplicate_eligible && result.amd_fraction.value_or(0.) > .50 &&
         result.amd.replay_error && result.codeformer.replay_error &&
-        *result.amd.replay_error <= *result.codeformer.replay_error)
-        return ReplayChoice::replacement;
+        *result.amd.replay_error <= *result.codeformer.replay_error) {
+        // Extra band-pass energy can come from screen texture returning in the alternate.
+        return result.relative_clarity <= 1.40 ? ReplayChoice::replacement : ReplayChoice::primary;
+    }
     return result.original_display.size() == 2 ? ReplayChoice::distinct_pair : ReplayChoice::primary;
 }
 
