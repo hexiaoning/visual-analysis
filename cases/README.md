@@ -1,7 +1,21 @@
-# 图像还原案例库
+# 验收案例
 
-本机的三个翻拍案例保存在 inputs/，原件校验清单为 index.local.json。把运行结果写入 outputs/。三个路径皆为 Git 忽略项。应用发布包只包含软件、运行库、模型和说明文档。
+## 人像还原
+
+三张翻拍案例保存在 `portrait-restoration/`。使用 `index.json` 核对文件的 SHA-256。运行结果保存到 Git 忽略的 `outputs/`。
 
 回归覆盖有屏幕网纹、偏暗的画面和低分辨率侧脸。使用同一个离线模型入口处理全部图片。每个案例至少产出一个实际还原结果。分数用于排序，置信等级表示候选受到原图及另一模型支持的程度。
 
-用 `scripts/test_native_operations.ps1` 的 `-CaseDirectory D:\visual-analysis\cases\inputs` 参数，以实际准备发布的 EXE 跑默认和偏召回两轮。也可使用 `VisualAnalysis.exe --check-restoration-cases` 检查指定目录，调用示例见 [原生构建说明](../native/README.md)。案例未通过时验收脚本会报错。
+用 `scripts/test_native_operations.ps1` 的 `-CaseDirectory D:\visual-analysis\cases\portrait-restoration` 参数，以实际准备发布的 EXE 跑默认和偏召回两轮。也可使用 `VisualAnalysis.exe --check-restoration-cases` 检查指定目录，调用示例见 [原生构建说明](../native/README.md)。案例未通过时验收脚本会报错。
+
+## 警情筛选
+
+`incidents/` 存放三份可导入的 Excel 样本。工作表「警情导入样本」使用与接警样表一致的列结构，「来源与验收标签」记录公开来源及测试标签。
+
+| 样本 | 条数 | 用途 |
+| --- | ---: | --- |
+| 公开警情描述 | 23 | 按七类目标警情，以及遗失和假报等边界情形回归 |
+| CAIL2018 候选案情 | 755 | 用公开裁判事实检查同义表达和覆盖率。候选标签按案情与罪名抽取 |
+| Madison 每日接警摘要 | 120 | 用中文译文检查跨地区描述。来源与当地分类在工作簿内可核对 |
+
+实际业务验收应另用经授权、按当地筛选口径标注的接警记录。

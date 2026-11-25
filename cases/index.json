@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "portrait_restoration": [
+    {
+      "path": "portrait-restoration/screen-capture-01.jpg",
+      "sha256": "a22db5c6760d0ad7aaa26d8a07d6edde51dcf9ed322c9003acbee06c389e2a07",
+      "size": 100449
+    },
+    {
+      "path": "portrait-restoration/screen-capture-02.jpg",
+      "sha256": "33194596b753b7ae4449da0aebf46744559e469d43444d3bcb45eb15658dbb58",
+      "size": 360509
+    },
+    {
+      "path": "portrait-restoration/screen-capture-03.jpg",
+      "sha256": "993e64a2fdbde4e5db12dadc6c71b6d0a2f5784766f0dbb1f39061b576fd9123",
+      "size": 135638
+    }
+  ],
+  "incident_screening": [
+    {
+      "path": "incidents/公开警情描述样本.xlsx",
+      "sha256": "9002f4ff847a16094fa8b9bd66ea16fd089152d27675e3c1689aa05c4bcb3c39",
+      "size": 11452,
+      "records": 23
+    },
+    {
+      "path": "incidents/CAIL2018警情候选样本.xlsx",
+      "sha256": "b14b5318ab0dcbc619cc0b0461afa3dcb2fa692f6e5cd487c5bb2c975a048afe",
+      "size": 502932,
+      "records": 755
+    },
+    {
+      "path": "incidents/Madison每日接警中文样本.xlsx",
+      "sha256": "fccc3fd5d83fe231ab822c5ab86b3d94f788d57d858c3a97224cf6d40f43e6d1",
+      "size": 38053,
+      "records": 120
+    }
+  ]
+}
