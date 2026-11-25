@@ -37,7 +37,9 @@ function Invoke-NativeOperation([string]$Name, [hashtable]$Request, [string]$Id 
     $Report = Join-Path $OutputDirectory "$Id-report.json"
     $Request | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $InputFile -Encoding UTF8
     $Backend = $env:VISUAL_ANALYSIS_BACKEND
-    if ($Id -notin "face.compare", "region-trigger", "semantic-first") { $env:VISUAL_ANALYSIS_BACKEND = "cpu" }
+    if ($Id -notin "face.compare", "region-trigger", "semantic-first", "plate-recognition-image", "plate-recognition-video") {
+        $env:VISUAL_ANALYSIS_BACKEND = "cpu"
+    }
     try {
         $Run = Start-Process -FilePath $Program -WindowStyle Hidden -Wait -PassThru -ArgumentList @(
             "--native-operation", $Name, "--request", (Quote-Argument $InputFile), "--report", (Quote-Argument $Report)
@@ -185,6 +187,16 @@ try {
         } "plate-recognition-video"
         $VideoPlateHit = @($VideoResult.hits | Where-Object { $_.accepted -and $_.number -ceq $ExpectedPlate })
         Require ($VideoPlateHit.Count -eq 1 -and $VideoPlateHit[0].observations -ge 2) "The plate track did not consolidate observations across video frames."
+        $CpuImage = Invoke-NativeOperation "plate.recognize" @{
+            source = $PlateImage; output = (Join-Path $OutputDirectory "plate-recognition-image-cpu")
+        } "plate-recognition-image-cpu"
+        $CpuVideo = Invoke-NativeOperation "plate.recognize" @{
+            source = $PlateVideo; step = 1; output = (Join-Path $OutputDirectory "plate-recognition-video-cpu")
+        } "plate-recognition-video-cpu"
+        $CpuPlateHit = @($CpuImage.hits | Where-Object { $_.accepted -and $_.number -ceq $PlateHit[0].number })
+        $CpuVideoHit = @($CpuVideo.hits | Where-Object { $_.accepted -and $_.number -ceq $VideoPlateHit[0].number })
+        Require ($CpuPlateHit.Count -eq 1 -and $CpuVideoHit.Count -eq 1 -and
+            $CpuVideoHit[0].observations -eq $VideoPlateHit[0].observations) "Plate recognition did not agree between default and CPU on the fixtures."
         $Checks.plate_recognition = $true
     }
     if ($IncidentWorkbook) {
@@ -282,8 +294,10 @@ try {
     $Gpu = [ordered]@{}
     $IntelGpuRuns = [ordered]@{}
     $Profiles = @(Get-ChildItem -LiteralPath $env:VISUAL_ANALYSIS_GPU_PROFILE -File)
-    foreach ($Name in @("scrfd_10g_bnkps", "glintr100", "rtdetr_v2_r50vd", "chinese_clip_vision",
-                        "chinese_clip_text", "gfpgan-v1.4-fp32", "pcflow-bfr-fp32")) {
+    $GpuModels = @("scrfd_10g_bnkps", "glintr100", "rtdetr_v2_r50vd", "chinese_clip_vision", "chinese_clip_text",
+        "gfpgan-v1.4-fp32", "pcflow-bfr-fp32")
+    if ($Checks.Contains("plate_recognition")) { $GpuModels += @("y5fu_640x_sim", "rpv3_mdict_160_r3") }
+    foreach ($Name in $GpuModels) {
         $Completed = @($Profiles | Where-Object Name -Like "$Name-*.gpu")
         $Counts = foreach ($File in $Completed) {
             $Prefix = [IO.Path]::GetFileNameWithoutExtension($File.Name)

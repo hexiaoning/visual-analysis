@@ -12,7 +12,7 @@
 - 「资料库」下设人员库和标注库。此前录入的记录继续使用 `%LOCALAPPDATA%\FaceMatching\data\faces.db`。
 - 「车型识别」默认实时查询 Wikimedia 和 NHTSA vPIC。支持本地参考图库，车型查询通过独立进程进行。其他分析功能使用本机数据。[车型资料说明](../docs/vehicle-catalogues.md)
 
-神经网络优先使用本机 DirectX 12 显卡。Intel 显卡上的 RT-DETR 人车检测和中文图文编码优先使用 OpenVINO，人像与人脸模型按推理后端配置运行。车牌识别使用本机 ONNX Runtime CPU。可用 `VISUAL_ANALYSIS_BACKEND=cpu` 运行兼容模式。人脸库的旧照片和旧特征保存在本机。既有特征的模型档与当前模型不同时，可在「人员库」按原始照片重建特征。
+神经网络优先使用本机 DirectX 12 显卡。Intel 显卡上的 RT-DETR 人车检测和中文图文编码优先使用 OpenVINO，人像与人脸模型按推理后端配置运行。车牌定位和识读默认通过 ONNX Runtime DirectML 使用本机显卡，GPU 不可用时回退到 CPU。可用 `VISUAL_ANALYSIS_BACKEND=cpu` 运行兼容模式。人脸库的旧照片和旧特征保存在本机。既有特征的模型档与当前模型不同时，可在「人员库」按原始照片重建特征。
 
 ## 构建与案例检查
 
@@ -22,7 +22,7 @@ GUI 默认在 EXE 同级的 `models/` 读取权重。向构建脚本传入 `-Mod
 
 ```powershell
 $exe = 'D:\DevTools\visual-analysis-dev\native\build\VisualAnalysis.exe'
-$argsRun = @('--check-restoration-cases', 'D:\visual-analysis\cases\inputs',
+$argsRun = @('--check-restoration-cases', 'D:\visual-analysis\cases\portrait-restoration',
     '--case-output', 'D:\visual-analysis\cases\outputs',
     '--report', 'D:\visual-analysis\cases\outputs\native-report.json',
     '--models', 'D:\DevTools\visual-analysis-dev\models', '--prefer-recall')

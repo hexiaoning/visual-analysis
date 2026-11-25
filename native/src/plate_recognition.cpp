@@ -99,7 +99,7 @@ cv::Mat rectify(const cv::Mat& image,const Location& location) {
 class PlateModels {
 public:
     explicit PlateModels(const fs::path& directory)
-        :recognizer_(directory/L"rpv3_mdict_160_r3.onnx",false),root_(directory) {}
+        :recognizer_(directory/L"rpv3_mdict_160_r3.onnx"),root_(directory) {}
 
     std::vector<Location> locate(const cv::Mat& frame,bool searchTiles) {
         const cv::Rect extent(0,0,frame.cols,frame.rows);
@@ -133,7 +133,7 @@ public:
 
 private:
     std::vector<Location> inferLocations(const cv::Mat& frame,const cv::Rect& search) {
-        if(!detector_) detector_=std::make_unique<ModelSession>(root_/L"y5fu_640x_sim.onnx",false);
+        if(!detector_) detector_=std::make_unique<ModelSession>(root_/L"y5fu_640x_sim.onnx");
         const auto ratio=std::min(float(detectorSize)/search.width,float(detectorSize)/search.height);
         const auto width=std::clamp(static_cast<int>(search.width*ratio),1,detectorSize);
         const auto height=std::clamp(static_cast<int>(search.height*ratio),1,detectorSize);
