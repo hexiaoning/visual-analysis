@@ -2430,3 +2430,24 @@ Restormer 较宽范围新增通过的是 006、051、095。三张的带符号边
 重定位使用 512 对齐底图上的 SCRFD，预先要求检测分至少 0.54，五个检查点的最大位移介于 2 与 38 像素。仅 025 的两条场景路径触发，重定位后两张仍未过线。手机图的两个估计最大相差 30.08 像素，检测分为 0.321、0.378。另冻结这一张的两个位置诊断候选。Restormer 路线重定位后 ArcFace 余弦由直接 CodeFormer 的 0.0627 增到 0.2579，边缘吻合由 0.0801 增到 0.1438，结构和外观仍未过门槛。并排看，眼睑、嘴唇以及手指与脸相交的边缘，与清晰原帧均有明显差别。
 
 两批运动去模糊共 24 次 Windows 11 C++ OpenVINO GPU.0 推理。原生 DirectML 另执行 12 次正式比较和两次重定位诊断的 CodeFormer 推理。同一手机场景 Restormer 张量的 OpenVINO CPU 和 GPU 推理分别为 7.20、9.07 秒，归一化像素最大差 0.00000543。用原生 ONNX Runtime CPU 复核该张量，也与 GPU 输出相符。本轮提交为配对评测记录。
+
+## 通过原生应用输出场景去模糊候选
+
+Windows 原生应用增加 `portrait.motion` 命令行操作。输入一张本地照片，自动定位面积最大的人脸，生成一张 512×512 PNG。调用使用原拍摄方向上的 630 像素对齐尺度、256×256 模型网格和渐变残差回贴。请求可提供已知的 `source_to_aligned` 2×3 矩阵用于配对复验。无效矩阵返回错误，输出使用原生应用的独占新文件写入，已存在的文件经碰撞测试保持相同 SHA-256。
+
+操作可使用 `--models` 指定的本地模型目录，其中包含 `scrfd_10g_bnkps.onnx` 和 `restormer-rsblur-256.onnx`。本次验证的 Restormer ONNX SHA-256 为 `426ab7548df1b354e1959761132ecb52b14c9e02f51f7f994ce3b3df599fde28`。默认 CPU，`prefer_gpu` 可请求 DirectML。下面是从现有原生应用运行单张图片的命令示例。[RSBlur 作者发布](https://github.com/rimchang/RSBlur#real-world-deblurring-benchmark)
+
+```json
+{
+  "input": "D:/cases/portrait.jpg",
+  "output": "D:/cases/portrait-motion.png"
+}
+```
+
+```powershell
+& $visualAnalysis --native-operation portrait.motion --request $requestJson --report $reportJson --models $modelDirectory
+```
+
+同一 12 张图的原生固定矩阵输出与研究结果逐通道最大差为一档 8 位灰阶，最大图像平均绝对差为 0.000054 档。重新只输入原照片，让应用自行定位后，在既定清晰参考坐标中比较残差回贴，双摄配对仍通过同样的 6/8。两种定位的手机重度运动样例都未过线。自动定位的三张用户屏拍均输出一张，仍有明显屏格、暗带或眼口模糊。其中固定矩阵输出的边缘强度相对各自糊图为 0.978、0.753、0.929 倍。三张缺少清晰原片核验真实外观。
+
+对双摄 006 的同一固定输入，比较 Windows 11 原生程序首次调用。CPU 与 DirectML 含模型加载及保存分别为 12.30、83.63 秒，8 位 PNG 逐通道最大差一档。DirectML 跟踪记录一次图执行，模型调用为 11.65 秒。该路径当前由显式命令启用。

@@ -30,6 +30,15 @@ std::vector<Candidates> restorePortraits(
     std::optional<cv::Rect> region = std::nullopt,
     bool preferRecall = false);
 
+struct PortraitMotionResult {
+    cv::Mat pixels;
+    cv::Matx23d sourceToAligned;
+    int contextPixels;
+};
+
+PortraitMotionResult restorePortraitMotion(const cv::Mat& source, const std::filesystem::path& models,
+                                           std::optional<cv::Matx23d> sourceToAligned, bool preferGpu);
+
 Candidates restorePlate(const cv::Mat& image, cv::Rect region);
 cv::Mat deblurPlate(const cv::Mat& crop, int length, int angle);
 

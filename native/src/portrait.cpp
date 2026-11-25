@@ -472,6 +472,91 @@ std::vector<Candidates> restorePortraits(
     return candidates;
 }
 
+PortraitMotionResult restorePortraitMotion(const cv::Mat& source, const std::filesystem::path& models,
+                                           std::optional<cv::Matx23d> sourceToAligned, bool preferGpu) {
+    if (source.empty() || source.type() != CV_8UC3) {
+        throw std::invalid_argument("Portrait motion restoration requires an 8-bit color image.");
+    }
+    if (!sourceToAligned) {
+        Inference detector(models / L"scrfd_10g_bnkps.onnx", preferGpu);
+        const auto faces = findFaces(detector, source, std::nullopt, true);
+        if (faces.empty()) {
+            throw std::runtime_error("No face detected for portrait motion restoration.");
+        }
+        const auto largest = std::max_element(faces.begin(), faces.end(),
+            [](const auto& a, const auto& b) { return a.bounds.area() < b.bounds.area(); });
+        cv::Matx23d matrix;
+        largest->transform.convertTo(matrix, CV_64F);
+        sourceToAligned = matrix;
+    }
+    const auto affine = *sourceToAligned;
+    const double scale = std::hypot(affine(0, 0), affine(0, 1));
+    if (!cv::checkRange(cv::Mat(affine)) || !(scale > 0.) ||
+        std::abs(affine(0, 0) - affine(1, 1)) > scale * 1.e-6 ||
+        std::abs(affine(0, 1) + affine(1, 0)) > scale * 1.e-6) {
+        throw std::invalid_argument("Portrait alignment must be a finite similarity transform.");
+    }
+    cv::Matx23d inverse;
+    cv::invertAffineTransform(affine, inverse);
+    const auto center = inverse * cv::Vec3d(256., 270., 1.);
+    if (!(center[0] >= 0 && center[0] < source.cols && center[1] >= 0 && center[1] < source.rows)) {
+        throw std::invalid_argument("Portrait alignment centers outside the source image.");
+    }
+
+    constexpr int modelSize = 256;
+    const int side = cvRound(std::clamp(630. / scale, 256., 960.));
+    const int left = cvRound(center[0]) - side / 2;
+    const int top = cvRound(center[1]) - side / 2;
+    const cv::Matx23d toContext(1., 0., -left, 0., 1., -top);
+    cv::Mat region, patch, aligned;
+    cv::warpAffine(source, region, toContext, {side, side}, cv::INTER_NEAREST, cv::BORDER_REFLECT_101);
+    cv::resize(region, patch, {modelSize, modelSize}, 0., 0., cv::INTER_AREA);
+    cv::warpAffine(source, aligned, affine, {portraitSize, portraitSize}, cv::INTER_LINEAR,
+                   cv::BORDER_REFLECT_101);
+
+    // Keep motion inference in the original shooting orientation. Only transport
+    // the model's residual to the face coordinates.
+    Inference model(models / L"restormer-rsblur-256.onnx", preferGpu);
+    const std::vector<int64_t> shape{1, 3, modelSize, modelSize};
+    if (model.inputNames().size() != 1 || model.inputShape(0) != shape) {
+        throw std::runtime_error("Portrait motion model requires a fixed 256-pixel RGB input.");
+    }
+    const auto outputs = model.run(cv::dnn::blobFromImage(patch, 1. / 255., {}, {}, true));
+    const auto tensor = outputs.at(0).GetTensorTypeAndShapeInfo();
+    if (tensor.GetShape() != shape || tensor.GetElementType() != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) {
+        throw std::runtime_error("Portrait motion model returned an invalid RGB image.");
+    }
+    const auto* values = outputs[0].GetTensorData<float>();
+    cv::Mat residual(modelSize, modelSize, CV_32FC3);
+    for (int y = 0; y < modelSize; ++y) {
+        for (int x = 0; x < modelSize; ++x) {
+            const int index = y * modelSize + x;
+            const int edge = std::min({x, y, modelSize - 1 - x, modelSize - 1 - y});
+            const float weight = std::clamp((edge - 8) / 27.f, 0.f, 1.f);
+            const auto sourcePixel = patch.at<cv::Vec3b>(y, x);
+            auto& pixel = residual.at<cv::Vec3f>(y, x);
+            for (int channel = 0; channel < 3; ++channel) {
+                const auto prediction = values[(2 - channel) * modelSize * modelSize + index];
+                if (!std::isfinite(prediction)) {
+                    throw std::runtime_error("Portrait motion model returned a nonfinite pixel.");
+                }
+                pixel[channel] = weight * (std::clamp(prediction, 0.f, 1.f) - sourcePixel[channel] / 255.f);
+            }
+        }
+    }
+
+    const double pixelScale = double(side) / modelSize;
+    const double offset = (pixelScale - 1.) / 2.;
+    const cv::Matx33d fromPatch(pixelScale, 0., left + offset, 0., pixelScale, top + offset, 0., 0., 1.);
+    const cv::Matx23d patchToAligned = affine * fromPatch;
+    cv::Mat correction, result;
+    cv::warpAffine(residual, correction, patchToAligned, aligned.size(), cv::INTER_LINEAR);
+    aligned.convertTo(result, CV_32FC3, 1. / 255.);
+    result += correction;
+    result.convertTo(aligned, CV_8UC3, 255.);
+    return {std::move(aligned), affine, side};
+}
+
 struct VideoPortraitRestorer::State {
     struct Previous {
         Face face;
