@@ -43,6 +43,16 @@ $exe = Join-Path $build.OutputDirectory 'PortraitCandidates.exe'
 
 `selection.json` 的 `compared_alternate_index` 为报告所用备选在参数列表里的位置，从 1 开始。`selected` 沿用 `codeformer` 和 `amd` 两个字段名，分别代表所给首选和该备选。输出图使用所选输入候选的像素。[独立配对评测](../../../docs/portrait-native-paired-evaluation.md)
 
+## 合并三路形状候选的细节
+
+`--combine-detail-consensus` 接收同一首图回贴出来的三张 512×512 对齐候选，逐通道取三者中值。只需本地输入，在指定的新路径写一张 PNG。
+
+```powershell
+& $exe --combine-detail-consensus .\fixed-points.png .\shape-a.png .\shape-b.png .\combined.png
+```
+
+中值合并减少单一路线独有的改动。用于评测的展示规则及独立配对结果另有记录。[配对评测](../../../docs/portrait-native-paired-evaluation.md)
+
 ## 单张模糊图的曝光校正
 
 `--normalize-exposure` 在生成候选之前运行，输入为一张已对齐的 512×512 BGR 图像。参数文件由公开配对数据的离线训练生成。此模式使用 C++ 和 OpenCV 估计亮度及色偏，需要提供研究参数文件，无需加载关键点模型。示例将得到一张新路径下的 PNG，可送入原生人像生成器。

@@ -2,6 +2,7 @@
 #include "exposure_normalizer.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -42,19 +43,32 @@ void write_image(const fs::path &output, const cv::Mat &image) {
         throw std::runtime_error("Failed to save candidate PNG");
 }
 
-void publish_exposure(const fs::path &output, const cv::Mat &image) {
+void publish_new_image(const fs::path &output, const cv::Mat &image) {
     const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
     fs::path pending = output;
     pending += ".tmp-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(timestamp);
     try {
         write_image(pending, image);
         if (!MoveFileExW(pending.c_str(), output.c_str(), 0))
-            throw std::runtime_error("Could not publish exposure output as a new file");
+            throw std::runtime_error("Could not publish output as a new file");
     } catch (...) {
         std::error_code ignored;
         fs::remove(pending, ignored);
         throw;
     }
+}
+
+cv::Mat combine_detail_consensus(const std::array<cv::Mat, 3> &candidates) {
+    for (const auto &image : candidates)
+        if (image.size() != cv::Size(512, 512) || image.type() != CV_8UC3)
+            throw std::invalid_argument("Expected three aligned 512x512 BGR portraits");
+    // Clamp the third value to the range of the first two to obtain the median.
+    cv::Mat lower, upper, result;
+    cv::min(candidates[0], candidates[1], lower);
+    cv::max(candidates[0], candidates[1], upper);
+    cv::max(candidates[2], lower, result);
+    cv::min(result, upper, result);
+    return result;
 }
 
 const char *route_name(Route name) { return name == Route::codeformer ? "codeformer" : "amd"; }
@@ -231,6 +245,7 @@ int wmain(int argc, wchar_t **argv) {
             "codeformer.png amd.png output-directory [source2.png codeformer2.png amd2.png output2 ...]\n"
             "PortraitCandidates.exe --normalize-exposure model.json source.png output.png\n"
             "PortraitCandidates.exe --match-candidate-tone candidate.png guide.png output.png\n"
+            "PortraitCandidates.exe --combine-detail-consensus first.png second.png third.png output.png\n"
             "PortraitCandidates.exe --select-by-replay landmarks.onnx source.png primary.png output-directory "
             "alternate.png [alternate2.png ...]";
         if (argc == 2 && std::wstring_view(argv[1]) == L"--help") {
@@ -244,6 +259,17 @@ int wmain(int argc, wchar_t **argv) {
             print_output_path(select_by_replay(argv, argc));
             return 0;
         }
+        if (option == L"--combine-detail-consensus") {
+            if (argc != 6)
+                throw std::invalid_argument(usage);
+            const fs::path output(argv[5]);
+            if (fs::exists(output))
+                throw std::invalid_argument("Consensus output must be a new path");
+            cv::setNumThreads(1);
+            const std::array candidates{read_image(argv[2]), read_image(argv[3]), read_image(argv[4])};
+            publish_new_image(output, combine_detail_consensus(candidates));
+            return 0;
+        }
         if (option == L"--match-candidate-tone") {
             if (argc != 5)
                 throw std::invalid_argument(usage);
@@ -253,7 +279,7 @@ int wmain(int argc, wchar_t **argv) {
             cv::setNumThreads(1);
             const auto candidate = read_image(argv[2]);
             const auto guide = read_image(argv[3]);
-            publish_exposure(output, portrait_selection::match_candidate_tone(candidate, guide));
+            publish_new_image(output, portrait_selection::match_candidate_tone(candidate, guide));
             return 0;
         }
         if (option == L"--normalize-exposure") {
@@ -264,7 +290,7 @@ int wmain(int argc, wchar_t **argv) {
                 throw std::invalid_argument("Exposure output must be a new path");
             cv::setNumThreads(1);
             const auto result = portrait_selection::normalize_exposure(read_image(argv[3]), argv[2]);
-            publish_exposure(output, result.image);
+            publish_new_image(output, result.image);
             std::cout << Json{{"applied", result.applied}, {"gain_bgr", result.gain_bgr},
                               {"black_level", result.black_level}, {"evidence", result.evidence},
                               {"recovered_grid", result.recovered_grid}}.dump() << '\n';
