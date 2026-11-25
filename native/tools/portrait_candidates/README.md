@@ -33,6 +33,16 @@ $exe = Join-Path $build.OutputDirectory 'PortraitCandidates.exe'
 
 标准输出每行是一个新结果目录的 UTF-8 绝对路径。批量处理可在同一命令后重复追加四个参数 `source codeformer amd output-directory`。同一批复用关键点模型会话。每个成功样本独立发布，重试会生成单独的结果目录。
 
+## 对多张候选做严格回放筛选
+
+`--select-by-replay` 对同一张糊图的首选和一个或多个原始备选进行比较。输入都在同一 512×512 对齐坐标下。近似备选的拟合权重须大于 0.50，清晰度须达到糊图的 1.20 倍，回放误差须不高于首选，才可替换为单张。没有合格替换时，沿用已有的五官差异和回放条件挑选第二张，同时要求它达到糊图的 1.20 倍清晰度。同一类备选中优先选回放误差最低的，误差相同时沿用参数顺序。没有合格备选时输出首选。
+
+```powershell
+& $exe --select-by-replay .\hr-nosa-wflw-geometry.onnx .\source.png .\primary.png .\outputs .\alternate-a.png .\alternate-b.png
+```
+
+`selection.json` 的 `compared_alternate_index` 为报告所用备选在参数列表里的位置，从 1 开始。`selected` 沿用 `codeformer` 和 `amd` 两个字段名，分别代表所给首选和该备选。输出图使用所选输入候选的像素。[独立配对评测](../../../docs/portrait-native-paired-evaluation.md)
+
 ## 单张模糊图的曝光校正
 
 `--normalize-exposure` 在生成候选之前运行，输入为一张已对齐的 512×512 BGR 图像。参数文件由公开配对数据的离线训练生成。此模式使用 C++ 和 OpenCV 估计亮度及色偏，需要提供研究参数文件，无需加载关键点模型。示例将得到一张新路径下的 PNG，可送入原生人像生成器。
