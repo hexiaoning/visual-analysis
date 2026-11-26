@@ -96,3 +96,13 @@ $exe = "$env:TEMP\portrait-screen\PortraitScreen.exe"
 ```
 
 `previous` 的第一项为待检查首图，其他已选项跳过替换比较。备选按清单顺序比较，同分时保留较早遇到的备选。`gap` 可设在 `rows` 同级，以 8 位灰度档为单位，默认 21。每个样例保存 `selected-<样例名>.png`，`results.json` 记录所选名称，其中 `tone-only` 表示首图的明暗校正版本。这条规则用于比较同一脸区的候选与原拍摄图的明暗和轮廓一致性。
+
+## 合并换方向去屏纹的推理结果
+
+```powershell
+& $exe --grid-fusion D:\cases\grid-manifest.json D:\cases\grid-run-01
+```
+
+清单的 `rows` 对象按样例名记录 `observed`、`color` 和 `frames`。前两项是 512×512 对齐的原始脸区和已校色脸区。第三项包含八个方向的推理输入记录。每项用 `tensor.path` 给出模型输入张量路径，例如 `D:/cases/0.f32`。工具读取同目录中的 `0-fhdmi.f32` 和 `0-uhdm.f32`，格式为 512×512、RGB 分平面、小端单精度。每项还给出 `pose`，例如 `[1, true]` 表示输入时先左右翻转，再逆时针旋转 90 度。给出 2×3 的 `to_grid`，将撤销旋转和翻转后的窗口重采样到 512×512 对齐脸区。
+
+每个 `case-<样例名>` 目录保存多频带融合图、细节增强图及两种校色结果。分别用 `bandmix.png`、`bandmix-detail.png`、`color-mix.png` 和 `color-tone-mix.png` 表示。后一种校色同时使用供体的宽尺度亮度。`results.json` 记录完成的样例数。此命令在 CPU 执行对齐、融合和校色，输入为已生成的推理张量。

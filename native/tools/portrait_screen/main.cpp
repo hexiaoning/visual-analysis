@@ -1,3 +1,4 @@
+#include "grid_fusion.h"
 #include "screen_restore.h"
 
 #include <algorithm>
@@ -297,11 +298,14 @@ void createOutput(const fs::path& output) {
 
 int wmain(int argc, wchar_t** argv) {
     try {
-        const bool tone = argc == 4 && std::wstring_view(argv[1]) == L"--capture-tone-guard";
-        if (argc != 3 && !tone) {
-            throw std::invalid_argument("Usage: PortraitScreen.exe [--capture-tone-guard] manifest.json output-directory");
+        const std::wstring_view mode = argc == 4 ? argv[1] : L"";
+        const bool tone = mode == L"--capture-tone-guard";
+        const bool grid = mode == L"--grid-fusion";
+        if (argc != 3 && !tone && !grid) {
+            throw std::invalid_argument(
+                "Usage: PortraitScreen.exe [--capture-tone-guard | --grid-fusion] manifest.json output-directory");
         }
-        const int firstPath = tone ? 2 : 1;
+        const int firstPath = tone || grid ? 2 : 1;
         std::ifstream manifest(fs::path(argv[firstPath]), std::ios::binary);
         if (!manifest) {
             throw std::runtime_error("Cannot open the manifest");
@@ -309,7 +313,9 @@ int wmain(int argc, wchar_t** argv) {
         const fs::path output(argv[firstPath + 1]);
         cv::setNumThreads(1);
         json results;
-        if (tone) {
+        if (grid) {
+            results = {{"samples", visual::screen::runGridFusion(manifest, output)}};
+        } else if (tone) {
             const auto config = nlohmann::ordered_json::parse(manifest);
             const auto& rows = samples(config);
             const auto gap = config.value("gap", 21.);
