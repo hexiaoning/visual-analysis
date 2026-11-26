@@ -9,6 +9,7 @@
 #include <iterator>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -231,33 +232,98 @@ json runCaptureReplay(const json& rows, const fs::path& output, bool guardCaptur
     return audit;
 }
 
+template<class Json>
+const Json& samples(const Json& config) {
+    const auto& rows = config.at("rows");
+    if (!rows.is_object() || rows.empty()) {
+        throw std::invalid_argument("The manifest must contain at least one named sample");
+    }
+    return rows;
+}
+
+json runCaptureToneGuard(const nlohmann::ordered_json& rows, const fs::path& output, double gap) {
+    json choices = json::object();
+    for (auto row = rows.begin(); row != rows.end(); ++row) {
+        const auto& key = row.key();
+        if (key.empty() || key.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
+                != std::string::npos) {
+            throw std::invalid_argument("Invalid sample name");
+        }
+        const auto destination = output / ("selected-" + key + ".png");
+        if (fs::exists(destination)) {
+            throw std::invalid_argument("Duplicate output filename");
+        }
+        const auto previous = row.value().at("previous").get<std::vector<std::string>>();
+        if (previous.empty() || previous.size() > 2) {
+            throw std::invalid_argument("Expected one or two previous candidates");
+        }
+        const auto& catalog = row.value().at("candidates");
+        const auto observed = load(row.value().at("observed").get<std::string>());
+        const auto baseline = load(catalog.at(previous.front()).get<std::string>());
+        std::vector<std::string> names;
+        std::vector<cv::Mat> alternatives;
+        for (auto option = catalog.begin(); option != catalog.end(); ++option) {
+            if (std::find(previous.begin(), previous.end(), option.key()) == previous.end()) {
+                if (option.key() == "tone-only") {
+                    throw std::invalid_argument("The tone-only name is reserved for an adjustment");
+                }
+                names.push_back(option.key());
+                alternatives.push_back(load(option.value().get<std::string>()));
+            }
+        }
+        const auto choice = visual::screen::chooseCaptureTone(observed, baseline, alternatives, gap);
+        auto name = previous.front();
+        if (choice.alternative) {
+            name = names[*choice.alternative];
+        } else if (choice.adjustedTone) {
+            name = "tone-only";
+        }
+        writeImage(destination, choice.image);
+        choices[key] = name;
+    }
+    return choices;
+}
+
+void createOutput(const fs::path& output) {
+    if (!output.parent_path().empty()) {
+        fs::create_directories(output.parent_path());
+    }
+    if (!fs::create_directory(output)) {
+        throw std::runtime_error("Choose a new output directory for this run");
+    }
+}
+
 }
 
 int wmain(int argc, wchar_t** argv) {
     try {
-        if (argc != 3) {
-            throw std::invalid_argument("Usage: PortraitScreen.exe manifest.json output-directory");
+        const bool tone = argc == 4 && std::wstring_view(argv[1]) == L"--capture-tone-guard";
+        if (argc != 3 && !tone) {
+            throw std::invalid_argument("Usage: PortraitScreen.exe [--capture-tone-guard] manifest.json output-directory");
         }
-        std::ifstream manifest(fs::path(argv[1]), std::ios::binary);
+        const int firstPath = tone ? 2 : 1;
+        std::ifstream manifest(fs::path(argv[firstPath]), std::ios::binary);
         if (!manifest) {
             throw std::runtime_error("Cannot open the manifest");
         }
-        const auto config = json::parse(manifest);
-        const auto& rows = config.at("rows");
-        if (!rows.is_object() || rows.empty()) {
-            throw std::invalid_argument("The manifest must contain at least one named sample");
-        }
-        const bool writeNarrow = config.value("writeNarrow", false);
-        const fs::path output(argv[2]);
-        if (!output.parent_path().empty()) {
-            fs::create_directories(output.parent_path());
-        }
-        if (!fs::create_directory(output)) {
-            throw std::runtime_error("Choose a new output directory for this run");
-        }
+        const fs::path output(argv[firstPath + 1]);
         cv::setNumThreads(1);
-        const auto results = config.value("rankAtCaptureResolution", false)
-            ? runCaptureReplay(rows, output, config.value("guardCaptureDetail", false)) : run(rows, output, writeNarrow);
+        json results;
+        if (tone) {
+            const auto config = nlohmann::ordered_json::parse(manifest);
+            const auto& rows = samples(config);
+            const auto gap = config.value("gap", 21.);
+            createOutput(output);
+            results = runCaptureToneGuard(rows, output, gap);
+        } else {
+            const auto config = json::parse(manifest);
+            const auto& rows = samples(config);
+            const auto writeNarrow = config.value("writeNarrow", false);
+            createOutput(output);
+            results = config.value("rankAtCaptureResolution", false)
+                ? runCaptureReplay(rows, output, config.value("guardCaptureDetail", false))
+                : run(rows, output, writeNarrow);
+        }
         const auto pending = output / L"results.pending.json";
         std::ofstream report(pending, std::ios::binary);
         report << results.dump(2) << '\n';

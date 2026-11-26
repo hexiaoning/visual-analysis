@@ -48,4 +48,13 @@ CaptureReplaySelection rankAtCaptureResolution(const cv::Mat& nativeBgr, const c
                                                bool guardCaptureDetail = false,
                                                std::optional<std::size_t> contourAlternative = std::nullopt);
 
+struct CaptureToneChoice {
+    cv::Mat image;
+    std::optional<std::size_t> alternative;
+    bool adjustedTone{};
+};
+
+CaptureToneChoice chooseCaptureTone(const cv::Mat& observed, const cv::Mat& before,
+                                    const std::vector<cv::Mat>& alternatives, double minimumDeficit);
+
 }

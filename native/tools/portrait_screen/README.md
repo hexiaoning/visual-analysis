@@ -71,3 +71,28 @@ $exe = "$env:TEMP\portrait-screen\PortraitScreen.exe"
 启用 `guardCaptureDetail` 时，可在单个样例设置 `"contourAlternative": "sadt-direct"`，指定 `candidates` 中的一个备选。工具先按原规则选图，再把备选回放到同一拍摄网格，比较眼、鼻、嘴的带通相关和五官之外的高频幅度。每个足量部位的相关须至少为 0.86，且至多比已选图低 0.03。色度小于 2.0、回放误差至多为 0.28 时，备选还需使高频幅度至少下降 2%。平均轮廓相关的允许损失取 0.018 与 `0.006 + 0.12 × 高频下降比例` 的较小值。另一种替换须同时有至少 40% 的回放误差下降、0.012 的平均轮廓相关提升，以及不超过拍摄图 96% 的高频幅度。检测到方形网格或已经选了两张时，轮廓比较无需执行。
 
 设定 `contourAlternative` 的样例会记录 `contourAlternativeUsed`，表示是否由轮廓比较替换首图。评测使用 SADT 直出作为指定候选。
+
+## 检查已有首图是否整体偏暗
+
+`--capture-tone-guard` 用 512×512 原始对齐脸区检查已有首图的曝光。它将脸区分为两组交错图块，剔除过曝和过暗区域，要求每组的首图中位亮度至少低 21 档，再考虑替换。备选须在两组均明显减小低频亮度误差，同时保留首图眼、鼻、嘴的轮廓约束。工具还会比较同一首图经有界、局部明暗校正后的版本。
+
+```json
+{
+  "rows": {
+    "example": {
+      "observed": "D:/cases/raw-face.png",
+      "previous": ["primary"],
+      "candidates": {
+        "primary": "D:/cases/previous.png",
+        "demoire": "D:/cases/demoire.png"
+      }
+    }
+  }
+}
+```
+
+```powershell
+& $exe --capture-tone-guard D:\cases\tone-manifest.json D:\cases\tone-run-01
+```
+
+`previous` 的第一项为待检查首图，其他已选项跳过替换比较。备选按清单顺序比较，同分时保留较早遇到的备选。`gap` 可设在 `rows` 同级，以 8 位灰度档为单位，默认 21。每个样例保存 `selected-<样例名>.png`，`results.json` 记录所选名称，其中 `tone-only` 表示首图的明暗校正版本。这条规则用于比较同一脸区的候选与原拍摄图的明暗和轮廓一致性。
