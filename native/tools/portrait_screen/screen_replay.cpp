@@ -165,10 +165,53 @@ double featureError(const cv::Mat& raw, const cv::Mat& rawBand, const cv::Mat& r
     return score / static_cast<double>(count);
 }
 
+std::optional<double> measureChromaBand(const cv::Mat& bgr, const CaptureGrid& grid) {
+    cv::Mat color;
+    bgr.convertTo(color, CV_32FC3, 1. / 255.);
+    cv::cvtColor(color, color, cv::COLOR_BGR2Lab);
+    const cv::Mat detail = blur(color, .55) - blur(color, 2.4);
+    const cv::Mat x = (grid.xCoordinates - 256.f) / 118.f;
+    const cv::Mat y = (grid.yCoordinates - 298.f) / 125.f;
+    cv::Mat skin = x.mul(x) + y.mul(y) < 1.f;
+    cv::bitwise_and(skin, grid.surround, skin);
+    if (cv::countNonZero(skin) < 100) {
+        return std::nullopt;
+    }
+    const cv::Scalar energy = cv::mean(detail.mul(detail), skin);
+    return std::sqrt(energy[1] + energy[2]);
+}
+
+std::size_t choosePrimary(const std::vector<CaptureReplayScore>& scores, bool quietChroma) {
+    const double base = scores.front().error;
+    std::size_t selected = 0;
+    for (std::size_t i = 1; i < scores.size(); ++i) {
+        const auto& score = scores[i];
+        const double improvement = (base - score.error) / std::max(base, 1e-7);
+        const bool plausible = score.relativeDetail <= 1.4 || (quietChroma && improvement > .20);
+        if (plausible && score.relativeDetail >= .60 && improvement > .02 && score.error < scores[selected].error) {
+            selected = i;
+        }
+    }
+    if (!quietChroma || selected == 0) {
+        return selected;
+    }
+    const auto& first = scores[selected];
+    std::size_t sharper = selected;
+    for (std::size_t i = 1; i < scores.size(); ++i) {
+        const auto& score = scores[i];
+        if (score.relativeDetail >= 1.20 * first.relativeDetail && score.error <= 1.10 * first.error &&
+            score.error < .80 * base && (sharper == selected || score.error < scores[sharper].error)) {
+            sharper = i;
+        }
+    }
+    return sharper;
+}
+
 }
 
 CaptureReplaySelection rankAtCaptureResolution(const cv::Mat& nativeBgr, const cv::Matx23d& nativeToAligned,
-                                               const std::vector<cv::Mat>& alignedCandidates, bool hasCurrentPair) {
+                                               const std::vector<cv::Mat>& alignedCandidates, bool hasCurrentPair,
+                                               bool guardCaptureDetail) {
     if (nativeBgr.empty() || nativeBgr.type() != CV_8UC3 || alignedCandidates.empty() ||
         !cv::checkRange(cv::Mat(nativeToAligned)) ||
         std::any_of(alignedCandidates.begin(), alignedCandidates.end(), [](const cv::Mat& image) {
@@ -178,7 +221,8 @@ CaptureReplaySelection rankAtCaptureResolution(const cv::Mat& nativeBgr, const c
     }
     const auto bounds = captureBounds(nativeBgr.size(), nativeToAligned);
     const auto grid = makeGrid(bounds, nativeToAligned);
-    const cv::Mat raw = grayscale(nativeBgr(bounds));
+    const cv::Mat crop = nativeBgr(bounds);
+    const cv::Mat raw = grayscale(crop);
     const auto outer = blur(raw, 3.5);
     const auto baseLow = blur(raw, 1.8);
     const cv::Mat band = blur(raw, .58) - blur(raw, 2.4);
@@ -193,6 +237,9 @@ CaptureReplaySelection rankAtCaptureResolution(const cv::Mat& nativeBgr, const c
     };
     const auto primary = resample(alignedCandidates.front());
     CaptureReplaySelection result;
+    if (guardCaptureDetail) {
+        result.chromaBandRms = measureChromaBand(crop, grid);
+    }
     double best = std::numeric_limits<double>::infinity();
     for (double scale : blurScales) {
         const auto matched = matchExposure(blur(primary, scale), outer, grid.surround);
@@ -210,15 +257,8 @@ CaptureReplaySelection rankAtCaptureResolution(const cv::Mat& nativeBgr, const c
                                  std::sqrt(detailEnergy(candidate) / baseEnergy)});
     }
     if (!hasCurrentPair) {
-        for (std::size_t index = 1; index < result.scores.size(); ++index) {
-            const auto& score = result.scores[index];
-            const double base = result.scores.front().error;
-            const double improvement = (base - score.error) / std::max(base, 1e-7);
-            if (score.relativeDetail >= .60 && score.relativeDetail <= 1.4 && improvement > .02 &&
-                score.error < result.scores[result.selected].error) {
-                result.selected = index;
-            }
-        }
+        const bool quietChroma = result.chromaBandRms.has_value() && *result.chromaBandRms < 2.;
+        result.selected = choosePrimary(result.scores, quietChroma);
     }
     return result;
 }

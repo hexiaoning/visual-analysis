@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 #include <vector>
 
 #include <opencv2/core.hpp>
@@ -36,10 +37,12 @@ struct CaptureReplaySelection {
     double blur{};
     std::size_t selected{};
     std::vector<CaptureReplayScore> scores;
+    std::optional<double> chromaBandRms;
 };
 
 // The first aligned crop is the current primary. A current pair is preserved.
 CaptureReplaySelection rankAtCaptureResolution(const cv::Mat& nativeBgr, const cv::Matx23d& nativeToAligned,
-                                               const std::vector<cv::Mat>& alignedCandidates, bool hasCurrentPair);
+                                               const std::vector<cv::Mat>& alignedCandidates, bool hasCurrentPair,
+                                               bool guardCaptureDetail = false);
 
 }

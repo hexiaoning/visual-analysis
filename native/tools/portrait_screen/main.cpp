@@ -175,7 +175,7 @@ json run(const json& rows, const fs::path& output, bool writeNarrow) {
     return audit;
 }
 
-json runCaptureReplay(const json& rows, const fs::path& output) {
+json runCaptureReplay(const json& rows, const fs::path& output, bool guardCaptureDetail) {
     json audit = json::object();
     for (const auto& [key, data] : rows.items()) {
         validateSample(key);
@@ -198,7 +198,8 @@ json runCaptureReplay(const json& rows, const fs::path& output) {
         }
         const auto native = load(data.at("native"));
         const auto affine = transform(data.at("nativeToAligned"));
-        const auto result = visual::screen::rankAtCaptureResolution(native, affine, crops, prior.size() == 2);
+        const auto result = visual::screen::rankAtCaptureResolution(native, affine, crops, prior.size() == 2,
+                                                                     guardCaptureDetail);
         const auto out = output / key;
         fs::create_directories(out);
         writeImage(out / L"selected.png", crops[result.selected]);
@@ -211,6 +212,9 @@ json runCaptureReplay(const json& rows, const fs::path& output) {
         }
         const auto selected = prior.size() == 2 ? prior : std::vector<std::string>{names[result.selected]};
         audit[key] = {{"selected", selected}, {"blur", result.blur}, {"scores", scores}};
+        if (guardCaptureDetail) {
+            audit[key]["chromaBandRms"] = result.chromaBandRms ? json(*result.chromaBandRms) : json(nullptr);
+        }
     }
     return audit;
 }
@@ -241,7 +245,7 @@ int wmain(int argc, wchar_t** argv) {
         }
         cv::setNumThreads(1);
         const auto results = config.value("rankAtCaptureResolution", false)
-            ? runCaptureReplay(rows, output) : run(rows, output, writeNarrow);
+            ? runCaptureReplay(rows, output, config.value("guardCaptureDetail", false)) : run(rows, output, writeNarrow);
         const auto pending = output / L"results.pending.json";
         std::ofstream report(pending, std::ios::binary);
         report << results.dump(2) << '\n';
