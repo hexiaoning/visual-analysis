@@ -1,7 +1,9 @@
+#include "align_model_views.h"
 #include "grid_fusion.h"
 #include "screen_restore.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
@@ -263,6 +265,35 @@ const Json& samples(const Json& config) {
     return rows;
 }
 
+json runModelViewAlignment(const json& rows, const fs::path& output) {
+    const auto offsetJson = [](const std::optional<cv::Point2f>& offset) {
+        return offset ? json::array({offset->x, offset->y}) : json(nullptr);
+    };
+    json results = json::object();
+    for (const auto& [key, row] : rows.items()) {
+        validateSample(key);
+        const auto& items = row.at("views");
+        if (!items.is_array() || items.size() != 3) {
+            throw std::invalid_argument("Expected three aligned model-output paths");
+        }
+        const std::array<cv::Mat, 3> views{load(items.at(0)), load(items.at(1)), load(items.at(2))};
+        const auto result = visual::screen::alignModelViews(load(row.at("observed")), load(row.at("anchor")), views);
+        const auto directory = output / ("case-" + key);
+        if (!fs::create_directory(directory)) {
+            throw std::invalid_argument("Duplicate sample name");
+        }
+        writeImage(directory / L"median.png", result.original);
+        writeImage(directory / L"warp-whole.png", result.whole);
+        writeImage(directory / L"align-then-median.png", result.aligned);
+        json viewsOffset = json::array();
+        for (const auto& position : result.viewOffsets) {
+            viewsOffset.push_back(offsetJson(position));
+        }
+        results[key] = {{"whole", offsetJson(result.wholeOffset)}, {"views", viewsOffset}};
+    }
+    return results;
+}
+
 json runCaptureToneGuard(const nlohmann::ordered_json& rows, const fs::path& output, double gap) {
     json choices = json::object();
     for (auto row = rows.begin(); row != rows.end(); ++row) {
@@ -322,11 +353,13 @@ int wmain(int argc, wchar_t** argv) {
         const std::wstring_view mode = argc == 4 ? argv[1] : L"";
         const bool tone = mode == L"--capture-tone-guard";
         const bool grid = mode == L"--grid-fusion";
-        if (argc != 3 && !tone && !grid) {
+        const bool alignViews = mode == L"--align-model-views";
+        if (argc != 3 && !tone && !grid && !alignViews) {
             throw std::invalid_argument(
-                "Usage: PortraitScreen.exe [--capture-tone-guard | --grid-fusion] manifest.json output-directory");
+                "Usage: PortraitScreen.exe [--capture-tone-guard | --grid-fusion | --align-model-views] "
+                "manifest.json output-directory");
         }
-        const int firstPath = tone || grid ? 2 : 1;
+        const int firstPath = tone || grid || alignViews ? 2 : 1;
         std::ifstream manifest(fs::path(argv[firstPath]), std::ios::binary);
         if (!manifest) {
             throw std::runtime_error("Cannot open the manifest");
@@ -336,6 +369,11 @@ int wmain(int argc, wchar_t** argv) {
         json results;
         if (grid) {
             results = {{"samples", visual::screen::runGridFusion(manifest, output)}};
+        } else if (alignViews) {
+            const auto config = json::parse(manifest);
+            const auto& rows = samples(config);
+            createOutput(output);
+            results = runModelViewAlignment(rows, output);
         } else if (tone) {
             const auto config = nlohmann::ordered_json::parse(manifest);
             const auto& rows = samples(config);

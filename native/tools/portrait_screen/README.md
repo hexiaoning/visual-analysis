@@ -108,3 +108,13 @@ $exe = "$env:TEMP\portrait-screen\PortraitScreen.exe"
 清单的 `rows` 对象按样例名记录 `observed`、`color` 和 `frames`。前两项是 512×512 对齐的原始脸区和已校色脸区。第三项包含八个方向的推理输入记录。每项用 `tensor.path` 给出模型输入张量路径，例如 `D:/cases/0.f32`。工具读取同目录中的 `0-fhdmi.f32` 和 `0-uhdm.f32`，格式为 512×512、RGB 分平面、小端单精度。每项还给出 `pose`，例如 `[1, true]` 表示输入时先左右翻转，再逆时针旋转 90 度。给出 2×3 的 `to_grid`，将撤销旋转和翻转后的窗口重采样到 512×512 对齐脸区。
 
 每个 `case-<样例名>` 目录保存多频带融合图、细节增强图及两种校色结果。分别用 `bandmix.png`、`bandmix-detail.png`、`color-mix.png` 和 `color-tone-mix.png` 表示。后一种校色同时使用供体的宽尺度亮度。`results.json` 记录完成的样例数。此命令在 CPU 执行对齐、融合和校色，输入为已生成的推理张量。
+
+## 对齐三个模型视图再取中值
+
+```powershell
+& $exe --align-model-views D:\cases\view-alignment.json D:\cases\view-run-01
+```
+
+`rows` 中每个样例提供 `observed` 原始脸区、`anchor` 稳定底图和 `views` 三个模型输出路径。所有输入是同一脸区的 512×512 彩色图，已恢复到同一方向。在半分辨率上用两个频带比较四个五官外围分区。使用当前原图与底图共同支持的整脸位移，回到 512 像素网格时每轴最多 3 像素。
+
+每个样例目录保存原三图中值 `median.png`、整脸平移中值 `warp-whole.png` 及逐图对齐后的中值 `align-then-median.png`。`results.json` 的 `whole` 和 `views` 记录应用的采样位移。值为 `null` 对应沿用原坐标。该命令只读取本地图像并在 CPU 执行。
