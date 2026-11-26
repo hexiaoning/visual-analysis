@@ -38,6 +38,7 @@ struct CaptureReplaySelection {
     std::size_t selected{};
     std::vector<CaptureReplayScore> scores;
     std::optional<double> chromaBandRms;
+    bool squareCarrier{};
 };
 
 // The first aligned crop is the current primary. A current pair is preserved.

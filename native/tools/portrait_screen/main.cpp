@@ -214,6 +214,7 @@ json runCaptureReplay(const json& rows, const fs::path& output, bool guardCaptur
         audit[key] = {{"selected", selected}, {"blur", result.blur}, {"scores", scores}};
         if (guardCaptureDetail) {
             audit[key]["chromaBandRms"] = result.chromaBandRms ? json(*result.chromaBandRms) : json(nullptr);
+            audit[key]["squareCarrier"] = result.squareCarrier;
         }
     }
     return audit;

@@ -181,18 +181,28 @@ std::optional<double> measureChromaBand(const cv::Mat& bgr, const CaptureGrid& g
     return std::sqrt(energy[1] + energy[2]);
 }
 
-std::size_t choosePrimary(const std::vector<CaptureReplayScore>& scores, bool quietChroma) {
+bool hasSquareCarrier(const cv::Mat& bgr) {
+    const auto periods = detect(bgr).periods;
+    if (periods.size() != 2) {
+        return false;
+    }
+    const double first = cv::norm(periods[0]), second = cv::norm(periods[1]);
+    return std::max(first, second) <= 1.08 * std::min(first, second) &&
+        std::abs(periods[0].dot(periods[1])) <= .12 * first * second;
+}
+
+std::size_t choosePrimary(const std::vector<CaptureReplayScore>& scores, bool allowMoreDetail) {
     const double base = scores.front().error;
     std::size_t selected = 0;
     for (std::size_t i = 1; i < scores.size(); ++i) {
         const auto& score = scores[i];
         const double improvement = (base - score.error) / std::max(base, 1e-7);
-        const bool plausible = score.relativeDetail <= 1.4 || (quietChroma && improvement > .20);
+        const bool plausible = score.relativeDetail <= 1.4 || (allowMoreDetail && improvement > .20);
         if (plausible && score.relativeDetail >= .60 && improvement > .02 && score.error < scores[selected].error) {
             selected = i;
         }
     }
-    if (!quietChroma || selected == 0) {
+    if (!allowMoreDetail || selected == 0) {
         return selected;
     }
     const auto& first = scores[selected];
@@ -258,7 +268,8 @@ CaptureReplaySelection rankAtCaptureResolution(const cv::Mat& nativeBgr, const c
     }
     if (!hasCurrentPair) {
         const bool quietChroma = result.chromaBandRms.has_value() && *result.chromaBandRms < 2.;
-        result.selected = choosePrimary(result.scores, quietChroma);
+        result.squareCarrier = quietChroma && hasSquareCarrier(crop);
+        result.selected = choosePrimary(result.scores, quietChroma && !result.squareCarrier);
     }
     return result;
 }
