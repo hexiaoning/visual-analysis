@@ -127,14 +127,18 @@ json frequencies(const std::vector<cv::Point2f>& values) {
     return result;
 }
 
+void validateSample(const std::string& key) {
+    if (key.empty() || key.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") !=
+        std::string::npos) {
+        throw std::invalid_argument("Invalid screen sample identifier");
+    }
+}
+
 json run(const json& rows, const fs::path& output, bool writeNarrow) {
     json audit = json::object();
     for (auto entry = rows.begin(); entry != rows.end(); ++entry) {
         const auto& key = entry.key();
-        if (key.empty() || key.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") !=
-            std::string::npos) {
-            throw std::invalid_argument("Invalid screen sample identifier");
-        }
+        validateSample(key);
         const auto& data = entry.value();
         const auto native = load(data.at("native"));
         const auto raw = load(data.at("alignedRaw"));
@@ -171,6 +175,46 @@ json run(const json& rows, const fs::path& output, bool writeNarrow) {
     return audit;
 }
 
+json runCaptureReplay(const json& rows, const fs::path& output) {
+    json audit = json::object();
+    for (const auto& [key, data] : rows.items()) {
+        validateSample(key);
+        const auto& candidates = data.at("candidates");
+        const auto prior = data.at("previous").get<std::vector<std::string>>();
+        if (!candidates.is_object() || prior.empty() || prior.size() > 2 ||
+            (prior.size() == 2 && prior[0] == prior[1])) {
+            throw std::invalid_argument("Expected named crops and one or two distinct previously displayed candidates");
+        }
+        auto names = prior;
+        for (const auto& [name, image] : candidates.items()) {
+            if (std::find(prior.begin(), prior.end(), name) == prior.end()) {
+                names.push_back(name);
+            }
+        }
+        std::vector<cv::Mat> crops;
+        crops.reserve(names.size());
+        for (const auto& name : names) {
+            crops.push_back(load(candidates.at(name)));
+        }
+        const auto native = load(data.at("native"));
+        const auto affine = transform(data.at("nativeToAligned"));
+        const auto result = visual::screen::rankAtCaptureResolution(native, affine, crops, prior.size() == 2);
+        const auto out = output / key;
+        fs::create_directories(out);
+        writeImage(out / L"selected.png", crops[result.selected]);
+        if (prior.size() == 2) {
+            writeImage(out / L"selected-2.png", crops[1]);
+        }
+        json scores = json::object();
+        for (std::size_t i = 0; i < names.size(); ++i) {
+            scores[names[i]] = {{"error", result.scores[i].error}, {"detailRatio", result.scores[i].relativeDetail}};
+        }
+        const auto selected = prior.size() == 2 ? prior : std::vector<std::string>{names[result.selected]};
+        audit[key] = {{"selected", selected}, {"blur", result.blur}, {"scores", scores}};
+    }
+    return audit;
+}
+
 }
 
 int wmain(int argc, wchar_t** argv) {
@@ -196,7 +240,8 @@ int wmain(int argc, wchar_t** argv) {
             throw std::runtime_error("Choose a new output directory for this run");
         }
         cv::setNumThreads(1);
-        const auto results = run(rows, output, writeNarrow);
+        const auto results = config.value("rankAtCaptureResolution", false)
+            ? runCaptureReplay(rows, output) : run(rows, output, writeNarrow);
         const auto pending = output / L"results.pending.json";
         std::ofstream report(pending, std::ios::binary);
         report << results.dump(2) << '\n';

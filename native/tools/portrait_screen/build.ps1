@@ -35,6 +35,7 @@ $flags = @(
     "/I$MsvcDirectory/include", "/I$headers/ucrt", "/I$headers/um", "/I$headers/shared",
     "/Fo$obj\", "/Fe$destination/PortraitScreen.exe",
     (Join-Path $PSScriptRoot "main.cpp"), (Join-Path $PSScriptRoot "screen_restore.cpp"),
+    (Join-Path $PSScriptRoot "screen_replay.cpp"),
     "/link", "/subsystem:console", "/incremental:no",
     "/libpath:$MsvcDirectory/lib/x64", "/libpath:$sdkLibraries/ucrt/x64", "/libpath:$sdkLibraries/um/x64",
     $world[0].FullName

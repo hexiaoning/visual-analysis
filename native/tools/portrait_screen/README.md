@@ -40,3 +40,26 @@ $exe = "$env:TEMP\portrait-screen\PortraitScreen.exe"
 请为每次执行指定新的输出目录。每个样例保存周期去纹图 `phase.png` 和选中的 `selected.png`，成功处理完全部样例后才写入 `results.json`。其中记录选路、频峰、三类判断量及耗时。屏纹频带的下降可能伴随其他可见色带残留，选择结果仍需用有清晰参考的配对验收。
 
 需要比较去屏纹后再去运动模糊时，可在清单的 `rows` 同级设置 `"writeNarrow": true`。每个样例会额外保存 `narrow.png` 并记录 `subtractMs`。该分支在线性 RGB 像素中估计实测频峰附近的本地正弦和余弦幅度，按相位一致性减少重复纹理。若下游模型需保留拍摄像素尺度，可使用 512×512 原生区域，将该区域同时填作 `native`、`alignedRaw` 和 `previous`，并使用单位矩阵及 `direct` 传递。该对照不参与 `selected.png` 的选择。
+
+## 按拍摄像素重排已有候选
+
+清单设置 `"rankAtCaptureResolution": true` 时，每个样例提供原生拍摄图、原生图到对齐脸区的仿射矩阵，以及该脸区的 512×512 候选。用 `previous` 给出目前展示的一个或两个候选名称。
+
+```json
+{
+  "rankAtCaptureResolution": true,
+  "rows": {
+    "example": {
+      "native": "D:/cases/screen.png",
+      "nativeToAligned": [[2, 0, 0], [0, 2, 0]],
+      "previous": ["primary"],
+      "candidates": {
+        "primary": "D:/cases/previous.png",
+        "demoire": "D:/cases/demoire.png"
+      }
+    }
+  }
+}
+```
+
+工具把候选回放到拍摄像素网格，用五官之外的像素拟合亮度和首图的模糊程度，再比较眼、鼻、嘴的残差。原先展示一张时，误差下降超过 2% 且脸区带通幅度相对首图为 0.60–1.40 的备选可参与替换。单张输出写入 `selected.png`，既有双候选按原顺序写入 `selected.png` 和 `selected-2.png`。`results.json` 记录入选名称、模糊尺度及全部候选的误差和细节幅度比。该结果用于屏摄配对评测。
