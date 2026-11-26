@@ -191,6 +191,61 @@ bool hasSquareCarrier(const cv::Mat& bgr) {
         std::abs(periods[0].dot(periods[1])) <= .12 * first * second;
 }
 
+double weightedCorrelation(const cv::Mat& a, const cv::Mat& b, const cv::Mat& weights, double area) {
+    const cv::Mat left = a - a.dot(weights) / area;
+    const cv::Mat right = b - b.dot(weights) / area;
+    const cv::Mat weightedLeft = left.mul(weights);
+    const cv::Mat weightedRight = right.mul(weights);
+    const double magnitude = std::sqrt(left.dot(weightedLeft) * right.dot(weightedRight));
+    return std::clamp(right.dot(weightedLeft) / std::max(magnitude, 1e-8), -1., 1.);
+}
+
+double highBandRms(const cv::Mat& signal, const cv::Mat& mask) {
+    const cv::Mat band = blur(signal, .47) - blur(signal, 1.25);
+    return std::sqrt(cv::mean(band.mul(band), mask)[0]);
+}
+
+bool preferContourAlternative(const cv::Mat& observed, const cv::Mat& current, const cv::Mat& alternative,
+                              const CaptureGrid& grid, const CaptureReplaySelection& result,
+                              std::size_t candidateIndex) {
+    const cv::Mat sourceBand = blur(observed, 1.1) - blur(observed, 3.2);
+    const cv::Mat currentBand = blur(current, 1.1) - blur(current, 3.2);
+    const cv::Mat nextBand = blur(alternative, 1.1) - blur(alternative, 3.2);
+    double difference = 0.;
+    std::size_t count = 0;
+    for (const auto& weights : grid.features) {
+        const double area = cv::sum(weights)[0];
+        if (area < 5.) {
+            continue;
+        }
+        const double currentAgreement = weightedCorrelation(sourceBand, currentBand, weights, area);
+        const double nextAgreement = weightedCorrelation(sourceBand, nextBand, weights, area);
+        if (nextAgreement < std::max(.86, currentAgreement - .03)) {
+            return false;
+        }
+        difference += nextAgreement - currentAgreement;
+        ++count;
+    }
+    if (count < 3) {
+        return false;
+    }
+    const double averageDifference = difference / static_cast<double>(count);
+    const auto& score = result.scores[candidateIndex];
+    const double referenceError = result.scores[result.selected].error;
+    const double observedEnergy = std::max(highBandRms(observed, grid.surround), 1e-6);
+    const double candidateEnergy = highBandRms(alternative, grid.surround);
+    const bool strongerReplay = score.error <= .60 * referenceError && averageDifference >= .012 &&
+        candidateEnergy <= .96 * observedEnergy && score.relativeDetail >= .60;
+    if (strongerReplay) {
+        return true;
+    }
+    const double currentEnergy = highBandRms(current, grid.surround);
+    const double retained = candidateEnergy / std::max(currentEnergy, 1e-7 * observedEnergy);
+    const double allowedContourLoss = std::min(.018, .006 + .12 * (1. - retained));
+    return result.chromaBandRms && *result.chromaBandRms < 2. && score.error <= .28 &&
+        retained <= .98 && averageDifference >= -allowedContourLoss;
+}
+
 std::size_t choosePrimary(const std::vector<CaptureReplayScore>& scores, bool allowMoreDetail) {
     const double base = scores.front().error;
     std::size_t selected = 0;
@@ -221,13 +276,17 @@ std::size_t choosePrimary(const std::vector<CaptureReplayScore>& scores, bool al
 
 CaptureReplaySelection rankAtCaptureResolution(const cv::Mat& nativeBgr, const cv::Matx23d& nativeToAligned,
                                                const std::vector<cv::Mat>& alignedCandidates, bool hasCurrentPair,
-                                               bool guardCaptureDetail) {
+                                               bool guardCaptureDetail,
+                                               std::optional<std::size_t> contourAlternative) {
     if (nativeBgr.empty() || nativeBgr.type() != CV_8UC3 || alignedCandidates.empty() ||
         !cv::checkRange(cv::Mat(nativeToAligned)) ||
         std::any_of(alignedCandidates.begin(), alignedCandidates.end(), [](const cv::Mat& image) {
             return image.type() != CV_8UC3 || image.size() != cv::Size(512, 512);
         })) {
         throw std::invalid_argument("Expected an eight-bit color source and aligned 512x512 color candidates");
+    }
+    if (contourAlternative && (!guardCaptureDetail || *contourAlternative >= alignedCandidates.size())) {
+        throw std::invalid_argument("Contour comparison requires an existing candidate and capture detail protection");
     }
     const auto bounds = captureBounds(nativeBgr.size(), nativeToAligned);
     const auto grid = makeGrid(bounds, nativeToAligned);
@@ -260,9 +319,12 @@ CaptureReplaySelection rankAtCaptureResolution(const cv::Mat& nativeBgr, const c
         }
     }
     const double baseEnergy = std::max(detailEnergy(alignedCandidates.front()), 1e-8);
+    const auto replay = [&](const cv::Mat& candidate) {
+        return matchExposure(blur(resample(candidate), result.blur), outer, grid.surround);
+    };
     result.scores.reserve(alignedCandidates.size());
     for (const auto& candidate : alignedCandidates) {
-        const auto corrected = matchExposure(blur(resample(candidate), result.blur), outer, grid.surround);
+        const auto corrected = replay(candidate);
         result.scores.push_back({featureError(raw, band, corrected, grid.features),
                                  std::sqrt(detailEnergy(candidate) / baseEnergy)});
     }
@@ -270,6 +332,12 @@ CaptureReplaySelection rankAtCaptureResolution(const cv::Mat& nativeBgr, const c
         const bool quietChroma = result.chromaBandRms.has_value() && *result.chromaBandRms < 2.;
         result.squareCarrier = quietChroma && hasSquareCarrier(crop);
         result.selected = choosePrimary(result.scores, quietChroma && !result.squareCarrier);
+        if (contourAlternative && *contourAlternative != result.selected && !result.squareCarrier &&
+            preferContourAlternative(raw, replay(alignedCandidates[result.selected]),
+                                     replay(alignedCandidates[*contourAlternative]), grid, result, *contourAlternative)) {
+            result.selected = *contourAlternative;
+            result.contourAlternativeUsed = true;
+        }
     }
     return result;
 }

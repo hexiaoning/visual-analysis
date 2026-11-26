@@ -191,6 +191,14 @@ json runCaptureReplay(const json& rows, const fs::path& output, bool guardCaptur
                 names.push_back(name);
             }
         }
+        std::optional<std::size_t> contourAlternative;
+        if (const auto alternative = data.find("contourAlternative"); alternative != data.end()) {
+            const auto name = alternative->get<std::string>();
+            if (!guardCaptureDetail || !candidates.contains(name)) {
+                throw std::invalid_argument("contourAlternative requires guardCaptureDetail and a named crop");
+            }
+            contourAlternative = static_cast<std::size_t>(std::find(names.begin(), names.end(), name) - names.begin());
+        }
         std::vector<cv::Mat> crops;
         crops.reserve(names.size());
         for (const auto& name : names) {
@@ -199,7 +207,7 @@ json runCaptureReplay(const json& rows, const fs::path& output, bool guardCaptur
         const auto native = load(data.at("native"));
         const auto affine = transform(data.at("nativeToAligned"));
         const auto result = visual::screen::rankAtCaptureResolution(native, affine, crops, prior.size() == 2,
-                                                                     guardCaptureDetail);
+                                                                     guardCaptureDetail, contourAlternative);
         const auto out = output / key;
         fs::create_directories(out);
         writeImage(out / L"selected.png", crops[result.selected]);
@@ -215,6 +223,9 @@ json runCaptureReplay(const json& rows, const fs::path& output, bool guardCaptur
         if (guardCaptureDetail) {
             audit[key]["chromaBandRms"] = result.chromaBandRms ? json(*result.chromaBandRms) : json(nullptr);
             audit[key]["squareCarrier"] = result.squareCarrier;
+        }
+        if (contourAlternative) {
+            audit[key]["contourAlternativeUsed"] = result.contourAlternativeUsed;
         }
     }
     return audit;

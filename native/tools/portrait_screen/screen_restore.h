@@ -39,11 +39,13 @@ struct CaptureReplaySelection {
     std::vector<CaptureReplayScore> scores;
     std::optional<double> chromaBandRms;
     bool squareCarrier{};
+    bool contourAlternativeUsed{};
 };
 
 // The first aligned crop is the current primary. A current pair is preserved.
 CaptureReplaySelection rankAtCaptureResolution(const cv::Mat& nativeBgr, const cv::Matx23d& nativeToAligned,
                                                const std::vector<cv::Mat>& alignedCandidates, bool hasCurrentPair,
-                                               bool guardCaptureDetail = false);
+                                               bool guardCaptureDetail = false,
+                                               std::optional<std::size_t> contourAlternative = std::nullopt);
 
 }
