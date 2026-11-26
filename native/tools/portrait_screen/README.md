@@ -72,6 +72,8 @@ $exe = "$env:TEMP\portrait-screen\PortraitScreen.exe"
 
 设定 `contourAlternative` 的样例会记录 `contourAlternativeUsed`，表示是否由轮廓比较替换首图。评测使用 SADT 直出作为指定候选。
 
+同设 `rankAtCaptureResolution`、`guardCaptureDetail` 和 `balanceCaptureDetail` 为 `true`，可给触发方形网格保护且原先只展示首图的样例尝试有限的细节修正。备选须比首图少至少 8% 的回放误差，细节幅度比须大于 1.40 且不超过 1.85。修正前后在可测的两相分量上残留屏纹都须在拍摄图的 30% 以内。先扣除同相屏纹，再有限衰减高频，眼、鼻、嘴的衰减较弱，目标细节比不高于 1.385。生成的备选按原回放规则参与比较。`detailBalanced` 记录每张新增候选及其文件名，候选图和最后的 `selected.png` 均写在样例目录。
+
 ## 检查已有首图是否整体偏暗
 
 `--capture-tone-guard` 用 512×512 原始对齐脸区检查已有首图的曝光。它将脸区分为两组交错图块，剔除过曝和过暗区域，要求每组的首图中位亮度至少低 21 档，再考虑替换。备选须在两组均明显减小低频亮度误差，同时保留首图眼、鼻、嘴的轮廓约束。工具还会比较同一首图经有界、局部明暗校正后的版本。

@@ -177,7 +177,7 @@ json run(const json& rows, const fs::path& output, bool writeNarrow) {
     return audit;
 }
 
-json runCaptureReplay(const json& rows, const fs::path& output, bool guardCaptureDetail) {
+json runCaptureReplay(const json& rows, const fs::path& output, bool guardCaptureDetail, bool balanceDetail) {
     json audit = json::object();
     for (const auto& [key, data] : rows.items()) {
         validateSample(key);
@@ -208,10 +208,28 @@ json runCaptureReplay(const json& rows, const fs::path& output, bool guardCaptur
         }
         const auto native = load(data.at("native"));
         const auto affine = transform(data.at("nativeToAligned"));
-        const auto result = visual::screen::rankAtCaptureResolution(native, affine, crops, prior.size() == 2,
-                                                                     guardCaptureDetail, contourAlternative);
+        auto result = visual::screen::rankAtCaptureResolution(native, affine, crops, prior.size() == 2,
+                                                               guardCaptureDetail, contourAlternative);
         const auto out = output / key;
         fs::create_directories(out);
+        json balanced = json::object();
+        if (balanceDetail && prior.size() == 1) {
+            for (auto& option : visual::screen::balanceCaptureDetail(native, affine, crops, result)) {
+                const auto name = names[option.source] + "-protected";
+                if (candidates.contains(name)) {
+                    throw std::invalid_argument("A balanced candidate conflicts with an existing name");
+                }
+                const auto filename = "balanced-" + std::to_string(option.source) + ".png";
+                writeImage(out / filename, option.image);
+                balanced[name] = filename;
+                names.push_back(name);
+                crops.push_back(std::move(option.image));
+            }
+            if (!balanced.empty()) {
+                result = visual::screen::rankAtCaptureResolution(native, affine, crops, false,
+                                                                 guardCaptureDetail, contourAlternative);
+            }
+        }
         writeImage(out / L"selected.png", crops[result.selected]);
         if (prior.size() == 2) {
             writeImage(out / L"selected-2.png", crops[1]);
@@ -228,6 +246,9 @@ json runCaptureReplay(const json& rows, const fs::path& output, bool guardCaptur
         }
         if (contourAlternative) {
             audit[key]["contourAlternativeUsed"] = result.contourAlternativeUsed;
+        }
+        if (balanceDetail) {
+            audit[key]["detailBalanced"] = balanced;
         }
     }
     return audit;
@@ -325,10 +346,15 @@ int wmain(int argc, wchar_t** argv) {
             const auto config = json::parse(manifest);
             const auto& rows = samples(config);
             const auto writeNarrow = config.value("writeNarrow", false);
+            const auto replay = config.value("rankAtCaptureResolution", false);
+            const auto guard = replay && config.value("guardCaptureDetail", false);
+            const auto balance = config.value("balanceCaptureDetail", false);
+            if (balance && !guard) {
+                throw std::invalid_argument("balanceCaptureDetail requires rankAtCaptureResolution and guardCaptureDetail");
+            }
             createOutput(output);
-            results = config.value("rankAtCaptureResolution", false)
-                ? runCaptureReplay(rows, output, config.value("guardCaptureDetail", false))
-                : run(rows, output, writeNarrow);
+            results = replay ? runCaptureReplay(rows, output, guard, balance)
+                             : run(rows, output, writeNarrow);
         }
         const auto pending = output / L"results.pending.json";
         std::ofstream report(pending, std::ios::binary);

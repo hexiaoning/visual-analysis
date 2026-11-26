@@ -5,6 +5,7 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 
 #include <opencv2/imgproc.hpp>
 
@@ -16,6 +17,7 @@ constexpr std::array<std::array<float, 4>, 4> featureRegions{{
     {192.f, 240.f, 38.f, 24.f}, {320.f, 240.f, 38.f, 24.f},
     {257.f, 310.f, 34.f, 35.f}, {256.f, 373.f, 51.f, 26.f},
 }};
+const cv::Rect detailRegion(107, 160, 298, 270);
 
 cv::Mat blur(const cv::Mat& src, double scale) {
     if (scale == 0.) {
@@ -33,12 +35,17 @@ cv::Mat grayscale(const cv::Mat& pixels) {
     return signal;
 }
 
-double detailEnergy(const cv::Mat& bgr) {
+cv::Mat floatLuma(const cv::Mat& bgr) {
     cv::Mat signal, gray;
     bgr.convertTo(signal, CV_32FC3, 1. / 255.);
     cv::cvtColor(signal, gray, cv::COLOR_BGR2GRAY);
+    return gray;
+}
+
+double detailEnergy(const cv::Mat& bgr) {
+    const auto gray = floatLuma(bgr);
     const cv::Mat detail = blur(gray, .65) - blur(gray, 2.2);
-    const cv::Mat face = detail(cv::Rect(107, 160, 298, 270));
+    const cv::Mat face = detail(detailRegion);
     return face.dot(face) / static_cast<double>(face.total());
 }
 
@@ -272,6 +279,163 @@ std::size_t choosePrimary(const std::vector<CaptureReplayScore>& scores, bool al
     return sharper;
 }
 
+struct Carrier {
+    cv::Mat cosine;
+    cv::Mat sine;
+    cv::Mat observedCos;
+    cv::Mat observedSin;
+    cv::Mat support;
+    double energy{};
+};
+
+using Phase = std::pair<cv::Mat, cv::Mat>;
+
+Phase demodulate(const cv::Mat& high, const Carrier& carrier) {
+    return {2. * blur(high.mul(carrier.cosine), 8.),
+            2. * blur(high.mul(carrier.sine), 8.)};
+}
+
+cv::Mat magnitude(const Phase& phase) {
+    cv::Mat strength;
+    cv::magnitude(phase.first, phase.second, strength);
+    return strength;
+}
+
+std::vector<Carrier> measureCarriers(const cv::Mat& aligned, const cv::Mat& projection,
+                                     const cv::Matx23d& affine, const Peaks& peaks) {
+    const cv::Matx22d basis(affine(0, 0), affine(0, 1), affine(1, 0), affine(1, 1));
+    const cv::Mat high = aligned - blur(aligned, 2.);
+    const cv::Mat projectionHigh = projection - blur(projection, 2.);
+    std::vector<Carrier> carriers;
+    for (const auto& period : peaks.periods) {
+        cv::Vec2d f = basis.t().inv() * cv::Vec2d(period.x, period.y);
+        for (int i = 0; i < 2; ++i) {
+            f[i] -= std::floor(f[i] + .5);
+        }
+        if (cv::norm(f) < .1) {
+            continue;
+        }
+        Carrier carrier;
+        carrier.cosine.create(aligned.size(), CV_32F);
+        carrier.sine.create(aligned.size(), CV_32F);
+        for (int y = 0; y < aligned.rows; ++y) {
+            for (int x = 0; x < aligned.cols; ++x) {
+                const float angle = static_cast<float>(2. * CV_PI * (x * f[0] + y * f[1]));
+                carrier.cosine.at<float>(y, x) = std::cos(angle);
+                carrier.sine.at<float>(y, x) = std::sin(angle);
+            }
+        }
+        const auto phase = demodulate(high, carrier);
+        const auto amplitude = magnitude(phase);
+        const auto coherentAmplitude = magnitude({blur(phase.first, 12.), blur(phase.second, 12.)});
+        const cv::Mat coherenceBound = .63 * cv::max(blur(amplitude, 12.), 1e-6);
+        cv::bitwise_and(amplitude(detailRegion) > .010,
+                        coherentAmplitude(detailRegion) > coherenceBound(detailRegion), carrier.support);
+        if (cv::countNonZero(carrier.support) >= 200) {
+            carrier.energy = cv::norm(amplitude(detailRegion), cv::NORM_L2SQR, carrier.support);
+        }
+        auto observed = demodulate(projectionHigh, carrier);
+        carrier.observedCos = std::move(observed.first);
+        carrier.observedSin = std::move(observed.second);
+        carriers.push_back(std::move(carrier));
+    }
+    return carriers;
+}
+
+double carrierRatio(const cv::Mat& high, const std::vector<Carrier>& carriers, double observedEnergy) {
+    double energy = 0.;
+    for (const auto& carrier : carriers) {
+        if (carrier.energy > 0.) {
+            const auto amplitude = magnitude(demodulate(high, carrier));
+            energy += cv::norm(amplitude(detailRegion), cv::NORM_L2SQR, carrier.support);
+        }
+    }
+    return std::sqrt(energy / observedEnergy);
+}
+
+cv::Mat subtractObservedPhase(const cv::Mat& candidate, const cv::Mat& high,
+                             const std::vector<Carrier>& carriers) {
+    cv::Mat correction = cv::Mat::zeros(high.size(), CV_32F);
+    for (const auto& carrier : carriers) {
+        const auto a = carrier.observedCos;
+        const auto b = carrier.observedSin;
+        const auto amplitude = magnitude({a, b});
+        const auto steady = magnitude({blur(a, 14.), blur(b, 14.)});
+        cv::Mat coherence;
+        cv::divide(steady, cv::max(blur(amplitude, 14.), 1e-6), coherence);
+        const cv::Mat confidence = cv::min(cv::max((coherence - .45) / .35, 0.), 1.);
+        const cv::Mat strength = cv::min(cv::max((amplitude - .004) / .012, 0.), 1.);
+        const auto q = demodulate(high, carrier);
+        cv::Mat matching;
+        cv::divide(q.first.mul(a) + q.second.mul(b), cv::max(amplitude.mul(amplitude), 1e-7), matching);
+        const cv::Mat common = cv::min(cv::max(matching, 0.), 1.);
+        const cv::Mat wave = a.mul(carrier.cosine) + b.mul(carrier.sine);
+        correction += confidence.mul(strength).mul(common).mul(wave);
+    }
+    correction = cv::min(cv::max(correction, -.12), .12);
+    cv::Mat rgb, value;
+    cv::merge(std::vector<cv::Mat>(3, correction), rgb);
+    candidate.convertTo(value, CV_32F, 1. / 255.);
+    value -= rgb;
+    value.convertTo(value, CV_8UC3, 255.);
+    return value;
+}
+
+cv::Mat detailProtection() {
+    cv::Mat mask(512, 512, CV_32F);
+    for (int y = 0; y < mask.rows; ++y) {
+        for (int x = 0; x < mask.cols; ++x) {
+            float protect = 0.f;
+            for (const auto& region : featureRegions) {
+                const auto dx = (static_cast<float>(x) - region[0]) / region[2];
+                const auto dy = (static_cast<float>(y) - region[1]) / region[3];
+                protect = std::max(protect, std::exp(-.75f * (dx * dx + dy * dy)));
+            }
+            const float dx = (x - 256.f) / 200.f;
+            const float dy = (y - 295.f) / 204.f;
+            const float taper = std::clamp((1.f - dx * dx - dy * dy) / .25f, 0.f, 1.f);
+            mask.at<float>(y, x) = taper * (1.f - .83f * protect);
+        }
+    }
+    return mask;
+}
+
+cv::Mat limitDetail(const cv::Mat& candidate, double baseEnergy) {
+    constexpr double maximum = 1.385;
+    const double allowedEnergy = maximum * maximum * baseEnergy;
+    if (detailEnergy(candidate) <= allowedEnergy) {
+        return candidate;
+    }
+    const auto y = floatLuma(candidate);
+    static const auto protection = detailProtection();
+    const cv::Mat difference = protection.mul(y - blur(y, 1.7));
+    cv::Mat rgbDifference, normalized;
+    cv::merge(std::vector<cv::Mat>(3, difference), rgbDifference);
+    candidate.convertTo(normalized, CV_32F, 1. / 255.);
+    const auto render = [&](double strength) {
+        cv::Mat out;
+        const cv::Mat next = normalized - strength * rgbDifference;
+        next.convertTo(out, CV_8UC3, 255.);
+        return out;
+    };
+    auto kept = render(1.);
+    if (detailEnergy(kept) > allowedEnergy) {
+        return {};
+    }
+    double low = 0., high = 1.;
+    for (int i = 0; i < 14; ++i) {
+        const double mid = (low + high) / 2.;
+        auto next = render(mid);
+        if (detailEnergy(next) > allowedEnergy) {
+            low = mid;
+        } else {
+            high = mid;
+            kept = std::move(next);
+        }
+    }
+    return kept;
+}
+
 }
 
 CaptureReplaySelection rankAtCaptureResolution(const cv::Mat& nativeBgr, const cv::Matx23d& nativeToAligned,
@@ -337,6 +501,60 @@ CaptureReplaySelection rankAtCaptureResolution(const cv::Mat& nativeBgr, const c
                                      replay(alignedCandidates[*contourAlternative]), grid, result, *contourAlternative)) {
             result.selected = *contourAlternative;
             result.contourAlternativeUsed = true;
+        }
+    }
+    return result;
+}
+
+std::vector<CaptureDetailCandidate> balanceCaptureDetail(const cv::Mat& nativeBgr, const cv::Matx23d& affine,
+                                                        const std::vector<cv::Mat>& crops,
+                                                        const CaptureReplaySelection& replay) {
+    std::vector<CaptureDetailCandidate> result;
+    if (!replay.squareCarrier) {
+        return result;
+    }
+    if (crops.empty() || crops.size() != replay.scores.size()) {
+        throw std::invalid_argument("Detail balancing requires the original capture replay");
+    }
+    const double baseError = replay.scores.front().error;
+    const auto eligible = [&](const CaptureReplayScore& score) {
+        return score.relativeDetail > 1.4 && score.relativeDetail <= 1.85 && score.error <= .92 * baseError;
+    };
+    if (std::none_of(replay.scores.begin(), replay.scores.end(), eligible)) {
+        return result;
+    }
+    const auto region = captureBounds(nativeBgr.size(), affine);
+    const auto periods = detect(nativeBgr(region));
+    cv::Mat observed, projection;
+    cv::warpAffine(nativeBgr, observed, affine, {512, 512}, cv::INTER_LINEAR, cv::BORDER_REFLECT_101);
+    cv::warpAffine(floatLuma(nativeBgr), projection, affine, {512, 512}, cv::INTER_LINEAR,
+                   cv::BORDER_REFLECT_101);
+    const auto carriers = measureCarriers(floatLuma(observed), projection, affine, periods);
+    double observedEnergy = 0.;
+    for (const auto& carrier : carriers) {
+        observedEnergy += carrier.energy;
+    }
+    if (observedEnergy <= 0.) {
+        return result;
+    }
+    const double baseEnergy = std::max(detailEnergy(crops.front()), 1e-8);
+    for (std::size_t i = 1; i < crops.size(); ++i) {
+        if (!eligible(replay.scores[i])) {
+            continue;
+        }
+        const auto gray = floatLuma(crops[i]);
+        const cv::Mat high = gray - blur(gray, 2.);
+        if (carrierRatio(high, carriers, observedEnergy) > .30) {
+            continue;
+        }
+        const auto corrected = subtractObservedPhase(crops[i], high, carriers);
+        const auto correctedY = floatLuma(corrected);
+        if (carrierRatio(correctedY - blur(correctedY, 2.), carriers, observedEnergy) > .30) {
+            continue;
+        }
+        auto bounded = limitDetail(corrected, baseEnergy);
+        if (!bounded.empty()) {
+            result.push_back({i, std::move(bounded)});
         }
     }
     return result;

@@ -48,6 +48,16 @@ CaptureReplaySelection rankAtCaptureResolution(const cv::Mat& nativeBgr, const c
                                                bool guardCaptureDetail = false,
                                                std::optional<std::size_t> contourAlternative = std::nullopt);
 
+struct CaptureDetailCandidate {
+    std::size_t source;
+    cv::Mat image;
+};
+
+// The replay must describe the same candidates, with the current primary first.
+std::vector<CaptureDetailCandidate> balanceCaptureDetail(const cv::Mat& nativeBgr, const cv::Matx23d& nativeToAligned,
+                                                        const std::vector<cv::Mat>& alignedCandidates,
+                                                        const CaptureReplaySelection& replay);
+
 struct CaptureToneChoice {
     cv::Mat image;
     std::optional<std::size_t> alternative;
