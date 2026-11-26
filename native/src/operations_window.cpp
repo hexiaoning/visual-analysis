@@ -4,6 +4,7 @@
 #include "people.h"
 #include "portrait_video.h"
 #include "preview_native.h"
+#include "workspace_theme.h"
 
 #include <algorithm>
 #include <array>
@@ -25,7 +26,9 @@ constexpr wchar_t windowClass[]=L"VisualAnalysisWorkflow";
 constexpr UINT_PTR timer=1;
 constexpr UINT_PTR sourceTimer=2;
 constexpr UINT chooseBase=200, actionBase=300, cancelAction=500, saveAction=501, exportHitsAction=502,
-    viewAction=503, playAction=504, pauseAction=505, restoreHitAction=506;
+    viewAction=503, playAction=504, pauseAction=505, restoreHitAction=506,
+    libraryList=507, selectLibraries=508, clearLibraries=509;
+constexpr char libraryRequired[]="请至少勾选一个目标人脸库。";
 
 enum class Box {Text,Media,Images,Json,Directory,Region,Line};
 struct Field {const char* key;const wchar_t* title;Box type=Box::Text;};
@@ -42,7 +45,7 @@ const std::array workflows{
         {{"vehicle.analyze",L"识别并查询线上资料"}}},
     Workflow{L"人脸检索",{{"input",L"探测照片",Box::Images},{"reference",L"对比照片",Box::Images},
             {"source",L"图片／视频（可混选）",Box::Media},{"step",L"抽帧间隔（可选）"},
-            {"library_id",L"人员库 ID（可选）"},{"sex",L"性别（男／女）"},{"region_prefix",L"地区码"},
+            {"sex",L"性别（男／女）"},{"region_prefix",L"地区码"},
             {"min_age",L"最小年龄（可选）"},{"max_age",L"最大年龄（可选）"},{"camera",L"摄像头编号（默认 0）"}},
         {{"face.compare",L"两张照片对比"},{"face.gallery",L"照片检索人物"},{"face.scan",L"开始检索"},
          {"face.camera",L"打开摄像头"}}},
@@ -102,12 +105,18 @@ struct Form {
     int displayedFrame{};
     std::future<Json> pending;
     std::string operation;
+    HWND libraryCaption{},libraryChoices{},selectAll{},clearAll{};
+    std::vector<std::string> libraryIds;
+
 };
 
 HWND child(HWND root,const wchar_t* name,const wchar_t* caption,DWORD style,UINT_PTR id) {
-    auto handle=CreateWindowExW(name==std::wstring_view(L"EDIT")?WS_EX_CLIENTEDGE:0,name,caption,
+    const auto type=std::wstring_view(name);
+    if(type==L"EDIT") style|=WS_BORDER;
+    if(type==L"BUTTON") style|=BS_OWNERDRAW;
+    auto handle=CreateWindowExW(0,name,caption,
         WS_CHILD|WS_VISIBLE|style,0,0,0,0,root,reinterpret_cast<HMENU>(id),nullptr,nullptr);
-    SendMessageW(handle,WM_SETFONT,reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)),TRUE);
+    theme::styleControl(handle);
     return handle;
 }
 
@@ -276,6 +285,66 @@ std::wstring selectionLabel(const std::vector<fs::path>& paths) {
     return paths.size()==1 ? paths.front().wstring() : L"已选择 "+std::to_wstring(paths.size())+L" 个文件";
 }
 
+bool librarySelected(const Form& form,size_t index) {
+    return SendMessageW(form.libraryChoices,LB_GETSEL,index,0)>0;
+}
+
+void reloadLibraries(Form& form) {
+    const std::atomic<bool> cancel=false;
+    const auto rows=peopleOperation("libraries.list",Json::object(),form.models,cancel);
+    std::map<std::string,bool> existing;
+    bool allSelected=true;
+    for(size_t index=0;index<form.libraryIds.size();++index) {
+        const bool checked=librarySelected(form,index);
+        existing.emplace(form.libraryIds[index],checked);
+        allSelected=allSelected && checked;
+    }
+    SendMessageW(form.libraryChoices,LB_RESETCONTENT,0,0);
+    form.libraryIds.clear();
+    for(const auto& row:rows) {
+        const auto id=row.at("id").get<std::string>();
+        const auto name=wide(row.at("name").get<std::string>());
+        const auto rowIndex=SendMessageW(form.libraryChoices,LB_ADDSTRING,0,reinterpret_cast<LPARAM>(name.c_str()));
+        if(rowIndex<0) throw std::runtime_error("无法显示目标人脸库。");
+        form.libraryIds.push_back(id);
+        const auto prior=existing.find(id);
+        SendMessageW(form.libraryChoices,LB_SETSEL,prior==existing.end()?allSelected:prior->second,rowIndex);
+    }
+}
+
+void drawLibraryChoice(const DRAWITEMSTRUCT& item) {
+    const auto area=item.rcItem;
+    theme::fill(item.hDC,area,theme::white);
+    if(item.itemID==static_cast<UINT>(-1)) return;
+    const bool checked=(item.itemState&ODS_SELECTED)!=0;
+    const bool disabled=(item.itemState&ODS_DISABLED)!=0 || !IsWindowEnabled(item.hwndItem);
+    const LONG boxTop=(area.top+area.bottom-14)/2;
+    const RECT box{area.left+6,boxTop,area.left+20,boxTop+14};
+    if(checked) {
+        theme::fill(item.hDC,box,disabled?theme::muted:theme::primaryBlue);
+        const auto pen=CreatePen(PS_SOLID,1,theme::white);
+        const auto old=SelectObject(item.hDC,pen);
+        MoveToEx(item.hDC,box.left+3,box.top+7,nullptr);
+        LineTo(item.hDC,box.left+6,box.top+10);
+        LineTo(item.hDC,box.left+11,box.top+4);
+        SelectObject(item.hDC,old);
+        DeleteObject(pen);
+    } else {
+        theme::card(item.hDC,box);
+    }
+    const auto length=SendMessageW(item.hwndItem,LB_GETTEXTLEN,item.itemID,0);
+    if(length!=LB_ERR) {
+        std::wstring name(length+1,L'\0');
+        SendMessageW(item.hwndItem,LB_GETTEXT,item.itemID,reinterpret_cast<LPARAM>(name.data()));
+        theme::text(item.hDC,name.c_str(),{area.left+26,area.top,area.right-5,area.bottom},theme::Font::Body,
+            disabled?theme::muted:theme::textColor,DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS);
+    }
+    if((item.itemState&(ODS_FOCUS|ODS_NOFOCUSRECT))==ODS_FOCUS) {
+        auto focus=area;
+        DrawFocusRect(item.hDC,&focus);
+    }
+}
+
 Json input(Form& form,const std::string& action) {
     auto result=Json::object();
     const auto& selected=workflows[form.index];
@@ -338,6 +407,14 @@ Json input(Form& form,const std::string& action) {
             result[key]=array;
         } else result[key]=utf8(text);
     }
+    if(action=="face.gallery" || action=="face.scan" || action=="face.camera") {
+        auto selectedIds=Json::array();
+        for(size_t index=0;index<form.libraryIds.size();++index) {
+            if(librarySelected(form,index)) selectedIds.push_back(form.libraryIds[index]);
+        }
+        if(selectedIds.empty()) throw std::invalid_argument(libraryRequired);
+        result["library_ids"]=std::move(selectedIds);
+    }
     if(action=="face.camera" && !result.contains("camera")) {
         result["camera"]=0;
     } else if(action=="vehicle.analyze" && (result.contains("brand") || result.contains("series"))) {
@@ -357,34 +434,63 @@ Json input(Form& form,const std::string& action) {
     return result;
 }
 
+constexpr int panelGap=12;
+constexpr int fieldInset=12;
+constexpr int controlsTop=theme::panelHeaderHeight+9;
+constexpr int resultsTop=140;
+
+int formWidth(const RECT& client) {
+    return std::clamp(int(client.right)*36/100,398,510);
+}
+
+RECT resultArea(const RECT& client) {
+    return {formWidth(client)+panelGap+fieldInset,resultsTop,client.right-fieldInset,client.bottom-fieldInset};
+}
+
 void layout(HWND handle,const Form& state) {
     RECT client{};
     GetClientRect(handle,&client);
-    constexpr int margin=14;
-    int y=margin;
+    const int leftWidth=formWidth(client);
+    const int rightStart=leftWidth+panelGap;
+    const int rightWidth=client.right-rightStart;
+    constexpr int labelWidth=174;
+    int y=controlsTop;
     for(size_t index=0;index<state.fields.size();++index) {
-        MoveWindow(state.captions[index],margin,y+4,146,23,TRUE);
-        MoveWindow(state.fields[index],margin+150,y,client.right-2*margin-228,25,TRUE);
-        if(state.choosers[index]) MoveWindow(state.choosers[index],client.right-margin-70,y,70,25,TRUE);
-        y+=32;
+        MoveWindow(state.captions[index],fieldInset,y+3,labelWidth-6,24,TRUE);
+        const bool picker=state.choosers[index]!=nullptr;
+        MoveWindow(state.fields[index],fieldInset+labelWidth,y,leftWidth-2*fieldInset-labelWidth-(picker?74:0),25,TRUE);
+        if(picker) MoveWindow(state.choosers[index],leftWidth-fieldInset-68,y,68,25,TRUE);
+        y+=29;
     }
-    const auto columns=std::max(1,(int(client.right)-2*margin)/139);
+    const int columns=3;
+    const int buttonWidth=(leftWidth-2*fieldInset-12)/columns;
+    y+=8;
     for(size_t index=0;index<state.buttons.size();++index) {
-        MoveWindow(state.buttons[index],margin+int(index%columns)*139,y+int(index/columns)*31,134,26,TRUE);
+        MoveWindow(state.buttons[index],fieldInset+int(index%columns)*(buttonWidth+6),y+int(index/columns)*30,buttonWidth,26,TRUE);
     }
-    y+=31*static_cast<int>((state.buttons.size()+columns-1)/columns)+4;
-    MoveWindow(state.activity,margin,y+5,client.right-2*margin-(state.pause?440:340),24,TRUE);
-    if(state.pause) MoveWindow(state.pause,client.right-margin-425,y,94,26,TRUE);
-    MoveWindow(state.exportHits,client.right-margin-325,y,110,26,TRUE);
-    MoveWindow(state.cancelButton,client.right-margin-211,y,94,26,TRUE);
-    MoveWindow(state.save,client.right-margin-107,y,106,26,TRUE);
-    y+=34;
-    MoveWindow(state.hitChoice,margin,y,client.right-2*margin-(state.restoreHit?390:260),170,TRUE);
-    if(state.restoreHit) MoveWindow(state.restoreHit,client.right-margin-382,y,122,26,TRUE);
-    MoveWindow(state.play,client.right-margin-252,y,122,26,TRUE);
-    MoveWindow(state.view,client.right-margin-122,y,122,26,TRUE);
-    y+=34;
-    MoveWindow(state.result,margin,y,client.right-2*margin,std::max(int(client.bottom)-y-margin,40),TRUE);
+    if(state.libraryChoices) {
+        const int titleY=y+30*static_cast<int>((state.buttons.size()+columns-1)/columns)+8;
+        const int listY=titleY+29;
+        MoveWindow(state.libraryCaption,fieldInset,titleY+4,120,22,TRUE);
+        MoveWindow(state.selectAll,leftWidth-fieldInset-114,titleY,54,24,TRUE);
+        MoveWindow(state.clearAll,leftWidth-fieldInset-54,titleY,54,24,TRUE);
+        MoveWindow(state.libraryChoices,fieldInset,listY,leftWidth-2*fieldInset,
+            std::max(int(client.bottom)-57-listY,26),TRUE);
+    }
+    MoveWindow(state.activity,fieldInset,client.bottom-36,leftWidth-(state.pause?180:108),23,TRUE);
+    MoveWindow(state.cancelButton,leftWidth-fieldInset-80,client.bottom-40,80,27,TRUE);
+    if(state.pause) MoveWindow(state.pause,leftWidth-fieldInset-145,client.bottom-40,59,27,TRUE);
+
+    MoveWindow(state.hitChoice,rightStart+fieldInset,controlsTop,rightWidth-2*fieldInset,170,TRUE);
+    const std::array resultButtons{state.view,state.play,state.exportHits,state.save,state.restoreHit};
+    const int itemWidth=(rightWidth-2*fieldInset-12)/columns;
+    for(size_t index=0;index<resultButtons.size() && resultButtons[index];++index) {
+        MoveWindow(resultButtons[index],rightStart+fieldInset+int(index%columns)*(itemWidth+6),
+            74+int(index/columns)*30,itemWidth,26,TRUE);
+    }
+    const auto result=resultArea(client);
+    MoveWindow(state.result,result.left,result.top,result.right-result.left,std::max<LONG>(result.bottom-result.top,40),TRUE);
+    InvalidateRect(handle,nullptr,TRUE);
 }
 
 void buttons(Form& state,bool running) {
@@ -394,6 +500,9 @@ void buttons(Form& state,bool running) {
         EnableWindow(state.choosers[i],!running || (state.faceQueue && fields[i].key==std::string_view("source")));
     }
     for(auto field:state.fields) EnableWindow(field,!running);
+    if(state.libraryChoices) {
+        for(const auto control:{state.libraryChoices,state.selectAll,state.clearAll}) EnableWindow(control,!running);
+    }
     EnableWindow(state.cancelButton,running);
     if(state.pause) EnableWindow(state.pause,running && state.preview!=nullptr);
     EnableWindow(state.save,!running && !state.last.is_null());
@@ -442,7 +551,7 @@ void beginTask(HWND handle,Form& state,std::string action,Json request) {
     if(state.preview) {
         if(state.pause) SetWindowTextW(state.pause,L"暂停");
         ShowWindow(state.result,SW_HIDE);
-        InvalidateRect(handle,nullptr,TRUE);
+        InvalidateRect(handle,nullptr,FALSE);
     }
     buttons(state,true);
     SetTimer(handle,timer,state.preview?67:150,nullptr);
@@ -488,31 +597,24 @@ void submitFaceSources(HWND handle,Form& state,const std::vector<fs::path>& path
     beginTask(handle,state,"face.scan",std::move(request));
 }
 
-RECT previewArea(HWND handle,const Form& state) {
-    RECT area{};
-    GetWindowRect(state.result,&area);
-    MapWindowPoints(nullptr,handle,reinterpret_cast<POINT*>(&area),2);
-    return area;
-}
-
-void paintProcessingPreview(HDC dc,RECT area,const cv::Mat& image) {
-    FillRect(dc,&area,GetSysColorBrush(COLOR_WINDOW));
-    if(image.empty()) {
-        DrawTextW(dc,L"等待处理画面…",-1,&area,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+void paintDetection(HDC dc,RECT area,const DetectionPreview::Frame& frame) {
+    if(frame.image.empty()) {
+        theme::text(dc,L"正在读取画面…",area,theme::Font::Body,theme::muted,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
         return;
     }
-    const auto scale=std::min(double(area.right-area.left)/image.cols,double(area.bottom-area.top)/image.rows);
-    if(scale<=0.) return;
-    const int width=cvRound(image.cols*scale),height=cvRound(image.rows*scale);
-    BITMAPINFO bitmap{};
-    bitmap.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);
-    bitmap.bmiHeader.biWidth=image.cols;
-    bitmap.bmiHeader.biHeight=-image.rows;
-    bitmap.bmiHeader.biPlanes=1;
-    bitmap.bmiHeader.biBitCount=32;
+    const auto ratio=std::min(double(area.right-area.left)/frame.image.cols,
+                              double(area.bottom-area.top)/frame.image.rows);
+    if(ratio<=0.) return;
+    const int width=cvRound(frame.image.cols*ratio), height=cvRound(frame.image.rows*ratio);
+    BITMAPINFO canvas{};
+    canvas.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);
+    canvas.bmiHeader.biWidth=frame.image.cols;
+    canvas.bmiHeader.biHeight=-frame.image.rows;
+    canvas.bmiHeader.biPlanes=1;
+    canvas.bmiHeader.biBitCount=32;
     SetStretchBltMode(dc,HALFTONE);
     StretchDIBits(dc,(area.left+area.right-width)/2,(area.top+area.bottom-height)/2,width,height,
-        0,0,image.cols,image.rows,image.data,&bitmap,DIB_RGB_COLORS,SRCCOPY);
+                  0,0,frame.image.cols,frame.image.rows,frame.image.data,&canvas,DIB_RGB_COLORS,SRCCOPY);
 }
 
 LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
@@ -536,6 +638,15 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
         for(size_t index=0;index<workflow.actions.size();++index) {
             state->buttons.push_back(child(handle,L"BUTTON",workflow.actions[index].label,WS_TABSTOP,actionBase+index));
         }
+        if(state->index==1) {
+            state->libraryCaption=child(handle,L"STATIC",L"目标人脸库",0,0);
+            SendMessageW(state->libraryCaption,WM_SETFONT,reinterpret_cast<WPARAM>(theme::font(theme::Font::Heading)),TRUE);
+            state->selectAll=child(handle,L"BUTTON",L"全选",WS_TABSTOP,selectLibraries);
+            state->clearAll=child(handle,L"BUTTON",L"清空",WS_TABSTOP,clearLibraries);
+            state->libraryChoices=child(handle,L"LISTBOX",L"",WS_TABSTOP|WS_BORDER|WS_VSCROLL|LBS_NOINTEGRALHEIGHT|
+                LBS_MULTIPLESEL|LBS_OWNERDRAWFIXED|LBS_HASSTRINGS|LBS_NOTIFY,libraryList);
+            SendMessageW(state->libraryChoices,LB_SETITEMHEIGHT,0,24);
+        }
         state->activity=child(handle,L"STATIC",L"",0,0);
         state->cancelButton=child(handle,L"BUTTON",L"取消任务",WS_TABSTOP,cancelAction);
         if(state->index==1 || state->index==2) state->pause=child(handle,L"BUTTON",L"暂停",WS_TABSTOP,pauseAction);
@@ -553,20 +664,46 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
     }
     case WM_SIZE:
         if(state->result) layout(handle,*state);
-        if(state->preview) InvalidateRect(handle,nullptr,TRUE);
         return 0;
-    case WM_PAINT:
-        if(state->preview) {
-            PAINTSTRUCT paint{};
-            const auto dc=BeginPaint(handle,&paint);
-            paintProcessingPreview(dc,previewArea(handle,*state),state->preview->current().image);
-            EndPaint(handle,&paint);
-            return 0;
+    case WM_SHOWWINDOW:
+        if(wparam && state->libraryChoices && !state->pending.valid()) {
+            try {reloadLibraries(*state);}
+            catch(const std::exception& error) {SetWindowTextW(state->activity,wide(error.what()).c_str());}
         }
         break;
-    case WM_GETMINMAXINFO:
-        reinterpret_cast<MINMAXINFO*>(lparam)->ptMinTrackSize={700,630};
+    case WM_DRAWITEM: {
+        const auto* item=reinterpret_cast<const DRAWITEMSTRUCT*>(lparam);
+        if(item->CtlID==libraryList) drawLibraryChoice(*item);
+        else {
+            const UINT primaryAction=state->index==1?actionBase+1:actionBase;
+            theme::drawButton(*item,item->CtlID==primaryAction?theme::Button::Primary:theme::Button::Quiet);
+        }
+        return TRUE;
+    }
+    case WM_CTLCOLORSTATIC:
+    case WM_CTLCOLOREDIT:
+    case WM_CTLCOLORLISTBOX:
+    case WM_CTLCOLORBTN: {
+        auto dc=reinterpret_cast<HDC>(wparam);
+        SetBkColor(dc,theme::white);
+        SetTextColor(dc,theme::textColor);
+        return reinterpret_cast<LRESULT>(theme::surface());
+    }
+    case WM_PAINT: {
+        PAINTSTRUCT paint{};
+        const auto dc=BeginPaint(handle,&paint);
+        RECT client{};
+        GetClientRect(handle,&client);
+        const int leftWidth=formWidth(client);
+        const int rightStart=leftWidth+panelGap;
+        theme::fill(dc,client,theme::canvas);
+        theme::panel(dc,{0,0,leftWidth,client.bottom},workflows[state->index].name);
+        theme::panel(dc,{rightStart,0,client.right,client.bottom},state->preview?L"实时预览":L"结果");
+        theme::fill(dc,{1,client.bottom-50,leftWidth-1,client.bottom-49},theme::border);
+        if(state->preview) paintDetection(dc,resultArea(client),state->preview->current());
+        EndPaint(handle,&paint);
         return 0;
+    }
     case WM_COMMAND: {
         const auto id=LOWORD(wparam);
         try {
@@ -576,7 +713,14 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
                 SetTimer(handle,sourceTimer,400,nullptr);
                 return 0;
             }
-            if(id==cancelAction && state->cancelFlag) {
+            if((id==selectLibraries || id==clearLibraries) && !state->pending.valid()) {
+                SendMessageW(state->libraryChoices,LB_SETSEL,id==selectLibraries,-1);
+                if(id==selectLibraries && content(state->activity)==wide(libraryRequired)) SetWindowTextW(state->activity,L"");
+            } else if(id==libraryList && HIWORD(wparam)==LBN_SELCHANGE) {
+                if(content(state->activity)==wide(libraryRequired) && SendMessageW(state->libraryChoices,LB_GETSELCOUNT,0,0)>0) {
+                    SetWindowTextW(state->activity,L"");
+                }
+            } else if(id==cancelAction && state->cancelFlag) {
                 *state->cancelFlag=true;
                 state->deferredFaceSources.clear();
                 if(state->pause) EnableWindow(state->pause,FALSE);
@@ -694,10 +838,12 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
             if(frame.index!=state->displayedFrame) {
                 state->displayedFrame=frame.index;
                 if(!state->preview->paused && !*state->cancelFlag) {
-                    const auto status=L"已处理 "+std::to_wstring(frame.index)+L" 帧 · 当前 "+std::to_wstring(frame.detections)+L" 个目标";
-                    SetWindowTextW(state->activity,status.c_str());
+                    const auto text=L"已处理 "+std::to_wstring(frame.index)+L" 帧 · 当前 "+std::to_wstring(frame.detections)+L" 个目标";
+                    SetWindowTextW(state->activity,text.c_str());
                 }
-                const auto area=previewArea(handle,*state);
+                RECT client{};
+                GetClientRect(handle,&client);
+                const auto area=resultArea(client);
                 InvalidateRect(handle,&area,FALSE);
             }
         }
@@ -739,6 +885,7 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
             if(state->preview) {
                 state->preview.reset();
                 ShowWindow(state->result,SW_SHOW);
+                InvalidateRect(handle,nullptr,FALSE);
             }
             state->cancelFlag.reset();
             state->faceQueue.reset();
@@ -750,14 +897,6 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
             }
         }
         return 0;
-    case WM_CLOSE:
-        if(state->pending.valid()) {
-            *state->cancelFlag=true;
-            state->deferredFaceSources.clear();
-            SetWindowTextW(state->activity,L"正在结束当前操作，请稍候。");
-            return 0;
-        }
-        break;
     case WM_NCDESTROY:
         if(state->cancelFlag) *state->cancelFlag=true;
         SetWindowLongPtrW(handle,GWLP_USERDATA,0);
@@ -769,34 +908,34 @@ LRESULT CALLBACK handler(HWND handle,UINT message,WPARAM wparam,LPARAM lparam) {
 
 }
 
-std::span<const wchar_t* const> workflowNames() {
-    static const auto names=[]{
-        std::array<const wchar_t*,workflows.size()> list{};
-        for(size_t index=0;index<list.size();++index) list[index]=workflows[index].name;
-        return list;
-    }();
-    return names;
+bool requestWorkflowClose(HWND page) {
+    auto* state=reinterpret_cast<Form*>(GetWindowLongPtrW(page,GWLP_USERDATA));
+    if(!state || !state->pending.valid()) return true;
+    *state->cancelFlag=true;
+    state->deferredFaceSources.clear();
+    SetWindowTextW(state->activity,L"正在结束当前操作，请稍候。");
+    return false;
 }
 
-void openWorkflow(HWND parent,const fs::path& models,const fs::path& worker,size_t workflow) {
+HWND createWorkflowPage(HWND parent,const fs::path& models,const fs::path& worker,size_t workflow) {
     if(workflow>=workflows.size()) throw std::invalid_argument("未知功能入口。");
     WNDCLASSW type{};
     type.hInstance=GetModuleHandleW(nullptr);
     type.lpfnWndProc=handler;
     type.lpszClassName=windowClass;
     type.hCursor=LoadCursorW(nullptr,IDC_ARROW);
-    type.hbrBackground=GetSysColorBrush(COLOR_BTNFACE);
+    type.hbrBackground=theme::background();
+    type.style=CS_HREDRAW|CS_VREDRAW;
     if(!RegisterClassW(&type) && GetLastError()!=ERROR_CLASS_ALREADY_EXISTS) throw std::runtime_error("无法注册功能窗口。");
     auto state=std::make_unique<Form>();
     state->models=models;
     state->worker=worker;
     state->index=workflow;
-    const auto title=std::wstring(L"Visual Analysis · ")+workflows[workflow].name;
-    const auto handle=CreateWindowExW(WS_EX_CONTROLPARENT,windowClass,title.c_str(),WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT,CW_USEDEFAULT,1000,760,parent,nullptr,type.hInstance,state.get());
+    const auto handle=CreateWindowExW(WS_EX_CONTROLPARENT,windowClass,workflows[workflow].name,WS_CHILD|WS_CLIPCHILDREN,
+        0,0,1000,580,parent,nullptr,type.hInstance,state.get());
     if(!handle) throw std::runtime_error("无法打开功能窗口。");
     state.release()->adopted=true;
-    ShowWindow(handle,SW_SHOWNORMAL);
+    return handle;
 }
 
 }

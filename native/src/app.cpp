@@ -1,8 +1,9 @@
 #include "local_images.h"
-#include "inference_backend.h"
 #include "portrait_video.h"
 #include "operations.h"
 #include "operations_window.h"
+#include "workspace_theme.h"
+#include "inference_backend.h"
 
 #include <algorithm>
 #include <array>
@@ -19,12 +20,24 @@
 
 namespace {
 namespace fs = std::filesystem;
+namespace theme = visual::theme;
 
 enum Control { chooseImage = 100, chooseMode, restoreImage, preferRecall, chooseCandidate, exportImage,
                firstWorkflow = 300 };
 constexpr UINT_PTR workerTimer = 1;
 constexpr UINT workerPollMs = 100;
 constexpr wchar_t className[] = L"VisualAnalysisNative";
+constexpr size_t restorationTab=3;
+constexpr int headingHeight=48;
+constexpr int navigationHeight=38;
+constexpr int contentTop=headingHeight+navigationHeight+12;
+constexpr int inset=12;
+struct Tab {const wchar_t* title;int page;};
+constexpr std::array tabs{
+    Tab{L"人脸检索",1},Tab{L"人车检测",2},Tab{L"车型识别",0},Tab{L"图像还原",-1},
+    Tab{L"视频车牌",5},Tab{L"以图搜索",3},Tab{L"语义搜索",4},Tab{L"人员库",6},Tab{L"标注库",7},Tab{L"设置",8},
+};
+constexpr size_t workflowCount=tabs.size()-1;
 
 struct Window {
     fs::path models;
@@ -38,6 +51,10 @@ struct Window {
     std::optional<cv::Point> dragStart;
     cv::Point dragEnd;
     HWND open{}, mode{}, restore{}, recall{}, list{}, save{}, status{};
+    std::array<HWND,tabs.size()> navigation{};
+    std::array<HWND,workflowCount> pages{};
+    size_t activeTab=restorationTab;
+    int page=-1;
 };
 
 std::wstring label(const visual::Candidate& item) {
@@ -81,22 +98,54 @@ std::optional<fs::path> selectFile(HWND owner, bool exporting, bool video = fals
     return std::nullopt;
 }
 
+int previewSplit(const RECT& client) {
+    return client.right*45/100;
+}
+
 void layout(HWND handle, const Window& state) {
     RECT client{};
     GetClientRect(handle, &client);
     const int width = client.right;
-    MoveWindow(state.open, 16, 14, 120, 30, TRUE);
-    MoveWindow(state.mode, 144, 14, 102, 140, TRUE);
-    MoveWindow(state.restore, 254, 14, 106, 30, TRUE);
-    MoveWindow(state.recall, 368, 14, 82, 30, TRUE);
-    MoveWindow(state.list, 458, 14, std::max(width - 606, 120), 160, TRUE);
-    MoveWindow(state.save, width - 138, 14, 122, 30, TRUE);
-    MoveWindow(state.status, 16, 57, std::max(width - 32, 1), 42, TRUE);
+    const auto space=width-2*inset;
+    for(size_t index=0;index<tabs.size();++index) {
+        const int left=inset+int(index)*space/int(tabs.size());
+        const int right=inset+int(index+1)*space/int(tabs.size());
+        MoveWindow(state.navigation[index],left,headingHeight,right-left,navigationHeight,TRUE);
+    }
+    const int toolY=contentTop+theme::panelHeaderHeight+8;
+    const int right=previewSplit(client)+inset+8;
+    MoveWindow(state.open,22,toolY,123,28,TRUE);
+    MoveWindow(state.mode,151,toolY+2,90,145,TRUE);
+    MoveWindow(state.recall,248,toolY,67,28,TRUE);
+    MoveWindow(state.restore,320,toolY,80,28,TRUE);
+    MoveWindow(state.list,right,toolY+2,std::max(width-150-right,1),166,TRUE);
+    MoveWindow(state.save,width-142,toolY,120,28,TRUE);
+    MoveWindow(state.status,22,client.bottom-33,std::max(width-44,1),25,TRUE);
+    if(state.page>=0 && state.pages[state.page]) {
+        MoveWindow(state.pages[state.page],inset,contentTop,space,std::max(int(client.bottom)-contentTop-inset,1),TRUE);
+    }
     InvalidateRect(handle, nullptr, TRUE);
 }
 
+void activate(HWND owner,Window& state,size_t tab,int page) {
+    // Create the destination before hiding the current workspace.
+    if(page>=0 && !state.pages[page]) state.pages[page]=visual::createWorkflowPage(owner,state.models,state.worker,page);
+    if(GetCapture()==owner) ReleaseCapture();
+    state.activeTab=tab;
+    state.page=page;
+    layout(owner,state);
+    for(size_t index=0;index<state.pages.size();++index) {
+        if(state.pages[index]) ShowWindow(state.pages[index],page==int(index)?SW_SHOW:SW_HIDE);
+    }
+    for(const auto item:{state.open,state.mode,state.restore,state.recall,state.list,state.save,state.status}) {
+        ShowWindow(item,page<0?SW_SHOW:SW_HIDE);
+    }
+    for(const auto item:state.navigation) InvalidateRect(item,nullptr,TRUE);
+}
+
 RECT fitImage(RECT area, const cv::Mat& image) {
-    area.top += 28;
+    InflateRect(&area,-10,-10);
+    area.top += theme::panelHeaderHeight+43;
     if (image.empty() || area.right <= area.left || area.bottom <= area.top) {
         return {};
     }
@@ -112,16 +161,18 @@ RECT fitImage(RECT area, const cv::Mat& image) {
 RECT sourceArea(HWND handle) {
     RECT client{};
     GetClientRect(handle, &client);
-    return {16, 107, client.right / 2 - 8, client.bottom - 16};
+    return {inset,contentTop,previewSplit(client),client.bottom-40};
 }
 
 void drawPreview(HDC dc, RECT area, const cv::Mat& image, const wchar_t* title) {
-    SetBkMode(dc, TRANSPARENT);
-    DrawTextW(dc, title, -1, &area, DT_TOP | DT_SINGLELINE | DT_CENTER);
+    theme::panel(dc,area,title);
+    const auto toolbarBottom=area.top+theme::panelHeaderHeight+43;
+    theme::fill(dc,{area.left+1,toolbarBottom,area.right-1,toolbarBottom+1},theme::border);
     const auto fitted = fitImage(area, image);
-    area.top += 28;
-    FillRect(dc, &area, GetSysColorBrush(COLOR_WINDOW));
     if (IsRectEmpty(&fitted)) {
+        theme::text(dc,wcscmp(title,L"原图")==0?L"选择本机图片开始":L"还原结果将显示在这里",
+                    {area.left+18,toolbarBottom+1,area.right-18,area.bottom-12},
+                    theme::Font::Body,theme::muted,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
         return;
     }
     cv::Mat bgra;
@@ -207,19 +258,23 @@ LRESULT CALLBACK dispatch(HWND handle, UINT message, WPARAM wparam, LPARAM lpara
         auto child = [&](const wchar_t* type, const wchar_t* name, DWORD style, UINT_PTR id) {
             auto result = CreateWindowExW(0, type, name, WS_CHILD | WS_VISIBLE | style, 0, 0, 0, 0,
                 handle, reinterpret_cast<HMENU>(id), nullptr, nullptr);
-            SendMessageW(result, WM_SETFONT, reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), TRUE);
+            theme::styleControl(result);
             return result;
         };
-        state->open = child(L"BUTTON", L"选择本机图片", WS_TABSTOP, chooseImage);
+        for(size_t index=0;index<tabs.size();++index) {
+            state->navigation[index]=child(L"BUTTON",tabs[index].title,WS_TABSTOP|BS_OWNERDRAW,firstWorkflow+index);
+        }
+        state->open = child(L"BUTTON", L"选择本机图片", WS_TABSTOP|BS_OWNERDRAW, chooseImage);
         state->mode = child(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, chooseMode);
         SendMessageW(state->mode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"人像"));
         SendMessageW(state->mode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"车牌"));
         SendMessageW(state->mode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"人像视频"));
         SendMessageW(state->mode, CB_SETCURSEL, 0, 0);
-        state->restore = child(L"BUTTON", L"离线还原", WS_TABSTOP, restoreImage);
+        state->restore = child(L"BUTTON", L"离线还原", WS_TABSTOP|BS_OWNERDRAW, restoreImage);
         state->recall = child(L"BUTTON", L"偏召回", BS_AUTOCHECKBOX | WS_TABSTOP, preferRecall);
         state->list = child(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, chooseCandidate);
-        state->save = child(L"BUTTON", L"保存候选 PNG", WS_TABSTOP, exportImage);
+        SendMessageW(state->list,CB_SETDROPPEDWIDTH,460,0);
+        state->save = child(L"BUTTON", L"保存候选 PNG", WS_TABSTOP|BS_OWNERDRAW, exportImage);
         state->status = child(L"STATIC", L"选择一张本机图片，使用 PCFlow 和 GFPGAN 生成人像还原候选。", SS_LEFT, 0);
         refresh(handle, *state);
         layout(handle, *state);
@@ -230,13 +285,35 @@ LRESULT CALLBACK dispatch(HWND handle, UINT message, WPARAM wparam, LPARAM lpara
         return 0;
     case WM_GETMINMAXINFO: {
         auto* info = reinterpret_cast<MINMAXINFO*>(lparam);
-        info->ptMinTrackSize = {760, 400};
+        info->ptMinTrackSize = {950, 670};
         return 0;
+    }
+    case WM_DRAWITEM: {
+        const auto* item=reinterpret_cast<const DRAWITEMSTRUCT*>(lparam);
+        if(item->CtlID>=firstWorkflow && item->CtlID<firstWorkflow+tabs.size()) {
+            theme::drawButton(*item,item->CtlID-firstWorkflow==state->activeTab
+                ?theme::Button::SelectedNavigation:theme::Button::Navigation);
+        } else {
+            theme::drawButton(*item,item->CtlID==restoreImage?theme::Button::Primary:theme::Button::Quiet);
+        }
+        return TRUE;
+    }
+    case WM_CTLCOLORSTATIC:
+    case WM_CTLCOLORBTN:
+    case WM_CTLCOLOREDIT:
+    case WM_CTLCOLORLISTBOX: {
+        const auto dc=reinterpret_cast<HDC>(wparam);
+        const auto control=reinterpret_cast<HWND>(lparam);
+        SetTextColor(dc,control==state->status?theme::muted:theme::textColor);
+        SetBkColor(dc,theme::white);
+        return reinterpret_cast<LRESULT>(theme::surface());
     }
     case visual::loadSearchRestoration: {
         if(state->work.valid() || !lparam) return FALSE;
         const auto& selected=*reinterpret_cast<const visual::SearchRestorationInput*>(lparam);
         if(selected.image.empty()) return FALSE;
+        activate(handle,*state,restorationTab,-1);
+        SetFocus(state->open);
         SendMessageW(state->mode,CB_SETCURSEL,0,0);
         state->original=selected.image;
         state->videoSource.clear();
@@ -250,8 +327,9 @@ LRESULT CALLBACK dispatch(HWND handle, UINT message, WPARAM wparam, LPARAM lpara
     case WM_COMMAND:
         try {
             const auto command=LOWORD(wparam);
-            if(command>=firstWorkflow && command<firstWorkflow+visual::workflowNames().size()) {
-                visual::openWorkflow(handle,state->models,state->worker,command-firstWorkflow);
+            if(command>=firstWorkflow && command<firstWorkflow+tabs.size()) {
+                const auto tab=command-firstWorkflow;
+                activate(handle,*state,tab,tabs[tab].page);
                 return 0;
             }
             switch (LOWORD(wparam)) {
@@ -333,13 +411,15 @@ LRESULT CALLBACK dispatch(HWND handle, UINT message, WPARAM wparam, LPARAM lpara
                 break;
             }
         } catch (const std::exception& error) {
-            SetWindowTextW(state->status, visual::wide(error.what()).c_str());
+            const auto details=visual::wide(error.what());
+            if(LOWORD(wparam)>=firstWorkflow) MessageBoxW(handle,details.c_str(),L"视频图像分析",MB_OK|MB_ICONERROR);
+            else SetWindowTextW(state->status,details.c_str());
         }
         return 0;
     case WM_LBUTTONDOWN:
     case WM_MOUSEMOVE:
     case WM_LBUTTONUP: {
-        if (state->work.valid() || state->original.empty() || videoMode(*state)) break;
+        if (state->page>=0 || state->work.valid() || state->original.empty() || videoMode(*state)) break;
         const auto area = fitImage(sourceArea(handle), state->original);
         if (IsRectEmpty(&area)) break;
         const POINT cursor{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
@@ -404,21 +484,45 @@ LRESULT CALLBACK dispatch(HWND handle, UINT message, WPARAM wparam, LPARAM lpara
         const auto dc = BeginPaint(handle, &paint);
         RECT client{};
         GetClientRect(handle, &client);
-        const auto* candidate = selection(*state);
-        drawPreview(dc, sourceArea(handle), state->original, L"原图");
-        drawRegion(dc, handle, *state);
-        drawPreview(dc, {client.right / 2 + 8, 107, client.right - 16, client.bottom - 16},
-                    candidate ? candidate->pixels : cv::Mat{}, L"还原候选");
+        theme::fill(dc,client,theme::canvas);
+        theme::fill(dc,{0,0,client.right,headingHeight},theme::blue);
+        theme::fill(dc,{0,headingHeight,client.right,headingHeight+navigationHeight},theme::blueDark);
+        theme::text(dc,L"视频图像分析",{22,0,client.right-150,headingHeight},theme::Font::Brand,
+                    theme::white,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
+        theme::text(dc,visual::inferenceBackendLabel().c_str(),
+                    {client.right*2/5,0,client.right-22,headingHeight},theme::Font::Body,
+                    theme::white,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS);
+        if(state->page<0) {
+            theme::card(dc,{inset,client.bottom-36,client.right-inset,client.bottom-8});
+            const auto* candidate = selection(*state);
+            drawPreview(dc,sourceArea(handle),state->original,L"原图");
+            drawRegion(dc,handle,*state);
+            drawPreview(dc,{previewSplit(client)+inset,contentTop,client.right-inset,client.bottom-40},
+                        candidate?candidate->pixels:cv::Mat{},L"还原候选");
+        }
         EndPaint(handle, &paint);
         return 0;
     }
-    case WM_CLOSE:
-        if (state->work.valid()) {
-            if (state->videoWork) state->videoWork->cancel = true;
-            SetWindowTextW(state->status, L"当前模型正在本机运行，完成后可关闭。");
+    case WM_CLOSE: {
+        auto pendingTab=tabs.size();
+        for(size_t index=0;index<tabs.size();++index) {
+            const int page=tabs[index].page;
+            if(page>=0 && state->pages[page] && !visual::requestWorkflowClose(state->pages[page])) {
+                if(pendingTab==tabs.size() || index==state->activeTab) pendingTab=index;
+            }
+        }
+        if(state->work.valid()) {
+            if(state->videoWork) state->videoWork->cancel=true;
+            SetWindowTextW(state->status,L"当前模型正在本机运行，完成后可关闭。");
+            pendingTab=restorationTab;
+        }
+        if(pendingTab!=tabs.size()) {
+            activate(handle,*state,pendingTab,tabs[pendingTab].page);
+            SetFocus(state->navigation[pendingTab]);
             return 0;
         }
         break;
+    }
     case WM_DESTROY:
         PostQuitMessage(0);
         return 0;
@@ -432,30 +536,28 @@ int showWindow(HINSTANCE module, int show, const fs::path& models) {
     windowClass.lpfnWndProc = dispatch;
     windowClass.lpszClassName = className;
     windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    windowClass.hbrBackground = GetSysColorBrush(COLOR_BTNFACE);
+    windowClass.hbrBackground = theme::background();
+    windowClass.style = CS_HREDRAW | CS_VREDRAW;
     if (!RegisterClassW(&windowClass)) {
         throw std::runtime_error("Could not register the visual analysis window.");
     }
     Window state;
     state.models = models;
     state.worker = applicationDirectory() / L"VehicleCatalogueWorker.exe";
-    const auto menu=CreateMenu();
-    for(size_t index=0;index<visual::workflowNames().size();++index) {
-        AppendMenuW(menu,MF_STRING,firstWorkflow+index,visual::workflowNames()[index]);
-    }
-    const auto caption=L"Visual Analysis · "+visual::inferenceBackendLabel();
-    const auto handle = CreateWindowExW(0, className, caption.c_str(),
-        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 1060, 700, nullptr, menu, module, &state);
+    const auto handle = CreateWindowExW(WS_EX_CONTROLPARENT, className, L"Visual Analysis",
+        WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT, 1320, 850, nullptr, nullptr, module, &state);
     if (!handle) {
-        DestroyMenu(menu);
         throw std::runtime_error("Could not create the visual analysis window.");
     }
+    theme::titleBar(handle);
     ShowWindow(handle, show);
     MSG message{};
     BOOL status{};
     while ((status = GetMessageW(&message, nullptr, 0, 0)) > 0) {
-        TranslateMessage(&message);
-        DispatchMessageW(&message);
+        if(!IsDialogMessageW(handle,&message)) {
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
     }
     return status < 0 ? 2 : static_cast<int>(message.wParam);
 }

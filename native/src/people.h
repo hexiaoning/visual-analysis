@@ -3,11 +3,13 @@
 #include "vision_models.h"
 #include <atomic>
 #include <map>
+#include <optional>
 
 namespace visual {
 
 struct PersonFilter {
-    std::string library,sex,region;
+    std::optional<std::vector<std::string>> libraries;
+    std::string sex,region;
     int minimum=-1,maximum=-1;
     static PersonFilter from(const Json& payload);
     bool matches(std::string idCard) const;

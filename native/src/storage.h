@@ -38,6 +38,7 @@ public:
 
     void script(const char* sql);
     Json query(const char* sql, std::initializer_list<Json> arguments = {});
+    Json query(const char* sql, std::span<const Json> arguments);
     int changes() const;
     int64_t lastId() const;
 private:

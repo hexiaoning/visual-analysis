@@ -1,7 +1,6 @@
 #pragma once
 
 #include <filesystem>
-#include <span>
 #include <Windows.h>
 #include <opencv2/core.hpp>
 
@@ -14,7 +13,7 @@ struct SearchRestorationInput {
     cv::Rect region;
 };
 
-std::span<const wchar_t* const> workflowNames();
-void openWorkflow(HWND parent,const std::filesystem::path& models,const std::filesystem::path& worker,size_t workflow);
+HWND createWorkflowPage(HWND parent,const std::filesystem::path& models,const std::filesystem::path& worker,size_t workflow);
+bool requestWorkflowClose(HWND page);
 
 }

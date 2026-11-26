@@ -59,13 +59,13 @@ $Arguments = @(
     (Join-Path $Sources "people.cpp"),
     (Join-Path $Sources "vehicle.cpp"), (Join-Path $Sources "operations.cpp"), (Join-Path $Sources "operations_window.cpp"),
     (Join-Path $Sources "media_operations.cpp"), (Join-Path $Sources "plate_video.cpp"),
-    (Join-Path $Sources "preview_native.cpp"), (Join-Path $Sources "inference_backend.cpp"),
+    (Join-Path $Sources "preview_native.cpp"), (Join-Path $Sources "workspace_theme.cpp"), (Join-Path $Sources "inference_backend.cpp"),
     (Join-Path $Sources "openvino_model.cpp"),
     "/link", "/subsystem:windows", "/incremental:no", "/libpath:$MsvcDirectory\lib\x64",
     "/libpath:$SdkLink\ucrt\x64", "/libpath:$SdkLink\um\x64",
     $OrtLibrary, $OpenCvLib[0].FullName, (Join-Path $OpenVinoDirectory "libs\openvino.lib"), "/libpath:$FFmpegDirectory\lib",
     "user32.lib", "gdi32.lib", "comdlg32.lib", "shell32.lib", "bcrypt.lib", "winsqlite3.lib", "normaliz.lib",
-    "crypt32.lib", "ole32.lib", "uuid.lib", "dxgi.lib", "d3d12.lib"
+    "crypt32.lib", "ole32.lib", "uuid.lib", "dwmapi.lib", "dxgi.lib", "d3d12.lib"
 )
 $Arguments += @($MediaLibraries | ForEach-Object { "$_.lib" })
 & $Cl @Arguments

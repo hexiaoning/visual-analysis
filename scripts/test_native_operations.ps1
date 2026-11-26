@@ -82,6 +82,27 @@ try {
     Require (@($Mixed.failures).Count -eq 0 -and @($Mixed.hits).Count -eq 2 -and
         @($Mixed.hits | Where-Object accepted | Select-Object -ExpandProperty source -Unique).Count -eq 2) "Mixed image and video sources did not both match in one batch."
     $Checks.face_mixed_sources = $true
+    $Libraries = @(Invoke-NativeOperation "library.add" @{ name = "Native acceptance review library" })
+    $Review = $Libraries | Where-Object name -eq "Native acceptance review library"
+    $Members = @(Invoke-NativeOperation "person.add" @{
+        name = "Native acceptance review fixture"; id_card = "fixture-" + [Guid]::NewGuid().ToString("N")
+        photos = @($FaceImage); library_ids = @($Review.id)
+    } "person-add-review")
+    $Reviewer = $Members | Where-Object name -eq "Native acceptance review fixture"
+    $Combined = @(Invoke-NativeOperation "face.gallery" @{
+        input = $FaceImage; library_ids = @("default", $Review.id, $Review.id)
+    } "face-gallery-multiple-libraries")
+    Require ($Combined.Count -eq 2 -and $Person.id -in $Combined.person_id -and $Reviewer.id -in $Combined.person_id) "Gallery did not search the union of selected libraries."
+    $Restricted = Invoke-NativeOperation "face.scan" @{
+        source = $TrackFixture; library_ids = @($Review.id)
+    } "face-track-selected-library"
+    Require (@($Restricted.hits).Count -eq 1 -and $Restricted.hits[0].accepted -and
+        $Restricted.hits[0].candidate.person_id -eq $Reviewer.id) "Video search matched a candidate outside the selected library."
+    $EmptyScope = @(Invoke-NativeOperation "face.gallery" @{
+        input = $FaceImage; library_ids = @()
+    } "face-gallery-empty-scope")
+    Require ($EmptyScope.Count -eq 0) "An empty library selection searched the whole gallery."
+    $Checks.face_library_selection = $true
     $Hit = $Scanned.hits[0]
     $Mark = Invoke-NativeOperation "annotation.write" @{
         session_id = $Hit.session_id; source = $Hit.source; track_id = $Hit.track_id; frame_index = $Hit.frame_index

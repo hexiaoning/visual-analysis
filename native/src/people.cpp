@@ -41,12 +41,28 @@ Json settings(const fs::path& root) {
     return fs::exists(config) ? readJson(config) : Json::object();
 }
 
+Json queryPeopleInScope(Database& db,std::string sql,const PersonFilter& filter,
+                        std::vector<Json> parameters={},std::string_view order={}) {
+    if(filter.libraries) {
+        if(filter.libraries->empty()) return Json::array();
+        sql+=" AND EXISTS(SELECT 1 FROM person_libraries l WHERE p.id=l.person_id AND l.library_id IN (";
+        const char* placeholder="?";
+        for(const auto& id:*filter.libraries) {
+            sql+=placeholder;
+            parameters.push_back(id);
+            placeholder=",?";
+        }
+        sql+="))";
+    }
+    sql+=order;
+    return db.query(sql.c_str(),std::span<const Json>(parameters));
+}
+
 Json listPeople(Database& db,const PersonFilter& filter) {
-    auto people=db.query(R"sql(
+    auto people=queryPeopleInScope(db,R"sql(
         SELECT p.*,COUNT(s.id) AS photo_count FROM persons p LEFT JOIN face_samples s ON p.id=s.person_id
-        WHERE (?='' OR EXISTS(SELECT 1 FROM person_libraries l WHERE p.id=l.person_id AND l.library_id=?))
-        GROUP BY p.id ORDER BY p.name,p.id
-    )sql",{filter.library,filter.library});
+        WHERE 1
+    )sql",filter,{}," GROUP BY p.id ORDER BY p.name,p.id");
     std::erase_if(people.get_ref<Json::array_t&>(),[&](const auto& person){
         return !filter.matches(person.at("id_card").template get<std::string>());
     });
@@ -296,8 +312,24 @@ Json annotationOperation(Database& db,const std::string& action,const Json& payl
 }
 
 PersonFilter PersonFilter::from(const Json& request) {
-    PersonFilter filter{text(request,"library_id"),text(request,"sex"),text(request,"region_prefix"),
+    PersonFilter filter{std::nullopt,text(request,"sex"),text(request,"region_prefix"),
                         request.value("min_age",-1),request.value("max_age",-1)};
+    if(request.contains("library_ids")) {
+        const auto& ids=request.at("library_ids");
+        if(!ids.is_array()) throw std::invalid_argument("目标人脸库列表无效。");
+        std::set<std::string> unique;
+        for(const auto& id:ids) {
+            if(!id.is_string()) throw std::invalid_argument("目标人脸库列表无效。");
+            const auto& value=id.get_ref<const std::string&>();
+            if(value.empty() || value.find('\0')!=std::string::npos || wide(value).size()>200) {
+                throw std::invalid_argument("目标人脸库编号无效。");
+            }
+            unique.insert(value);
+        }
+        filter.libraries.emplace(unique.begin(),unique.end());
+    } else if(auto id=text(request,"library_id");!id.empty()) {
+        filter.libraries=std::vector<std::string>{std::move(id)};
+    }
     const auto digits=[](char c){return c>='0'&&c<='9';};
     const auto length=filter.region.size();
     if((!filter.sex.empty() && filter.sex!="男" && filter.sex!="女") ||
@@ -334,11 +366,10 @@ bool PersonFilter::matches(std::string idCard) const {
 
 PreparedFaceGallery::PreparedFaceGallery(Database& database,const FaceSettings& config,const PersonFilter& filter)
     :threshold_(config.matchThreshold),margin_(config.margin) {
-    const auto rows=database.query(R"sql(
+    const auto rows=queryPeopleInScope(database,R"sql(
         SELECT p.id,p.name,p.id_card,s.image_path,s.embedding,s.embedding_dim,s.quality FROM face_samples s
-        JOIN persons p ON p.id=s.person_id WHERE s.model_id=? AND
-        (?='' OR EXISTS(SELECT 1 FROM person_libraries l WHERE l.person_id=p.id AND l.library_id=?))
-    )sql",{config.modelId(),filter.library,filter.library});
+        JOIN persons p ON p.id=s.person_id WHERE s.model_id=?
+    )sql",filter,{config.modelId()});
     for (const auto& row:rows) {
         if(!filter.matches(row.at("id_card").get<std::string>())) continue;
         auto value=readFeature(row.at("embedding"),row.at("embedding_dim").get<size_t>());

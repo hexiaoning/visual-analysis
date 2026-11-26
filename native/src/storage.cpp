@@ -136,6 +136,10 @@ void Database::script(const char* sql) {
 }
 
 Json Database::query(const char* sql, std::initializer_list<Json> arguments) {
+    return query(sql,std::span<const Json>(arguments.begin(),arguments.size()));
+}
+
+Json Database::query(const char* sql, std::span<const Json> arguments) {
     sqlite3_stmt* raw = nullptr;
     if (sqlite3_prepare_v2(handle_, sql, -1, &raw, nullptr) != SQLITE_OK) {
         throw std::runtime_error(sqlite3_errmsg(handle_));
@@ -147,7 +151,7 @@ Json Database::query(const char* sql, std::initializer_list<Json> arguments) {
             ", received "+std::to_string(arguments.size())+"): "+sql);
     }
     for (size_t index = 0; index < arguments.size(); ++index) {
-        const auto& value = arguments.begin()[index];
+        const auto& value = arguments[index];
         const int key = static_cast<int>(index + 1);
         int result = SQLITE_MISMATCH;
         if (value.is_null()) result = sqlite3_bind_null(raw, key);
