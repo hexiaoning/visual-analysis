@@ -294,6 +294,19 @@ json runModelViewAlignment(const json& rows, const fs::path& output) {
     return results;
 }
 
+json runGeneratedDetailMix(const json& rows, const fs::path& output) {
+    json results = json::object();
+    for (const auto& [key, row] : rows.items()) {
+        validateSample(key);
+        const auto anchor = load(row.at("anchor"));
+        const auto generated = load(row.at("generated"));
+        const auto filename = "mixed-" + key + ".png";
+        writeImage(output / filename, visual::screen::mixGeneratedDetail(anchor, generated));
+        results[key] = filename;
+    }
+    return results;
+}
+
 json runCaptureToneGuard(const nlohmann::ordered_json& rows, const fs::path& output, double gap) {
     json choices = json::object();
     for (auto row = rows.begin(); row != rows.end(); ++row) {
@@ -354,12 +367,15 @@ int wmain(int argc, wchar_t** argv) {
         const bool tone = mode == L"--capture-tone-guard";
         const bool grid = mode == L"--grid-fusion";
         const bool alignViews = mode == L"--align-model-views";
-        if (argc != 3 && !tone && !grid && !alignViews) {
+        const bool mixDetails = mode == L"--mix-generated-detail";
+        const bool namedMode = tone || grid || alignViews || mixDetails;
+        if (argc != 3 && !namedMode) {
             throw std::invalid_argument(
-                "Usage: PortraitScreen.exe [--capture-tone-guard | --grid-fusion | --align-model-views] "
+                "Usage: PortraitScreen.exe [--capture-tone-guard | --grid-fusion | --align-model-views | "
+                "--mix-generated-detail] "
                 "manifest.json output-directory");
         }
-        const int firstPath = tone || grid || alignViews ? 2 : 1;
+        const int firstPath = namedMode ? 2 : 1;
         std::ifstream manifest(fs::path(argv[firstPath]), std::ios::binary);
         if (!manifest) {
             throw std::runtime_error("Cannot open the manifest");
@@ -369,11 +385,11 @@ int wmain(int argc, wchar_t** argv) {
         json results;
         if (grid) {
             results = {{"samples", visual::screen::runGridFusion(manifest, output)}};
-        } else if (alignViews) {
+        } else if (alignViews || mixDetails) {
             const auto config = json::parse(manifest);
             const auto& rows = samples(config);
             createOutput(output);
-            results = runModelViewAlignment(rows, output);
+            results = alignViews ? runModelViewAlignment(rows, output) : runGeneratedDetailMix(rows, output);
         } else if (tone) {
             const auto config = nlohmann::ordered_json::parse(manifest);
             const auto& rows = samples(config);

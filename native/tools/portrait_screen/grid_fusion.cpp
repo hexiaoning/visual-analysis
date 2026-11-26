@@ -233,6 +233,39 @@ void save(const fs::path& file, const cv::Mat& pixels) {
 }
 }
 
+cv::Mat mixGeneratedDetail(const cv::Mat& anchor, const cv::Mat& generated) {
+    const cv::Size expected(Side, Side);
+    for (const auto* image : {&anchor, &generated}) {
+        if (image->size() != expected || image->type() != CV_8UC3) {
+            throw std::invalid_argument("Expected aligned 512x512 color portraits");
+        }
+    }
+
+    cv::Mat anchorFloat, generatedFloat;
+    anchor.convertTo(anchorFloat, CV_32FC3, 1. / 255.);
+    generated.convertTo(generatedFloat, CV_32FC3, 1. / 255.);
+    const auto yAnchor = luminance(anchorFloat);
+    const auto yGenerated = luminance(generatedFloat);
+    const cv::Mat delta = (yGenerated - yAnchor) - (blur(yGenerated, 4.) - blur(yAnchor, 4.));
+
+    cv::Mat output = anchor.clone();
+    for (int y = 0; y < Side; ++y) {
+        const auto* correction = delta.ptr<float>(y);
+        const auto* original = anchor.ptr<cv::Vec3b>(y);
+        auto* target = output.ptr<cv::Vec3b>(y);
+        const float dy = (y - 292.f) / 190.f;
+        for (int x = 0; x < Side; ++x) {
+            const float dx = (x - 256.f) / 184.f;
+            const float fade = std::clamp((1.f - dx * dx - dy * dy) / .33f, 0.f, 1.f);
+            const float detail = 255.f * std::clamp(.4f * fade * correction[x], -.075f, .075f);
+            for (int channel = 0; channel < 3; ++channel) {
+                target[x][channel] = cv::saturate_cast<unsigned char>(original[x][channel] + detail);
+            }
+        }
+    }
+    return output;
+}
+
 std::size_t runGridFusion(std::istream& manifest, const fs::path& output) {
     const auto plan = Json::parse(manifest);
     const auto& rows = plan.at("rows");

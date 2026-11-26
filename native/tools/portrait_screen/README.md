@@ -118,3 +118,13 @@ $exe = "$env:TEMP\portrait-screen\PortraitScreen.exe"
 `rows` 中每个样例提供 `observed` 原始脸区、`anchor` 稳定底图和 `views` 三个模型输出路径。所有输入是同一脸区的 512×512 彩色图，已恢复到同一方向。在半分辨率上用两个频带比较四个五官外围分区。使用当前原图与底图共同支持的整脸位移，回到 512 像素网格时每轴最多 3 像素。
 
 每个样例目录保存原三图中值 `median.png`、整脸平移中值 `warp-whole.png` 及逐图对齐后的中值 `align-then-median.png`。`results.json` 的 `whole` 和 `views` 记录应用的采样位移。值为 `null` 对应沿用原坐标。该命令只读取本地图像并在 CPU 执行。
+
+## 在去纹底图上融合生成图的亮度细节
+
+```powershell
+& $exe --mix-generated-detail D:\cases\detail-mix.json D:\cases\detail-mix-run-01
+```
+
+`rows` 中每个样例提供 `anchor` 和 `generated`，分别指向 512×512 的去纹底图与同一坐标下的生成图。两图都应使用彩色像素。工具取两张图相对 σ 为 4 像素高斯低通的亮度差，在椭圆脸区按固定比例 0.40 和软边权重混入底图，单通道改变量限制在约 19 个 8 位灰阶。
+
+每个样例保存 `mixed-<样例名>.png`，`results.json` 记录对应文件名。命令在 CPU 上执行，结果可追加到同一案例的拍摄像素回放清单进行评测。
