@@ -294,14 +294,16 @@ json runModelViewAlignment(const json& rows, const fs::path& output) {
     return results;
 }
 
-json runGeneratedDetailMix(const json& rows, const fs::path& output) {
+json runGeneratedDetailMix(const json& rows, const fs::path& output, bool transferBands) {
     json results = json::object();
     for (const auto& [key, row] : rows.items()) {
         validateSample(key);
         const auto anchor = load(row.at("anchor"));
         const auto generated = load(row.at("generated"));
         const auto filename = "mixed-" + key + ".png";
-        writeImage(output / filename, visual::screen::mixGeneratedDetail(anchor, generated));
+        const auto mixed = transferBands ? visual::screen::transferLuminanceBands(anchor, generated)
+                                         : visual::screen::mixGeneratedDetail(anchor, generated);
+        writeImage(output / filename, mixed);
         results[key] = filename;
     }
     return results;
@@ -388,8 +390,13 @@ int wmain(int argc, wchar_t** argv) {
         } else if (alignViews || mixDetails) {
             const auto config = json::parse(manifest);
             const auto& rows = samples(config);
+            const auto method = mixDetails ? config.value("method", std::string("generated-detail")) : "";
+            if (mixDetails && method != "generated-detail" && method != "band-transfer") {
+                throw std::invalid_argument("Unknown detail mix method");
+            }
             createOutput(output);
-            results = alignViews ? runModelViewAlignment(rows, output) : runGeneratedDetailMix(rows, output);
+            results = alignViews ? runModelViewAlignment(rows, output)
+                                 : runGeneratedDetailMix(rows, output, method == "band-transfer");
         } else if (tone) {
             const auto config = nlohmann::ordered_json::parse(manifest);
             const auto& rows = samples(config);

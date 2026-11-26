@@ -6,9 +6,11 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <numbers>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -20,6 +22,7 @@ namespace fs = std::filesystem;
 using Json = nlohmann::json;
 
 constexpr int Side = 512;
+constexpr int BandPadding = 52;
 constexpr std::size_t Views = 8;
 using Planes = std::array<cv::Mat, Views>;
 using Bands = std::array<cv::Mat, 3>;
@@ -34,6 +37,51 @@ cv::Mat luminance(const cv::Mat& rgb) {
     cv::Mat gray;
     cv::cvtColor(rgb, gray, cv::COLOR_BGR2GRAY);
     return gray;
+}
+
+void validateAlignedPair(const cv::Mat& anchor, const cv::Mat& donor) {
+    const cv::Size expected(Side, Side);
+    for (const auto* image : {&anchor, &donor}) {
+        if (image->size() != expected || image->type() != CV_8UC3) {
+            throw std::invalid_argument("Expected aligned 512x512 color portraits");
+        }
+    }
+}
+
+cv::Mat luminanceSpectrum(const cv::Mat& image) {
+    cv::Mat color, padded, spectrum;
+    image.convertTo(color, CV_32FC3, 1. / 255.);
+    cv::copyMakeBorder(luminance(color), padded, BandPadding, BandPadding, BandPadding, BandPadding,
+                       cv::BORDER_REFLECT_101);
+    cv::dft(padded, spectrum, cv::DFT_COMPLEX_OUTPUT);
+    return spectrum;
+}
+
+cv::Mat bandResponses() {
+    constexpr int size = Side + 2 * BandPadding;
+    constexpr std::array<double, 5> sigmas{.40, .92, 1.70, 3.0, 5.4};
+    constexpr std::array<double, 4> gains{.30, .26, .17, .04};
+    constexpr double factor = -2. * std::numbers::pi * std::numbers::pi / (size * size);
+    cv::Mat response(size, size, CV_32FC2);
+    for (int y = 0; y < size; ++y) {
+        auto* row = response.ptr<cv::Vec2f>(y);
+        const auto fy = std::min(y, size - y);
+        for (int x = 0; x < size; ++x) {
+            const auto fx = std::min(x, size - x);
+            const auto radius = factor * (fx * fx + fy * fy);
+            std::array<double, sigmas.size()> filters{};
+            for (size_t i = 0; i < sigmas.size(); ++i) {
+                filters[i] = std::exp(radius * sigmas[i] * sigmas[i]);
+            }
+            const auto band = filters.front() - filters.back();
+            auto addition = 0.;
+            for (size_t i = 0; i < gains.size(); ++i) {
+                addition += gains[i] * (filters[i] - filters[i + 1]);
+            }
+            row[x] = cv::Vec2f(static_cast<float>(band), static_cast<float>(band + addition));
+        }
+    }
+    return response;
 }
 
 cv::Mat blur(const cv::Mat& pixels, double sigma) {
@@ -234,12 +282,7 @@ void save(const fs::path& file, const cv::Mat& pixels) {
 }
 
 cv::Mat mixGeneratedDetail(const cv::Mat& anchor, const cv::Mat& generated) {
-    const cv::Size expected(Side, Side);
-    for (const auto* image : {&anchor, &generated}) {
-        if (image->size() != expected || image->type() != CV_8UC3) {
-            throw std::invalid_argument("Expected aligned 512x512 color portraits");
-        }
-    }
+    validateAlignedPair(anchor, generated);
 
     cv::Mat anchorFloat, generatedFloat;
     anchor.convertTo(anchorFloat, CV_32FC3, 1. / 255.);
@@ -264,6 +307,38 @@ cv::Mat mixGeneratedDetail(const cv::Mat& anchor, const cv::Mat& generated) {
         }
     }
     return output;
+}
+
+cv::Mat transferLuminanceBands(const cv::Mat& anchor, const cv::Mat& donor) {
+    validateAlignedPair(anchor, donor);
+    static const auto responses = bandResponses();
+    const auto base = luminanceSpectrum(anchor);
+    auto difference = luminanceSpectrum(donor);
+    for (int y = 0; y < difference.rows; ++y) {
+        auto* d = difference.ptr<cv::Vec2f>(y);
+        const auto* a = base.ptr<cv::Vec2f>(y);
+        const auto* w = responses.ptr<cv::Vec2f>(y);
+        for (int x = 0; x < difference.cols; ++x) {
+            d[x] = d[x] * w[x][1] - a[x] * w[x][0];
+        }
+    }
+    cv::Mat correction;
+    cv::idft(difference, correction, cv::DFT_SCALE | cv::DFT_REAL_OUTPUT);
+    cv::Mat result = anchor.clone();
+    for (int y = 0; y < Side; ++y) {
+        auto* row = result.ptr<cv::Vec3b>(y);
+        const auto* detail = correction.ptr<float>(y + BandPadding) + BandPadding;
+        const auto dy = (y - 288.f) / 203.f;
+        for (int x = 0; x < Side; ++x) {
+            const auto dx = (x - 256.f) / 196.f;
+            const auto fade = std::clamp((1.f - dx * dx - dy * dy) / .26f, 0.f, 1.f);
+            const auto addition = std::clamp(detail[x], -.13f, .13f) * fade * 255.f;
+            for (int channel = 0; channel < 3; ++channel) {
+                row[x][channel] = cv::saturate_cast<unsigned char>(row[x][channel] + addition);
+            }
+        }
+    }
+    return result;
 }
 
 std::size_t runGridFusion(std::istream& manifest, const fs::path& output) {
