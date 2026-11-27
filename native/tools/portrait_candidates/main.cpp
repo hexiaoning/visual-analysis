@@ -1,4 +1,5 @@
 #include "portrait_selection.h"
+#include "appearance_cover.h"
 #include "exposure_normalizer.h"
 #include "fine_band_limit.h"
 #include "geometry_calibration.h"
@@ -232,9 +233,8 @@ void write_result(const fs::path &file, const Result &r, bool fit_duplicate, con
         throw std::runtime_error("Failed to save selection.json");
 }
 
-fs::path publish(const fs::path &directory, const cv::Mat &cf, const cv::Mat &amd, const Result &r,
-                 bool fit_duplicate, const std::vector<Route> &selection,
-                 std::optional<size_t> compared_alternate = std::nullopt) {
+template <typename WriteRun>
+fs::path publish_run(const fs::path &directory, WriteRun write_run) {
     fs::create_directories(directory);
     fs::path pending, complete;
     do {
@@ -244,6 +244,21 @@ fs::path publish(const fs::path &directory, const cv::Mat &cf, const cv::Mat &am
         pending = directory / (name + ".tmp");
     } while (fs::exists(complete) || !fs::create_directory(pending));
     try {
+        write_run(pending);
+        fs::rename(pending, complete);
+    } catch (...) {
+        // Only remove the private, uniquely created staging folder for this call.
+        std::error_code ec;
+        fs::remove_all(pending, ec);
+        throw;
+    }
+    return complete;
+}
+
+fs::path publish(const fs::path &directory, const cv::Mat &cf, const cv::Mat &amd, const Result &r,
+                 bool fit_duplicate, const std::vector<Route> &selection,
+                 std::optional<size_t> compared_alternate = std::nullopt) {
+    return publish_run(directory, [&](const fs::path &pending) {
         write_image(pending / "observed-luminance.png", r.observed_image);
         Json outputs = Json::array();
         for (Route route : selection) {
@@ -260,14 +275,38 @@ fs::path publish(const fs::path &directory, const cv::Mat &cf, const cv::Mat &am
             outputs.push_back(std::move(entry));
         }
         write_result(pending / "selection.json", r, fit_duplicate, selection, outputs, compared_alternate);
-        fs::rename(pending, complete);
-    } catch (...) {
-        // Only remove the private, uniquely created staging folder for this call.
-        std::error_code ec;
-        fs::remove_all(pending, ec);
-        throw;
-    }
-    return complete;
+    });
+}
+
+fs::path cover_shapes(wchar_t **argv, int argc) {
+    cv::setNumThreads(1);
+    const std::wstring value(argv[2]);
+    size_t used = 0;
+    const double radius = std::stod(value, &used);
+    if (used != value.size())
+        throw std::invalid_argument("Invalid appearance cover radius");
+    std::vector<cv::Mat> portraits;
+    portraits.reserve(static_cast<size_t>(argc - 4));
+    for (int arg = 4; arg < argc; ++arg)
+        portraits.push_back(read_image(argv[arg]));
+    const auto cover = portrait_selection::cover_appearances(portraits, radius);
+    return publish_run(argv[3], [&](const fs::path &pending) {
+        Json outputs = Json::array();
+        for (const auto index : cover.representatives) {
+            const std::string filename = "candidate-" + std::to_string(outputs.size() + 1) + ".png";
+            write_image(pending / filename, portraits[index]);
+            outputs.push_back({{"input_index", index}, {"png", filename}});
+        }
+        Json report = {
+            {"mode", "shape-cover"}, {"radius", radius}, {"nearest_input_index", cover.nearest},
+            {"measured_distance", cover.distances}, {"outputs", std::move(outputs)},
+        };
+        std::ofstream receipt(pending / "selection.json", std::ios::binary);
+        receipt << report.dump(2) << '\n';
+        receipt.close();
+        if (!receipt)
+            throw std::runtime_error("Could not save shape cover report");
+    });
 }
 
 enum class ReplayChoice { primary, distinct_pair, replacement };
@@ -335,6 +374,7 @@ int wmain(int argc, wchar_t **argv) {
             "PortraitCandidates.exe --compose-local-donors weights.json baseline.png first.png second.png "
             "third.png output.png\n"
             "PortraitCandidates.exe --combine-detail-consensus first.png second.png third.png output.png\n"
+            "PortraitCandidates.exe --cover-shapes radius output-directory primary.png [candidate.png ...]\n"
             "PortraitCandidates.exe --select-by-replay landmarks.onnx source.png primary.png output-directory "
             "alternate.png [alternate2.png ...]";
         if (argc == 2 && std::wstring_view(argv[1]) == L"--help") {
@@ -342,6 +382,12 @@ int wmain(int argc, wchar_t **argv) {
             return 0;
         }
         const std::wstring_view option = argc > 1 ? argv[1] : L"";
+        if (option == L"--cover-shapes") {
+            if (argc < 5)
+                throw std::invalid_argument(usage);
+            print_output_path(cover_shapes(argv, argc));
+            return 0;
+        }
         if (option == L"--select-by-replay") {
             if (argc < 7)
                 throw std::invalid_argument(usage);

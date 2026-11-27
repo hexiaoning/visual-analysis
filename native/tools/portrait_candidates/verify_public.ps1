@@ -116,6 +116,22 @@ try {
             Write-Output "$($Case.id) mode=$mode selected=$($expected -join ',')"
         }
     }
+    $CoverCase = $Cases | Where-Object id -EQ "2762"
+    $CoverSource = Join-Path $Fixtures $CoverCase.id
+    $Primary = Join-Path $CoverSource "codeformer.png"
+    $Alternate = Join-Path $CoverSource "amd.png"
+    $CoverFolder = & $App --cover-shapes 0 (Join-Path $OutputRoot "cover") $Primary $Alternate $Primary
+    if ($LASTEXITCODE -ne 0) {
+        throw "Shape cover regression failed with exit code $LASTEXITCODE."
+    }
+    $Cover = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $CoverFolder "selection.json") | ConvertFrom-Json
+    if ($Cover.mode -cne "shape-cover" -or ($Cover.outputs.input_index -join ",") -cne "0,1" -or
+        ($Cover.nearest_input_index -join ",") -cne "0,1,0" -or ($Cover.measured_distance -join ",") -cne "0,0,0") {
+        throw "Shape cover should retain both distinct fixtures and collapse the repeated image."
+    }
+    Test-Pixels (Join-Path $CoverFolder $Cover.outputs[0].png) 512 $CoverCase.input_hashes.codeformer
+    Test-Pixels (Join-Path $CoverFolder $Cover.outputs[1].png) 512 $CoverCase.input_hashes.amd
+    Write-Output "2762 mode=shape-cover selected=0,1"
 } finally {
     [Console]::OutputEncoding = $OldEncoding
     # Delete only the unique temporary tree created by this invocation.

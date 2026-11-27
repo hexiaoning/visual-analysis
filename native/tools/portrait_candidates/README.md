@@ -128,6 +128,16 @@ $exe = Join-Path $build.OutputDirectory 'PortraitCandidates.exe'
 - `clarity` 是脸部带通响应的均方根，`clarity_vs_source` 是相对于输入的比值。`replay_error` 是在 128×128 亮度图上、脸部特征区域内测得的截断残差。曝光或特征区有效像素不足时误差为 `null`，对应回放图也为空。
 - `candidate-1.png` 和可能的 `candidate-2.png` 对应实际展示的候选。`observed-luminance.png` 与 `candidate-*-replay.png` 供直接核对观测和评分用回放。
 
+## 为候选库保留外观代表
+
+`--cover-shapes` 接受已对齐的 512×512 BGR 候选。先保留首张，再从其余图中补入离已保留图最远的一张，直到每张输入和至少一张代表的实测五官距离都在指定半径内。半径可取 0 到 2。距离取左右眼、鼻和口中最远的区域，以亮度带通响应计算。如果只有一张图在该区域有明显结构，该区域距离计为 1。
+
+```powershell
+& $exe --cover-shapes 0.10 .\cover-output .\primary.png .\alternative-1.png .\alternative-2.png
+```
+
+输出的候选 PNG 与对应输入像素一致。`selection.json` 中的 `outputs` 按保留顺序列出原输入序号及文件名。`nearest_input_index` 和 `measured_distance` 为每张输入列出最近代表的原输入序号及距离。所有序号从 0 开始。该半径只约束候选库中已生成的图和上述距离，外观评审仍需与可能的清晰原像比较。
+
 ## 纹理保护实验
 
 `--texture-guard <model.json>` 包含近重复拟合。仅当拟合会把主候选替换成 AMD 时，程序计算 AMD 的纹理分。分数小于或等于科研模型的固定阈值 **0.5641734981312992** 时接受替换，超过阈值则保留原先选择。模型使用绝对分数，计算过程中只读取 AMD 的候选图。近重复以外的双张展示按原规则处理。
