@@ -390,10 +390,28 @@ fs::path inspect_appearance_bank(wchar_t **argv, int argc) {
     if (used != radius_text.size() || !std::isfinite(radius) || radius <= 0. || radius > 2.)
         throw std::invalid_argument("Expected a radius in (0, 2]");
     const bool directed = std::wstring_view(argv[3]) == L"--directed";
-    const int model_index = directed ? 4 : 3;
+    int model_index = directed ? 4 : 3;
+    std::optional<std::size_t> swap_prefix;
+    double replay_tolerance = 0.;
+    if (model_index < argc && std::wstring_view(argv[model_index]) == L"--swap-prefix") {
+        if (!directed || argc <= model_index + 2)
+            throw std::invalid_argument("Swap inspection requires --directed, a prefix count and a replay tolerance");
+        const std::wstring count(argv[model_index + 1]);
+        if (count.empty() || !std::ranges::all_of(count, [](wchar_t c) { return c >= L'0' && c <= L'9'; }))
+            throw std::invalid_argument("Expected a positive swap prefix count");
+        swap_prefix = static_cast<std::size_t>(std::stoull(count));
+        const std::wstring tolerance(argv[model_index + 2]);
+        replay_tolerance = std::stod(tolerance, &used);
+        if (used != tolerance.size() || !std::isfinite(replay_tolerance) ||
+            replay_tolerance < 0. || replay_tolerance > 1.)
+            throw std::invalid_argument("Expected a swap replay tolerance in [0, 1]");
+        model_index += 3;
+    }
     const int first_candidate = model_index + 3;
     if (argc <= first_candidate)
         throw std::invalid_argument("Expected a landmark model, source, output directory and candidates");
+    if (swap_prefix && (*swap_prefix == 0 || *swap_prefix > static_cast<std::size_t>(argc - first_candidate)))
+        throw std::invalid_argument("The swap prefix must be inside the candidate bank");
     const bool compare_landmarks = std::wstring_view(argv[model_index]) != L"--distance-only";
     if (directed && !compare_landmarks)
         throw std::invalid_argument("Directed comparison requires a landmark model");
@@ -403,9 +421,34 @@ fs::path inspect_appearance_bank(wchar_t **argv, int argc) {
         portraits.push_back(read_image(argv[i]));
     const auto evidence = portrait_selection::analyse_appearance_bank(source, portraits);
     ShapeComparisons landmarks(argv[model_index], portraits, false);
+    std::vector<bool> possible_swaps(portraits.size());
+    if (swap_prefix) {
+        for (std::size_t removed = 1; removed < *swap_prefix; ++removed) {
+            double best_replay = std::numeric_limits<double>::infinity();
+            for (std::size_t i = 0; i < *swap_prefix; ++i)
+                if (i != removed)
+                    best_replay = std::min(best_replay, evidence.replay_errors[i]);
+            const double detail = std::max(evidence.observed_detail, evidence.candidate_detail[removed]);
+            for (std::size_t j = *swap_prefix; j < portraits.size(); ++j) {
+                if (possible_swaps[j] || evidence.candidate_detail[j] < detail ||
+                    evidence.replay_errors[j] > best_replay + replay_tolerance)
+                    continue;
+                bool separated = true;
+                for (std::size_t i = 0; i < *swap_prefix; ++i) {
+                    if (i != removed && evidence.distances[i][j] <= radius) {
+                        separated = false;
+                        break;
+                    }
+                }
+                possible_swaps[j] = separated;
+            }
+        }
+    }
     std::vector<std::vector<bool>> compatible(portraits.size(), std::vector<bool>(portraits.size()));
-    for (std::size_t i = 0; i < portraits.size(); ++i) {
+    for (std::size_t i = 0; i < swap_prefix.value_or(portraits.size()); ++i) {
         for (std::size_t j = i + 1; j < portraits.size(); ++j) {
+            if (swap_prefix && (j < *swap_prefix || !possible_swaps[j]))
+                continue;
             if (evidence.distances[i][j] <= radius)
                 continue;
             compatible[i][j] = !compare_landmarks || landmarks.different(i, j);
@@ -420,6 +463,11 @@ fs::path inspect_appearance_bank(wchar_t **argv, int argc) {
         };
         if (directed)
             report["directed_landmarks"] = true;
+        if (swap_prefix) {
+            report["swap_prefix"] = *swap_prefix;
+            report["swap_replay_tolerance"] = replay_tolerance;
+            report["possible_swaps"] = possible_swaps;
+        }
         std::ofstream receipt(directory / "selection.json", std::ios::binary);
         receipt << report.dump() << '\n';
         receipt.close();
@@ -764,7 +812,7 @@ int wmain(int argc, wchar_t **argv) {
             "PortraitCandidates.exe --extend-shape-cover radius replay-tolerance kept-count [--max-additions count [--close-separation radius]] [--landmarks model.onnx] source.png output-directory candidate.png [more.png ...]\n"
             "PortraitCandidates.exe --refine-representatives kept-count landmarks.onnx source.png output-directory shown.png [more.png ...]\n"
             "PortraitCandidates.exe --refine-clear-representatives kept-count added-count landmarks.onnx source.png output-directory shown.png [more.png ...]\n"
-            "PortraitCandidates.exe --inspect-appearance-bank radius [--directed] landmarks.onnx|--distance-only source.png output-directory candidate.png [more.png ...]\n"
+            "PortraitCandidates.exe --inspect-appearance-bank radius [--directed [--swap-prefix count replay-tolerance]] landmarks.onnx|--distance-only source.png output-directory candidate.png [more.png ...]\n"
             "PortraitCandidates.exe --transfer-guided-detail donor.png guide.png output-directory [donor2.png guide2.png output2 ...]\n"
             "PortraitCandidates.exe --bounded-exposure-directions dictionary.bin input.png anchor1.png anchor2.png seed-directory output-directory\n"
             "PortraitCandidates.exe --cover-shapes radius output-directory primary.png [candidate.png ...]\n"

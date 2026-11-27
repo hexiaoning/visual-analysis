@@ -223,6 +223,10 @@ $exe = Join-Path $build.OutputDirectory 'PortraitCandidates.exe'
     .\primary.png .\alternative-1.png .\alternative-2.png
 ```
 
+仅检查同数量替换时，可在 `--directed` 后加 `--swap-prefix`、已有展示数量和回放容差。候选参数先列出已有展示，再列出备选。首图受保护。回执保留所有图的细频、回放误差和两两距离，并以 `possible_swaps` 标出通过预筛的备选。预筛要求备选至少能替换一张非首图，同时满足细频不下降、回放容差和到其余展示的最小距离。
+
+此模式仅对通过预筛的备选与已有展示做双向关键点检查。两张同属展示、两张同属备选或超出预筛范围的矩阵位置均为 `false`。输出中的 `swap_prefix` 和 `swap_replay_tolerance` 记录计算范围。
+
 ## 纹理保护实验
 
 `--texture-guard <model.json>` 包含近重复拟合。仅当拟合会把主候选替换成 AMD 时，程序计算 AMD 的纹理分。分数小于或等于科研模型的固定阈值 **0.5641734981312992** 时接受替换，超过阈值则保留原先选择。模型使用绝对分数，计算过程中只读取 AMD 的候选图。近重复以外的双张展示按原规则处理。
