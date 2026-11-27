@@ -33,6 +33,12 @@ struct EvidenceExtension {
     std::vector<std::size_t> representatives;
     std::vector<double> replay_errors;
     std::vector<double> distances_to_kept;
+    std::size_t standard_count{};
+};
+
+struct CloseAppearanceCheck {
+    double radius;
+    std::function<bool(std::size_t, std::size_t)> compatible;
 };
 
 // Preserve kept_count initial portraits and extend the measured cover. The
@@ -40,7 +46,8 @@ struct EvidenceExtension {
 EvidenceExtension extend_appearances(const cv::Mat& source, const std::vector<cv::Mat>& candidates,
                                      std::size_t kept_count, double radius, double replay_tolerance,
                                      std::size_t max_additions = 1,
-                                     const std::function<bool(std::size_t, std::size_t)>& compatible = {});
+                                     const std::function<bool(std::size_t, std::size_t)>& compatible = {},
+                                     const std::optional<CloseAppearanceCheck>& close = std::nullopt);
 
 struct RepresentativeReplacement {
     std::size_t previous;

@@ -178,6 +178,15 @@ $exe = Join-Path $build.OutputDirectory 'PortraitCandidates.exe'
 
 显式传入 `--max-additions` 时，每接受一张就更新覆盖距离。新图必须与全部已输出图满足距离门槛。启用 `--landmarks` 时，还需要逐对通过关键点及局部像素检验。被拒绝后继续尝试其他候选，能通过多少张就输出多少张。`0` 只输出指定的开头候选。该模式用 `pair_checks` 记录逐对结果，用 `max_additions` 记录追加上限。
 
+可同时启用 `--close-separation` 复核中频轮廓接近的候选。先按通常半径追加。还有名额时，使用指定的小半径找备选，并交换比较顺序，对每一张已展示图做双向关键点及局部像素检验。回放、细频与追加数量门槛沿用同一设置。该选项要求提供 `--max-additions` 与 `--landmarks`，指定半径须大于零且小于通常半径。
+
+```powershell
+& $exe --extend-shape-cover 0.055 0.028 1 --max-additions 4 --close-separation 0.025 `
+    --landmarks .\hr-nosa-wflw-geometry.onnx .\source.png .\outputs .\primary.png .\alternative-1.png .\alternative-2.png
+```
+
+回执中的 `standard_count` 包含原展示和通常阶段追加的候选。此索引之后的输出通过小半径阶段，两个比较方向都记录在 `pair_checks`。
+
 ## 固定数量时复核已有候选
 
 ```powershell

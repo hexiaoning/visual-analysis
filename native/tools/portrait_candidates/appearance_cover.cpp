@@ -369,10 +369,14 @@ AppearanceEvidence analyse_appearance_bank(const cv::Mat& source, const std::vec
 EvidenceExtension extend_appearances(const cv::Mat& source, const std::vector<cv::Mat>& candidates,
                                      std::size_t kept_count, double radius, double replay_tolerance,
                                      std::size_t max_additions,
-                                     const std::function<bool(std::size_t, std::size_t)>& compatible) {
+                                     const std::function<bool(std::size_t, std::size_t)>& compatible,
+                                     const std::optional<CloseAppearanceCheck>& close) {
     if (kept_count == 0 || kept_count > candidates.size() || !std::isfinite(radius) || radius <= 0. || radius > 2. ||
         !std::isfinite(replay_tolerance) || replay_tolerance < 0. || replay_tolerance > 1.)
         throw std::invalid_argument("Expected a nonempty protected prefix, radius in (0, 2], and replay tolerance in [0, 1].");
+    if (close && (!std::isfinite(close->radius) || close->radius <= 0. || close->radius >= radius ||
+                  !close->compatible || !compatible))
+        throw std::invalid_argument("Close separation requires a smaller positive radius and both appearance checks");
     auto evidence = analyse_appearance_bank(source, candidates);
     const auto& distances = evidence.distances;
     const auto count = candidates.size();
@@ -396,30 +400,36 @@ EvidenceExtension extend_appearances(const cv::Mat& source, const std::vector<cv
     }
     auto nearest = result.distances_to_kept;
     std::vector<bool> tried(count);
-    while (result.representatives.size() - kept_count < max_additions) {
-        double best_gain = 0.;
-        std::size_t best = count;
-        for (std::size_t i = kept_count; i < count; ++i) {
-            if (tried[i] || weights[i] <= 0. || nearest[i] <= radius)
-                continue;
-            double gain = 0.;
-            for (std::size_t j = 0; j < count; ++j)
-                gain += weights[j] * std::max(0., nearest[j] - distances[i][j]);
-            if (gain > best_gain) {
-                best_gain = gain;
-                best = i;
+    const auto append_separated = [&](double separation, const auto& allowed) {
+        while (result.representatives.size() - kept_count < max_additions) {
+            double best_gain = 0.;
+            std::size_t best = count;
+            for (std::size_t i = kept_count; i < count; ++i) {
+                if (tried[i] || weights[i] <= 0. || nearest[i] <= separation)
+                    continue;
+                double gain = 0.;
+                for (std::size_t j = 0; j < count; ++j)
+                    gain += weights[j] * std::max(0., nearest[j] - distances[i][j]);
+                if (gain > best_gain) {
+                    best_gain = gain;
+                    best = i;
+                }
             }
+            if (best == count)
+                break;
+            tried[best] = true;
+            if (allowed && !std::all_of(result.representatives.begin(), result.representatives.end(),
+                                       [&](auto previous) { return allowed(previous, best); }))
+                continue;
+            result.representatives.push_back(best);
+            for (std::size_t i = 0; i < count; ++i)
+                nearest[i] = std::min(nearest[i], distances[best][i]);
         }
-        if (best == count)
-            break;
-        tried[best] = true;
-        if (compatible && !std::all_of(result.representatives.begin(), result.representatives.end(),
-                                       [&](auto previous) { return compatible(previous, best); }))
-            continue;
-        result.representatives.push_back(best);
-        for (std::size_t i = 0; i < count; ++i)
-            nearest[i] = std::min(nearest[i], distances[best][i]);
-    }
+    };
+    append_separated(radius, compatible);
+    result.standard_count = result.representatives.size();
+    if (close)
+        append_separated(close->radius, close->compatible);
     return result;
 }
 

@@ -440,7 +440,18 @@ fs::path extend_shape_cover(wchar_t **argv, int argc) {
         max_additions = static_cast<std::size_t>(std::stoull(count));
         source_index += 2;
     }
+    std::optional<double> close_radius;
+    if (source_index < argc && std::wstring_view(argv[source_index]) == L"--close-separation") {
+        if (!expand || source_index + 1 >= argc)
+            throw std::invalid_argument("Close separation requires --max-additions and a smaller radius");
+        close_radius = parse(argv[source_index + 1]);
+        source_index += 2;
+    }
+    if (source_index >= argc)
+        throw std::invalid_argument("Expected the source, output directory and at least one candidate");
     const bool compare_landmarks = std::wstring_view(argv[source_index]) == L"--landmarks";
+    if (close_radius && !compare_landmarks)
+        throw std::invalid_argument("Close separation requires bidirectional landmark checks");
     const int model_index = source_index + 1;
     if (compare_landmarks)
         source_index += 2;
@@ -457,14 +468,20 @@ fs::path extend_shape_cover(wchar_t **argv, int argc) {
     const auto protected_count = static_cast<std::size_t>(kept);
     std::optional<ShapeComparisons> comparisons;
     std::function<bool(std::size_t, std::size_t)> compatible;
+    std::optional<portrait_selection::CloseAppearanceCheck> close;
     if (expand && compare_landmarks) {
         comparisons.emplace(argv[model_index], portraits);
         compatible = [&](std::size_t previous, std::size_t proposed) {
             return comparisons->different(previous, proposed);
         };
+        if (close_radius) {
+            close.emplace(portrait_selection::CloseAppearanceCheck{*close_radius, [&](auto previous, auto proposed) {
+                return comparisons->different(previous, proposed) && comparisons->different(proposed, previous);
+            }});
+        }
     }
     auto chosen = portrait_selection::extend_appearances(source, portraits, protected_count, radius, tolerance,
-                                                        max_additions, compatible);
+                                                        max_additions, compatible, close);
     Json landmark_checks = Json::array();
     if (!expand && compare_landmarks && chosen.representatives.size() > protected_count) {
         portrait_selection::Selector selector(argv[model_index]);
@@ -487,6 +504,10 @@ fs::path extend_shape_cover(wchar_t **argv, int argc) {
         if (expand) {
             report["max_additions"] = max_additions;
             report["pair_checks"] = comparisons ? comparisons->checks : Json::array();
+        }
+        if (close_radius) {
+            report["close_separation"] = *close_radius;
+            report["standard_count"] = chosen.standard_count;
         }
         std::ofstream receipt(pending / "selection.json", std::ios::binary);
         receipt << report.dump(2) << '\n';
@@ -670,7 +691,7 @@ int wmain(int argc, wchar_t **argv) {
             "PortraitCandidates.exe --combine-detail-consensus first.png second.png third.png output.png\n"
             "PortraitCandidates.exe --mouth-variants landmarks.onnx aligned.png output-directory opening [opening2 ...]\n"
             "PortraitCandidates.exe --recombine-exposure landmarks.onnx first.png second.png output-directory [first2.png second2.png output2 ...]\n"
-            "PortraitCandidates.exe --extend-shape-cover radius replay-tolerance kept-count [--max-additions count] [--landmarks model.onnx] source.png output-directory candidate.png [more.png ...]\n"
+            "PortraitCandidates.exe --extend-shape-cover radius replay-tolerance kept-count [--max-additions count [--close-separation radius]] [--landmarks model.onnx] source.png output-directory candidate.png [more.png ...]\n"
             "PortraitCandidates.exe --refine-representatives kept-count landmarks.onnx source.png output-directory shown.png [more.png ...]\n"
             "PortraitCandidates.exe --refine-clear-representatives kept-count added-count landmarks.onnx source.png output-directory shown.png [more.png ...]\n"
             "PortraitCandidates.exe --inspect-appearance-bank radius landmarks.onnx|--distance-only source.png output-directory candidate.png [more.png ...]\n"
