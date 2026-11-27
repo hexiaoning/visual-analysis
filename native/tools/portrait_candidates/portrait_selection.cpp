@@ -9,6 +9,7 @@
 #include <opencv2/dnn.hpp>
 #include <opencv2/imgproc.hpp>
 #include <stdexcept>
+#include <utility>
 
 namespace portrait_selection {
 namespace {
@@ -94,6 +95,65 @@ Evidence measure(const selection::Observation &observed, const cv::Mat &face, do
             std::isfinite(replay) ? std::optional<double>(replay) : std::nullopt, replay_image};
 }
 
+struct MouthGeometry {
+    cv::Point2d center;
+    cv::Point2d axis;
+    cv::Point2d normal;
+    double width;
+    double inner_height;
+};
+
+MouthGeometry mouth_geometry(const std::vector<cv::Point2f> &points) {
+    const cv::Point2d span = cv::Point2d(points[82]) - cv::Point2d(points[76]);
+    const double width = cv::norm(span);
+    if (width < 12.)
+        throw std::runtime_error("Mouth corners do not define a stable axis.");
+    const cv::Point2d axis = span / width;
+    const cv::Point2d normal(-axis.y, axis.x);
+    cv::Point2d center{};
+    const int inner_begin = 88, inner_end = 96;
+    double low = normal.dot(cv::Point2d(points[inner_begin])), high = low;
+    for (int i = inner_begin; i < inner_end; ++i) {
+        const cv::Point2d point = points[i];
+        center += point;
+        const double position = normal.dot(point);
+        low = std::min(low, position);
+        high = std::max(high, position);
+    }
+    return {center / (inner_end - inner_begin), axis, normal, width, high - low};
+}
+
+cv::Mat reshape_mouth(const cv::Mat &face, const MouthGeometry &shape, double opening) {
+    const double radius = std::max(1.3, .5 * shape.inner_height);
+    const double requested = std::clamp(.5 * shape.width * opening, .43 * radius, 1.9 * radius);
+    const double margin = std::max({13., .34 * shape.width, 2. * radius, 2. * requested});
+    const double half_width = .58 * shape.width;
+    cv::Mat mapping(face.size(), CV_32FC2);
+    for (int y = 0; y < face.rows; ++y) {
+        auto *row = mapping.ptr<cv::Point2f>(y);
+        for (int x = 0; x < face.cols; ++x) {
+            row[x] = cv::Point2f(static_cast<float>(x), static_cast<float>(y));
+            const cv::Point2d relative = cv::Point2d(x, y) - shape.center;
+            const double across = shape.axis.dot(relative) / half_width;
+            const double signed_height = shape.normal.dot(relative);
+            const double height = std::abs(signed_height);
+            if (std::abs(across) >= 1. || height >= margin)
+                continue;
+            // Map the requested inner lip interval into the original one. The
+            // transition to the outer boundary preserves ordering along the normal.
+            const double blend = std::pow(1. - across * across, .68);
+            const double desired = radius + blend * (requested - radius);
+            const double from = height < desired ? height * radius / desired
+                                                  : radius + (height - desired) * (margin - radius) / (margin - desired);
+            const cv::Point2d displacement = shape.normal * ((from - height) * (signed_height < 0. ? -1. : 1.));
+            row[x] += cv::Point2f(displacement);
+        }
+    }
+    cv::Mat image;
+    cv::remap(face, image, mapping, {}, cv::INTER_CUBIC, cv::BORDER_REFLECT_101);
+    return image;
+}
+
 } // namespace
 
 class Selector::Model {
@@ -151,6 +211,24 @@ class Selector::Model {
 
 Selector::Selector(const std::filesystem::path &model) : model_(std::make_unique<Model>(model)) {}
 Selector::~Selector() = default;
+
+std::vector<MouthVariant> Selector::mouth_variants(const cv::Mat &face, const std::vector<double> &openings) {
+    if (face.type() != CV_8UC3 || face.size() != cv::Size(512, 512))
+        throw std::invalid_argument("Expected an aligned 512x512 CV_8UC3 portrait");
+    if (openings.empty() || std::any_of(openings.begin(), openings.end(), [](double opening) {
+            return !std::isfinite(opening) || opening <= 0. || opening > 1.;
+        }))
+        throw std::invalid_argument("Expected mouth openings in (0, 1].");
+    const auto shape = mouth_geometry(model_->points(face));
+    std::vector<MouthVariant> variants;
+    variants.reserve(openings.size());
+    for (double opening : openings) {
+        auto image = reshape_mouth(face, shape, opening);
+        const auto actual = mouth_geometry(model_->points(image));
+        variants.push_back({std::move(image), opening, actual.inner_height / actual.width});
+    }
+    return variants;
+}
 
 Result Selector::select(const cv::Mat &source, const cv::Mat &codeformer, const cv::Mat &amd,
                         const TextureGuard *guard) {

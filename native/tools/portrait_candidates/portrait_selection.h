@@ -44,6 +44,12 @@ struct Result {
     }
 };
 
+struct MouthVariant {
+    cv::Mat image;
+    double requested_opening;
+    double output_opening;
+};
+
 class Selector {
   public:
     explicit Selector(const std::filesystem::path &landmarks);
@@ -53,6 +59,7 @@ class Selector {
     // All images are already aligned 512x512 BGR, 8 bits/channel. The order matters.
     Result select(const cv::Mat &source, const cv::Mat &codeformer, const cv::Mat &amd,
                   const TextureGuard *guard = nullptr);
+    std::vector<MouthVariant> mouth_variants(const cv::Mat &face, const std::vector<double> &openings);
 
   private:
     class Model;

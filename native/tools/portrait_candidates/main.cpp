@@ -278,6 +278,37 @@ fs::path publish(const fs::path &directory, const cv::Mat &cf, const cv::Mat &am
     });
 }
 
+fs::path mouth_variants(wchar_t **argv, int argc) {
+    cv::setNumThreads(1);
+    std::vector<double> openings;
+    for (int arg = 5; arg < argc; ++arg) {
+        const std::wstring value(argv[arg]);
+        std::size_t used = 0;
+        const double opening = std::stod(value, &used);
+        if (used != value.size() || !std::isfinite(opening) || opening <= 0. || opening > 1.)
+            throw std::invalid_argument("Expected mouth openings in (0, 1].");
+        if (std::find(openings.begin(), openings.end(), opening) == openings.end())
+            openings.push_back(opening);
+    }
+    const auto photo = read_image(argv[3]);
+    portrait_selection::Selector model(argv[2]);
+    const auto variants = model.mouth_variants(photo, openings);
+    return publish_run(argv[4], [&](const fs::path &pending) {
+        Json outputs = Json::array();
+        for (const auto &variant : variants) {
+            const std::string filename = "candidate-" + std::to_string(outputs.size() + 1) + ".png";
+            write_image(pending / filename, variant.image);
+            outputs.push_back({{"requested_opening", variant.requested_opening},
+                               {"output_opening", variant.output_opening}, {"png", filename}});
+        }
+        std::ofstream receipt(pending / "selection.json", std::ios::binary);
+        receipt << Json{{"mode", "mouth-variants"}, {"outputs", std::move(outputs)}}.dump(2) << '\n';
+        receipt.close();
+        if (!receipt)
+            throw std::runtime_error("Could not save mouth variant report");
+    });
+}
+
 fs::path cover_shapes(wchar_t **argv, int argc) {
     cv::setNumThreads(1);
     const std::wstring value(argv[2]);
@@ -374,6 +405,7 @@ int wmain(int argc, wchar_t **argv) {
             "PortraitCandidates.exe --compose-local-donors weights.json baseline.png first.png second.png "
             "third.png output.png\n"
             "PortraitCandidates.exe --combine-detail-consensus first.png second.png third.png output.png\n"
+            "PortraitCandidates.exe --mouth-variants landmarks.onnx aligned.png output-directory opening [opening2 ...]\n"
             "PortraitCandidates.exe --cover-shapes radius output-directory primary.png [candidate.png ...]\n"
             "PortraitCandidates.exe --select-by-replay landmarks.onnx source.png primary.png output-directory "
             "alternate.png [alternate2.png ...]";
@@ -382,6 +414,12 @@ int wmain(int argc, wchar_t **argv) {
             return 0;
         }
         const std::wstring_view option = argc > 1 ? argv[1] : L"";
+        if (option == L"--mouth-variants") {
+            if (argc < 6)
+                throw std::invalid_argument(usage);
+            print_output_path(mouth_variants(argv, argc));
+            return 0;
+        }
         if (option == L"--cover-shapes") {
             if (argc < 5)
                 throw std::invalid_argument(usage);
