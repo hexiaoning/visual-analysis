@@ -32,6 +32,9 @@
 
 添加 `-TransferGuidedDetail` 可从同一张糊图再生成至多四张备选。脚本把直接解码的人像分别移到两个曝光端点的轮廓，并各保留一个局部对比度对照供筛选。需一并使用支持 `--transfer-guided-detail` 的 `PortraitCandidates.exe`。两个端点的回执路径记录在 `guided-detail-paths.log`，筛选仍按回放、清晰度和五官差异决定展示哪些图。
 
+加上 `-ExploreExposureDirections` 可从同一张对齐糊图生成两组四时刻，并探索不同眼、鼻、口亮度形状。选项需要仓库当前版本的三个原生工具，以及模型目录中的 `tail-1.onnx`、`tail-2.onnx`、`original.onnx`、`madenn.onnx`、它们引用的本地权重和 `learned-exposure.bin`。时刻生成共用一次序列模型推理。两类清晰底图使用 `PortraitCodes.exe restore` 运行。时刻拟合、方向生成和筛选全在本机，不启动 Python。
+
+普通选图和可选清晰度复核先完成。开启新选项时，保留其输出，再对通过整组回放的候选最多追加两张。加权的 8 位编码值保持，按 2.2 伽马计算的合成曝光差限制在 0.75 灰阶以内。`exposure-directions.log` 指向两组状态和候选的回执。`exposure-inputs.log` 列出最终选择回执使用的输入顺序。
 编码输入为 512×512 图像，经程序转换成 `[1,3,512,512]` 的 RGB FP32，值域为 `[-1,1]`。编码模型输出 `[1,256,1024]` 的未归一化码本评分，`encode` 依次写出评分的 FP32 原始字节。`blend` 从原图和端点评分逐格选择编码，写出 `[1,16,16]` 的小端 int64，取值范围为 0–1023。`decode` 接受原糊图和所选编码，输出一张 PNG。原图和端点均采用同一裁切坐标。编码器和解码器的 ONNX 与它们引用的外部权重文件需已在本机。
 
 ```powershell

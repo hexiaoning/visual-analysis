@@ -5650,3 +5650,15 @@ RestoreFormer++ 正向与镜像各生成 51 张，两路均记录到 51 次 Dire
 把限制两状态亮度改动的计算独立用 Windows C++ 实现。用两份实拍新增匹配和第三张用户图的两个入选结果做四次测试，两状态共八份图的 RGB 值均与试验 PNG 逐像素一致。探针接受已有方向及四状态图，核对的是亮度约束计算。[原生探针逐图校验](<D:/Data/Build/visual-analysis-dev/portrait-combined-exposure-directions-01/native-replay-parity.json>)
 
 三张用户案例实际追加 0、0、2 张。第三张的两张选图仍可见眼口拖影与反光，整体目视差异有限。三张均缺同帧清晰原片。33 项仓库测试通过。[三个案例的原图、底图及试验候选](<D:/Data/Build/visual-analysis-dev/portrait-combined-exposure-directions-01/private.png>)
+
+### 单图原生入口生成带线性光约束的备选
+
+把带限幅的单部位路线接入原有单图命令，可用 `-ExploreExposureDirections` 开启。输入只有一张对齐糊图，两个清晰底图及两组四时刻由同一次运行在本机生成。普通两端点和额外两个模型的时刻推理共用一次序列模型。候选工具按原图拟合失焦或线性运动、亮度和平移，并对每个底图选择一组四时刻及权重。拟合整组曝光的亮度残差后，从独立拍摄的字典取两个局部主轴，生成正负两种组合。在两个时刻按权重反向分配改动，保持编码曝光，严格限制 2.2 伽马假设下的单通道峰值变化。原生回执记下四个拟合状态，便于独立重算曝光。普通选择先完成并原样保留，再从整组回放合格的候选最多追加两张。[运行及本地模型要求](../native/tools/portrait_codes/README.md#运行)
+
+用仓库当前源码重新构建三个工具。初次端到端启动使用的旧时刻生成工具缺少多模型参数，重新构建后原始糊图成功走完。截断字典被拒绝，未发布结果目录。对第一份实拍 `rb-00009-0673`，普通端点和三张普通候选与旧流程逐像素一致。新命令从糊图复现第 1 份参考的数值匹配，九种半像素位置均通过。新增候选保存在候选目录，最终选择仍展示原本匹配的第 3 份参考。
+
+第一份实拍的同一底图用 Windows 原生 CPU 和 DirectML 复跑，单次推理分别为 21.069 和 5.806 秒，两份解码图的最大通道差为 1 灰阶。ONNX Runtime 分析分别记录了 CPU 和 DirectML 节点事件。两份底图的 DirectML 运行与上一轮位图一致。[CPU 与 DirectML 校验](<D:/Data/Build/visual-analysis-dev/portrait-learned-native-01/restore-device-parity.json>)
+
+`rb-00008-0099` 的第 3 份短曝光在原生候选库有匹配，其中一个候选通过九种半像素复核。单图入口的普通选择已匹配第 3、5、7 份，追加后的选择仍是这三份。另对两份实拍分别从相同候选试验最多追加八张，已匹配的参考范围均没有增加。三张端到端输入各增加两张实际展示，全部普通展示在输出逐像素保留。
+
+两张实拍和第三张用户图各生成 64 张候选。验证实际保存的四状态和改动图，共 96 对，8 位加权曝光逐点保持。按 2.2 伽马重算，最大曝光差小于 0.75 灰阶。三个运行中，两个局部恢复图的 8 个时刻均与上一轮逐像素一致。三个原生流程分别记录 12 次 OpenVINO GPU.0 输出、6 次码本 DirectML 执行及两次底图 DirectML 执行。第三张新展示中，眼口重影及反光仍在。33 项仓库测试通过。[两张实拍和第三张用户图对照](<D:/Data/Build/visual-analysis-dev/portrait-learned-native-01/verified-end-to-end.png>) · [端到端逐图回执](<D:/Data/Build/visual-analysis-dev/portrait-learned-native-01/verified-end-to-end.json>)

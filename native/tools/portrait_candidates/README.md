@@ -250,3 +250,16 @@ $exe = Join-Path $build.OutputDirectory 'PortraitCandidates.exe'
 ```
 
 两张图都使用同一糊图的 512×512 对齐坐标。双向光流在较小网格估计位移，检查往返一致性，将实际位移限制到 11 像素。输出 `warped.png` 为重采样后的底图。仅在两个候选的中频轮廓方向一致处校正对比度，所得图写为 `adjusted.png`。`transfer.json` 记录光流一致性、对比度支持和位移上限。可重复给出一组底图、轮廓图和输出路径。每组输出独立发布在运行目录下。
+
+## 单部位曝光候选
+
+```powershell
+& $exe --bounded-exposure-directions .\learned-exposure.bin .\blurred.png `
+    .\anchor-1.png .\anchor-2.png .\exposure-seeds .\directions
+```
+
+输入为同一糊图对齐坐标下的两个底图和两个四时刻候选组。时刻目录内的 `candidate-1.png` 至 `candidate-8.png` 依模型及位置 1、3、5、7 顺序排列。单图入口负责从原糊图生成这些中间图。 [单图入口](../portrait_codes/README.md#运行)
+
+程序在新的结果目录写出四个拟合状态、八个局部方向的正负方案及 `directions.json`。回执记录权重、改动所在部位、时刻、相反符号方案以及按 2.2 伽马估计的最大回放差。整组回放明显降低且状态差异达到门槛时，回执才标记可进入展示筛选。
+
+字典使用小端字节序。头为八个字节 `VADIR01\0` 及一个无符号 32 位样本数，当前版本为 168。每行依次是一个无符号 32 位拍摄组编号、四个部位各 63 个 float32 观测值、四个部位各 32×38 个按行排序的 float32 带符号差分。每份拍摄的六种时刻组合连续存放。已验证的本机文件为 `D:/Data/Build/visual-analysis-dev/portrait-learned-native-01/models/learned-exposure.bin`，SHA-256 为 `89a1abb1b8a0d5092463a03e0c5338d5dfa0830ed362fb43ded551a0386c6444`。

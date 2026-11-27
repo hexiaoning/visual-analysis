@@ -9,7 +9,8 @@ param(
     [ValidateSet("GPU", "CPU")][string]$Device = "GPU",
     [switch]$RefineClarity,
     [ValidateScript({ $_ -gt 0.0 -and $_ -lt 0.055 })][double]$CloseSeparation,
-    [switch]$TransferGuidedDetail
+    [switch]$TransferGuidedDetail,
+    [switch]$ExploreExposureDirections
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,7 +20,11 @@ $Moments = (Resolve-Path -LiteralPath $MomentsExecutable).ProviderPath
 $Codes = (Resolve-Path -LiteralPath $CodesExecutable).ProviderPath
 $Candidates = (Resolve-Path -LiteralPath $CandidatesExecutable).ProviderPath
 $Models = @{}
-foreach ($Name in "jin-240.onnx", "signed-512.onnx", "encode.onnx", "decode.onnx", "hr-nosa-wflw-geometry.onnx") {
+$Names = @("jin-240.onnx", "signed-512.onnx", "encode.onnx", "decode.onnx", "hr-nosa-wflw-geometry.onnx")
+if ($ExploreExposureDirections) {
+    $Names += @("tail-1.onnx", "tail-2.onnx", "original.onnx", "madenn.onnx", "learned-exposure.bin")
+}
+foreach ($Name in $Names) {
     $Models[$Name] = (Resolve-Path -LiteralPath (Join-Path $ModelDirectory $Name)).ProviderPath
 }
 $Destination = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
@@ -41,8 +46,20 @@ function Invoke-NativeStage([string]$Program, [string[]]$Parameters, [string]$Lo
 Push-Location -LiteralPath $Pending
 try {
     Invoke-NativeStage $Codes @("validate", $InputFile) "input.log"
-    Invoke-NativeStage $Moments @("--refine-sequence", $Device, $Models["jin-240.onnx"], $Models["signed-512.onnx"],
-        "--positions", "1,7", $InputFile, "seeds") "moments.log"
+    if ($ExploreExposureDirections) {
+        Invoke-NativeStage $Moments @("--refine-sequence", $Device, $Models["jin-240.onnx"], $Models["signed-512.onnx"],
+            "--additional-refinement", $Models["tail-1.onnx"], "--additional-refinement", $Models["tail-2.onnx"],
+            "--positions", "1,3,5,7", $InputFile, "all-seeds") "moments.log"
+        $null = New-Item -ItemType Directory -Path "seeds", "exposure-seeds"
+        Copy-Item -LiteralPath "all-seeds/candidate-1.png" -Destination "seeds/candidate-1.png"
+        Copy-Item -LiteralPath "all-seeds/candidate-4.png" -Destination "seeds/candidate-2.png"
+        foreach ($Index in 1..8) {
+            Copy-Item -LiteralPath "all-seeds/candidate-$($Index + 4).png" -Destination "exposure-seeds/candidate-$Index.png"
+        }
+    } else {
+        Invoke-NativeStage $Moments @("--refine-sequence", $Device, $Models["jin-240.onnx"], $Models["signed-512.onnx"],
+            "--positions", "1,7", $InputFile, "seeds") "moments.log"
+    }
     Invoke-NativeStage $Codes @("encode", $Backend, $Models["encode.onnx"], $InputFile, "raw.f32",
         "seeds/candidate-1.png", "first.f32", "seeds/candidate-2.png", "last.f32") "encode.log"
     Invoke-NativeStage $Codes @("blend", "raw.f32", "raw.f32", "raw.bin", "raw.f32", "first.f32", "first.bin",
@@ -91,11 +108,13 @@ try {
     if (-not (Test-Path -LiteralPath $Receipt -PathType Leaf)) {
         throw "The native selector did not publish a result in $Pending."
     }
+    $DisplayInputs = $Bank
     if ($RefineClarity) {
         $Initial = Get-Content -LiteralPath $Receipt -Raw | ConvertFrom-Json
         $SelectedNames = @($Initial.outputs | ForEach-Object { $Bank[[int]$_.input_index] })
         $AddedCount = $SelectedNames.Count - [int]$Initial.kept_count
         $OrderedBank = $SelectedNames + @($Bank | Where-Object { $_ -notin $SelectedNames })
+        $DisplayInputs = $OrderedBank
         Set-Content -LiteralPath "refinement-inputs.log" -Value $OrderedBank -Encoding utf8
         $Arguments = @("--refine-clear-representatives", "$($Initial.kept_count)", "$AddedCount",
             $Models["hr-nosa-wflw-geometry.onnx"], $InputFile, "refined") + $OrderedBank
@@ -106,6 +125,40 @@ try {
             throw "The clarity refinement did not publish a result in $Pending."
         }
         Set-Content -LiteralPath "refinement-path.log" -Value $Receipt -Encoding utf8
+    }
+    if ($ExploreExposureDirections) {
+        Invoke-NativeStage $Codes @("restore", $Backend, $Models["original.onnx"],
+            $InputFile, "exposure-first.png") "exposure-first.log"
+        Invoke-NativeStage $Codes @("restore", $Backend, $Models["madenn.onnx"],
+            $InputFile, "exposure-second.png") "exposure-second.log"
+        Invoke-NativeStage $Candidates @("--bounded-exposure-directions", $Models["learned-exposure.bin"],
+            $InputFile, "exposure-first.png", "exposure-second.png", "exposure-seeds", "exposure-directions") "exposure-directions.log"
+        $DirectionRun = Split-Path -Leaf (Get-Content -LiteralPath "exposure-directions.log" -Raw).Trim()
+        $DirectionsRoot = Join-Path "exposure-directions" $DirectionRun
+        $DirectionReceipt = Join-Path $DirectionsRoot "directions.json"
+        $Directions = Get-Content -LiteralPath $DirectionReceipt -Raw | ConvertFrom-Json
+        Set-Content -LiteralPath "exposure-directions.log" -Value $DirectionReceipt -Encoding utf8
+        $NewStates = @($Directions.groups | Where-Object eligible | ForEach-Object {
+            $_.outputs | ForEach-Object { Join-Path $DirectionsRoot $_.png }
+        })
+        if ($NewStates.Count -gt 0) {
+            $Initial = Get-Content -LiteralPath $Receipt -Raw | ConvertFrom-Json
+            $Protected = @($Initial.outputs | ForEach-Object { $DisplayInputs[[int]$_.input_index] })
+            $DisplayInputs = $Protected + $NewStates
+            $Radius = if ($PSBoundParameters.ContainsKey("CloseSeparation")) { $CloseSeparation } else { 0.025 }
+            $Distance = $Radius.ToString("G17", [Globalization.CultureInfo]::InvariantCulture)
+            $Arguments = @("--extend-shape-cover", ".055", "1", "$($Protected.Count)", "--max-additions", "2",
+                "--close-separation", $Distance, "--landmarks", $Models["hr-nosa-wflw-geometry.onnx"],
+                $InputFile, "selected-exposure") + $DisplayInputs
+            Invoke-NativeStage $Candidates $Arguments "exposure-selection.log"
+            $Name = Split-Path -Leaf (Get-Content -LiteralPath "exposure-selection.log" -Raw).Trim()
+            $Receipt = Join-Path ("selected-exposure\" + $Name) "selection.json"
+            if (-not (Test-Path -LiteralPath $Receipt -PathType Leaf)) {
+                throw "The exposure selector did not publish a result."
+            }
+            Set-Content -LiteralPath "exposure-selection.log" -Value $Receipt -Encoding utf8
+        }
+        Set-Content -LiteralPath "exposure-inputs.log" -Value $DisplayInputs -Encoding utf8
     }
     Set-Content -LiteralPath "selection-path.log" -Value $Receipt -Encoding utf8
 } finally {

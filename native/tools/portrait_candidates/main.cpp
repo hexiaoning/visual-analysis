@@ -5,6 +5,7 @@
 #include "fine_band_limit.h"
 #include "geometry_calibration.h"
 #include "guided_detail.h"
+#include "learned_exposure.h"
 
 #include <algorithm>
 #include <array>
@@ -689,6 +690,46 @@ void print_output_path(const fs::path &path) {
     const auto utf8 = fs::absolute(path).u8string();
     std::cout.write(reinterpret_cast<const char *>(utf8.data()), utf8.size()) << std::endl;
 }
+fs::path bounded_exposure(wchar_t **argv) {
+    cv::setNumThreads(1);
+    const fs::path seed_directory=argv[6];
+    std::array<portrait_selection::ExposureFrames,2> seed_families;
+    for (std::size_t i=0; i<seed_families.size(); ++i)
+        for (std::size_t j=0; j<seed_families[i].size(); ++j)
+            seed_families[i][j]=read_image(seed_directory/("candidate-"+std::to_string(i*4+j+1)+".png"));
+    const std::array<cv::Mat,2> anchors{read_image(argv[4]),read_image(argv[5])};
+    const auto groups=portrait_selection::learned_exposure_directions(argv[2],read_image(argv[3]),anchors,seed_families);
+    return publish_run(argv[7],[&](const fs::path& pending) {
+        Json expanded=Json::array();
+        for (std::size_t i=0; i<groups.size(); ++i) {
+            const auto& g=groups[i];
+            Json inputs=Json::array();
+            for (std::size_t j=0; j<g.fitted_states.size(); ++j) {
+                const auto name="anchor-"+std::to_string(i+1)+"-state-"+std::to_string(j+1)+".png";
+                write_image(pending/name,g.fitted_states[j]);
+                inputs.push_back(name);
+            }
+            Json images=Json::array();
+            for (std::size_t j=0; j<g.candidates.size(); ++j) {
+                const auto& c=g.candidates[j];
+                const auto filename="anchor-"+std::to_string(i+1)+"-candidate-"+std::to_string(j+1)+".png";
+                write_image(pending/filename,c.image);
+                images.push_back({{"png",filename},{"region",c.region+1},{"axis",c.axis+1},
+                                  {"sign",c.sign},{"phase",1+2*c.phase},{"max_light_error",c.peak_light_error}});
+            }
+            expanded.push_back({{"seed_family",g.seed_family+1},{"weights_in_sixteenths",g.weight_units},
+                                {"initial_replay",g.initial_replay},{"fitted_replay",g.fitted_replay},
+                                {"seed_spread",g.seed_spread},{"eligible",g.eligible},{"fitted_states",std::move(inputs)},
+                                {"outputs",std::move(images)}});
+        }
+        std::ofstream report(pending/"directions.json",std::ios::binary);
+        report << Json{{"mode","bounded-exposure-directions"},{"groups",std::move(expanded)}}.dump(2) << '\n';
+        report.close();
+        if (!report)
+            throw std::runtime_error("Could not save learned exposure receipt");
+    });
+}
+
 } // namespace
 
 int wmain(int argc, wchar_t **argv) {
@@ -714,6 +755,7 @@ int wmain(int argc, wchar_t **argv) {
             "PortraitCandidates.exe --refine-clear-representatives kept-count added-count landmarks.onnx source.png output-directory shown.png [more.png ...]\n"
             "PortraitCandidates.exe --inspect-appearance-bank radius landmarks.onnx|--distance-only source.png output-directory candidate.png [more.png ...]\n"
             "PortraitCandidates.exe --transfer-guided-detail donor.png guide.png output-directory [donor2.png guide2.png output2 ...]\n"
+            "PortraitCandidates.exe --bounded-exposure-directions dictionary.bin input.png anchor1.png anchor2.png seed-directory output-directory\n"
             "PortraitCandidates.exe --cover-shapes radius output-directory primary.png [candidate.png ...]\n"
             "PortraitCandidates.exe --select-by-replay landmarks.onnx source.png primary.png output-directory "
             "alternate.png [alternate2.png ...]";
@@ -770,6 +812,12 @@ int wmain(int argc, wchar_t **argv) {
             cv::setNumThreads(1);
             for (int i = 2; i < argc; i += 3)
                 print_output_path(transfer_guide(argv[i + 2], read_image(argv[i]), read_image(argv[i + 1])));
+            return 0;
+        }
+        if (option == L"--bounded-exposure-directions") {
+            if (argc != 8)
+                throw std::invalid_argument(usage);
+            print_output_path(bounded_exposure(argv));
             return 0;
         }
         if (option == L"--cover-shapes") {

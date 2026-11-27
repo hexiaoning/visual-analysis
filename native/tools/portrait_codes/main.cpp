@@ -131,10 +131,11 @@ void run(int argc, wchar_t** argv) {
     const std::wstring_view mode(argv[1]);
     const std::wstring_view backend(argv[2]);
     const bool encode = mode == L"encode";
-    const int stride = encode ? 2 : 3;
-    if ((!encode && mode != L"decode") || (backend != L"cpu" && backend != L"dml") ||
+    const bool restore = mode == L"restore";
+    const int stride = encode || restore ? 2 : 3;
+    if ((!encode && !restore && mode != L"decode") || (backend != L"cpu" && backend != L"dml") ||
         argc < 4 + stride || (argc - 4) % stride != 0)
-        throw std::invalid_argument("Expected encode/decode cpu/dml model.onnx and complete image [code] output sets");
+        throw std::invalid_argument("Expected encode/decode/restore cpu/dml model.onnx and complete image [code] output sets");
 
     Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "portrait-exposure-codes");
     Ort::SessionOptions options;
@@ -154,20 +155,21 @@ void run(int argc, wchar_t** argv) {
         Ort::ThrowOnError(append(options, 0));
     }
     Ort::Session net(env, argv[3], options);
-    const size_t input_count = encode ? 1 : 2;
+    const size_t input_count = encode || restore ? 1 : 2;
     if (net.GetInputCount() != input_count || net.GetOutputCount() != 1)
-        throw std::invalid_argument("Wrong model for the encode or decode route");
+        throw std::invalid_argument("Wrong model for the requested route");
     Ort::AllocatorWithDefaultOptions allocator;
     const auto output = net.GetOutputNameAllocated(0, allocator);
     const auto output_ptr = output.get();
-    const std::array<const char*, 2> names{"image", "codes"};
+    const auto image_name = net.GetInputNameAllocated(0, allocator);
+    const std::array<const char*, 2> names{restore ? image_name.get() : "image", "codes"};
     const auto memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
     for (int i = 4; i < argc; i += stride) {
         auto blob = read_image(argv[i]);
         std::array<Ort::Value, 2> values{Ort::Value::CreateTensor<float>(memory, blob.ptr<float>(), blob.total(),
                                           rgb_shape.data(), rgb_shape.size()), Ort::Value{nullptr}};
         std::array<int64_t, 256> codes{};
-        if (!encode) {
+        if (!encode && !restore) {
             const auto data = read_bytes(argv[i + 1]);
             if (data.size() != sizeof(codes))
                 throw std::invalid_argument("Expected exactly 256 code indices in binary int64 form");
@@ -187,7 +189,7 @@ void run(int argc, wchar_t** argv) {
             write_bytes(argv[i + 1], pixels, 256 * 1024 * sizeof(float));
         } else {
             require_tensor(out[0], ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, rgb_shape);
-            save_face(argv[i + 2], pixels);
+            save_face(argv[i + (restore ? 1 : 2)], pixels);
         }
         std::cout << "seconds=" << seconds << '\n';
     }
