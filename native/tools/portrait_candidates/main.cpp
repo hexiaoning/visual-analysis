@@ -13,8 +13,10 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <numeric>
 #include <nlohmann/json.hpp>
 #include <opencv2/imgcodecs.hpp>
+#include <optional>
 #include <stdexcept>
 #include <string_view>
 #include <utility>
@@ -320,6 +322,32 @@ Json write_indexed_candidates(const fs::path &directory, const std::vector<cv::M
     return outputs;
 }
 
+class ShapeComparisons {
+public:
+    ShapeComparisons(const fs::path &model, const std::vector<cv::Mat> &portraits)
+        : model_(model), portraits_(portraits), descriptions_(portraits.size()) {}
+
+    bool different(std::size_t previous, std::size_t proposed) {
+        if (!selector_)
+            selector_.emplace(model_);
+        for (const auto index : {previous, proposed}) {
+            if (!descriptions_[index])
+                descriptions_[index] = selector_->describe_shape(portraits_[index]);
+        }
+        const bool visible = portrait_selection::visibly_different(*descriptions_[previous], *descriptions_[proposed]);
+        checks.push_back({{"previous", previous}, {"proposed", proposed}, {"visible", visible}});
+        return visible;
+    }
+
+    Json checks = Json::array();
+
+private:
+    fs::path model_;
+    const std::vector<cv::Mat> &portraits_;
+    std::optional<portrait_selection::Selector> selector_;
+    std::vector<std::optional<portrait_selection::ShapeDescriptor>> descriptions_;
+};
+
 fs::path extend_shape_cover(wchar_t **argv, int argc) {
     cv::setNumThreads(1);
     const auto parse = [](const wchar_t *argument) {
@@ -335,8 +363,20 @@ fs::path extend_shape_cover(wchar_t **argv, int argc) {
     const std::wstring text(argv[4]);
     std::size_t used = 0;
     const auto kept = std::stoull(text, &used);
-    const bool compare_landmarks = std::wstring_view(argv[5]) == L"--landmarks";
-    const int source_index = compare_landmarks ? 7 : 5;
+    int source_index = 5;
+    const bool expand = std::wstring_view(argv[source_index]) == L"--max-additions";
+    std::size_t max_additions = 1;
+    if (expand) {
+        const std::wstring count(argv[source_index + 1]);
+        if (count.empty() || !std::ranges::all_of(count, [](wchar_t c) { return c >= L'0' && c <= L'9'; }))
+            throw std::invalid_argument("Expected a nonnegative maximum number of additions");
+        max_additions = static_cast<std::size_t>(std::stoull(count));
+        source_index += 2;
+    }
+    const bool compare_landmarks = std::wstring_view(argv[source_index]) == L"--landmarks";
+    const int model_index = source_index + 1;
+    if (compare_landmarks)
+        source_index += 2;
     const int first_candidate = source_index + 2;
     if (argc <= first_candidate)
         throw std::invalid_argument("Expected the source, output directory and at least one candidate");
@@ -348,10 +388,19 @@ fs::path extend_shape_cover(wchar_t **argv, int argc) {
     for (int arg = first_candidate; arg < argc; ++arg)
         portraits.push_back(read_image(argv[arg]));
     const auto protected_count = static_cast<std::size_t>(kept);
-    auto chosen = portrait_selection::extend_appearances(source, portraits, protected_count, radius, tolerance);
+    std::optional<ShapeComparisons> comparisons;
+    std::function<bool(std::size_t, std::size_t)> compatible;
+    if (expand && compare_landmarks) {
+        comparisons.emplace(argv[model_index], portraits);
+        compatible = [&](std::size_t previous, std::size_t proposed) {
+            return comparisons->different(previous, proposed);
+        };
+    }
+    auto chosen = portrait_selection::extend_appearances(source, portraits, protected_count, radius, tolerance,
+                                                        max_additions, compatible);
     Json landmark_checks = Json::array();
-    if (compare_landmarks && chosen.representatives.size() > protected_count) {
-        portrait_selection::Selector selector(argv[6]);
+    if (!expand && compare_landmarks && chosen.representatives.size() > protected_count) {
+        portrait_selection::Selector selector(argv[model_index]);
         const auto &extra = portraits[chosen.representatives.back()];
         bool distinct = true;
         for (std::size_t i = 0; i < protected_count; ++i) {
@@ -363,16 +412,54 @@ fs::path extend_shape_cover(wchar_t **argv, int argc) {
             chosen.representatives.pop_back();
     }
     return publish_run(argv[source_index + 1], [&](const fs::path &pending) {
-        const Json report = {{"mode", "evidence-extension"}, {"radius", radius}, {"replay_tolerance", tolerance},
+        Json report = {{"mode", "evidence-extension"}, {"radius", radius}, {"replay_tolerance", tolerance},
                              {"kept_count", kept}, {"replay_errors", chosen.replay_errors},
                              {"distance_to_protected", chosen.distances_to_kept},
                              {"landmarks_enabled", compare_landmarks}, {"landmark_checks", landmark_checks},
                              {"outputs", write_indexed_candidates(pending, portraits, chosen.representatives)}};
+        if (expand) {
+            report["max_additions"] = max_additions;
+            report["pair_checks"] = comparisons ? comparisons->checks : Json::array();
+        }
         std::ofstream receipt(pending / "selection.json", std::ios::binary);
         receipt << report.dump(2) << '\n';
         receipt.close();
         if (!receipt)
             throw std::runtime_error("Could not save evidence extension report");
+    });
+}
+
+fs::path refine_representatives(wchar_t **argv, int argc) {
+    cv::setNumThreads(1);
+    const std::wstring count(argv[2]);
+    if (count.empty() || !std::ranges::all_of(count, [](wchar_t c) { return c >= L'0' && c <= L'9'; }))
+        throw std::invalid_argument("Expected a positive number of displayed candidates");
+    const auto kept = static_cast<std::size_t>(std::stoull(count));
+    const auto source = read_image(argv[4]);
+    std::vector<cv::Mat> portraits;
+    for (int arg = 6; arg < argc; ++arg)
+        portraits.push_back(read_image(argv[arg]));
+    ShapeComparisons comparisons(argv[3], portraits);
+    const auto replacement = portrait_selection::refine_representative(source, portraits, kept,
+        [&](auto previous, auto proposed) { return comparisons.different(previous, proposed); });
+    std::vector<std::size_t> selected(kept);
+    std::iota(selected.begin(), selected.end(), 0);
+    Json improvement = nullptr;
+    if (replacement) {
+        selected[replacement->previous] = replacement->proposed;
+        improvement = {{"previous", replacement->previous}, {"proposed", replacement->proposed},
+                       {"distance", replacement->distance}, {"minimum_relative_gain", replacement->score},
+                       {"replay_improvements", replacement->replay_improvements}};
+    }
+    return publish_run(argv[5], [&](const fs::path &pending) {
+        const Json report = {{"mode", "representative-refinement"}, {"kept_count", kept},
+                             {"replacement", improvement}, {"pair_checks", comparisons.checks},
+                             {"outputs", write_indexed_candidates(pending, portraits, selected)}};
+        std::ofstream receipt(pending / "selection.json", std::ios::binary);
+        receipt << report.dump(2) << '\n';
+        receipt.close();
+        if (!receipt)
+            throw std::runtime_error("Could not write representative refinement receipt");
     });
 }
 
@@ -467,7 +554,8 @@ int wmain(int argc, wchar_t **argv) {
             "third.png output.png\n"
             "PortraitCandidates.exe --combine-detail-consensus first.png second.png third.png output.png\n"
             "PortraitCandidates.exe --mouth-variants landmarks.onnx aligned.png output-directory opening [opening2 ...]\n"
-            "PortraitCandidates.exe --extend-shape-cover radius replay-tolerance kept-count [--landmarks model.onnx] source.png output-directory candidate.png [more.png ...]\n"
+            "PortraitCandidates.exe --extend-shape-cover radius replay-tolerance kept-count [--max-additions count] [--landmarks model.onnx] source.png output-directory candidate.png [more.png ...]\n"
+            "PortraitCandidates.exe --refine-representatives kept-count landmarks.onnx source.png output-directory shown.png [more.png ...]\n"
             "PortraitCandidates.exe --cover-shapes radius output-directory primary.png [candidate.png ...]\n"
             "PortraitCandidates.exe --select-by-replay landmarks.onnx source.png primary.png output-directory "
             "alternate.png [alternate2.png ...]";
@@ -480,6 +568,12 @@ int wmain(int argc, wchar_t **argv) {
             if (argc < 8)
                 throw std::invalid_argument(usage);
             print_output_path(extend_shape_cover(argv, argc));
+            return 0;
+        }
+        if (option == L"--refine-representatives") {
+            if (argc < 7)
+                throw std::invalid_argument(usage);
+            print_output_path(refine_representatives(argv, argc));
             return 0;
         }
         if (option == L"--mouth-variants") {

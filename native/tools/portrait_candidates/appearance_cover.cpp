@@ -159,6 +159,87 @@ double registered_error(const cv::Mat& gray, const cv::Mat& observed) {
     return best;
 }
 
+struct ReplayFold {
+    std::vector<cv::Point> training;
+    std::vector<cv::Point> checking;
+};
+
+struct ReplayFit {
+    std::size_t blur;
+    cv::Point offset;
+    double gain;
+    double bias;
+    double error;
+};
+
+using ReplayImages = std::array<cv::Mat, 3>;
+using ReplayFolds = std::array<ReplayFold, 4>;
+using ReplayFits = std::array<ReplayFit, 4>;
+
+ReplayImages replay_images(const cv::Mat& image) {
+    return {smooth(image, .65), smooth(image, 1.25), smooth(image, 2.1)};
+}
+
+ReplayFolds replay_folds(const cv::Mat& observed) {
+    ReplayFolds result;
+    for (int y = 0; y < evidence_region.height; ++y) {
+        for (int x = 0; x < evidence_region.width; ++x) {
+            const auto point = evidence_region.tl() + cv::Point(x, y);
+            const auto value = observed.at<float>(point);
+            if (value <= .032 || value >= .969)
+                continue;
+            const auto checking = static_cast<std::size_t>((y / 7 + x / 9) % 4);
+            for (std::size_t i = 0; i < result.size(); ++i) {
+                auto& pixels = i == checking ? result[i].checking : result[i].training;
+                pixels.push_back(point);
+            }
+        }
+    }
+    return result;
+}
+
+double replay_error(const cv::Mat& image, const cv::Mat& observed,
+                    const std::vector<cv::Point>& pixels, const ReplayFit& fit) {
+    double error = 0.;
+    for (const auto& point : pixels) {
+        const auto sample = fit.gain * image.at<float>(point + fit.offset) + fit.bias;
+        error += std::min(.1, std::abs(sample - observed.at<float>(point)));
+    }
+    return error / pixels.size();
+}
+
+ReplayFit fit_replay(const ReplayImages& images, const cv::Mat& observed, const ReplayFold& fold) {
+    ReplayFit best{0, {}, 1., 0., std::numeric_limits<double>::infinity()};
+    const double count = static_cast<double>(fold.training.size());
+    double observed_sum = 0.;
+    for (const auto& point : fold.training)
+        observed_sum += observed.at<float>(point);
+    for (std::size_t i = 0; i < images.size(); ++i) {
+        for (int y = -3; y <= 3; ++y) {
+            for (int x = -3; x <= 3; ++x) {
+                const cv::Point offset(x, y);
+                double image_sum = 0., image_squared = 0., cross = 0.;
+                for (const auto& point : fold.training) {
+                    const double sample = images[i].at<float>(point + offset);
+                    image_sum += sample;
+                    image_squared += sample * sample;
+                    cross += sample * observed.at<float>(point);
+                }
+                const double covariance = cross - image_sum * observed_sum / count;
+                const double variance = image_squared - image_sum * image_sum / count;
+                const double gain = std::clamp(covariance / std::max(variance, .00001), .72, 1.38);
+                const double bias = std::clamp((observed_sum - gain * image_sum) / count, -.12, .12);
+                ReplayFit fit{i, offset, gain, bias, 0.};
+                fit.error = replay_error(images[i], observed, fold.training, fit);
+                if (fit.error < best.error)
+                    best = fit;
+            }
+        }
+    }
+    best.error = replay_error(images[best.blur], observed, fold.checking, best);
+    return best;
+}
+
 }
 
 AppearanceCover cover_appearances(const std::vector<cv::Mat>& candidates, double radius) {
@@ -189,7 +270,9 @@ AppearanceCover cover_appearances(const std::vector<cv::Mat>& candidates, double
 }
 
 EvidenceExtension extend_appearances(const cv::Mat& source, const std::vector<cv::Mat>& candidates,
-                                     std::size_t kept_count, double radius, double replay_tolerance) {
+                                     std::size_t kept_count, double radius, double replay_tolerance,
+                                     std::size_t max_additions,
+                                     const std::function<bool(std::size_t, std::size_t)>& compatible) {
     if (kept_count == 0 || kept_count > candidates.size() || !std::isfinite(radius) || radius <= 0. || radius > 2. ||
         !std::isfinite(replay_tolerance) || replay_tolerance < 0. || replay_tolerance > 1.)
         throw std::invalid_argument("Expected a nonempty protected prefix, radius in (0, 2], and replay tolerance in [0, 1].");
@@ -226,22 +309,102 @@ EvidenceExtension extend_appearances(const cv::Mat& source, const std::vector<cv
             density += std::exp(-distance / radius);
         weights[i] = std::exp(-std::max(0., error - anchor_error) / .014) / density;
     }
-    double best_gain = 0.;
-    std::size_t best = count;
-    for (std::size_t i = kept_count; i < count; ++i) {
-        if (weights[i] <= 0. || result.distances_to_kept[i] <= radius)
-            continue;
-        double gain = 0.;
-        for (std::size_t j = 0; j < count; ++j)
-            gain += weights[j] * std::max(0., result.distances_to_kept[j] - distances[i][j]);
-        if (gain > best_gain) {
-            best_gain = gain;
-            best = i;
+    auto nearest = result.distances_to_kept;
+    std::vector<bool> tried(count);
+    while (result.representatives.size() - kept_count < max_additions) {
+        double best_gain = 0.;
+        std::size_t best = count;
+        for (std::size_t i = kept_count; i < count; ++i) {
+            if (tried[i] || weights[i] <= 0. || nearest[i] <= radius)
+                continue;
+            double gain = 0.;
+            for (std::size_t j = 0; j < count; ++j)
+                gain += weights[j] * std::max(0., nearest[j] - distances[i][j]);
+            if (gain > best_gain) {
+                best_gain = gain;
+                best = i;
+            }
         }
-    }
-    if (best < count)
+        if (best == count)
+            break;
+        tried[best] = true;
+        if (compatible && !std::all_of(result.representatives.begin(), result.representatives.end(),
+                                       [&](auto previous) { return compatible(previous, best); }))
+            continue;
         result.representatives.push_back(best);
+        for (std::size_t i = 0; i < count; ++i)
+            nearest[i] = std::min(nearest[i], distances[best][i]);
+    }
     return result;
+}
+
+std::optional<RepresentativeReplacement> refine_representative(
+    const cv::Mat& source, const std::vector<cv::Mat>& candidates, std::size_t kept_count,
+    const std::function<bool(std::size_t, std::size_t)>& visibly_different) {
+    if (kept_count == 0 || kept_count > candidates.size() || !visibly_different)
+        throw std::invalid_argument("Expected a nonempty displayed prefix and a landmark comparison");
+    const auto observed = thumbnail(source);
+    const auto folds = replay_folds(observed);
+    if (std::any_of(folds.begin(), folds.end(), [](const auto& fold) { return fold.checking.size() < 80; }))
+        return std::nullopt;
+
+    const auto observed_detail = evidence_shape(observed).detail_strength;
+    std::vector<EvidenceShape> shapes;
+    std::vector<ReplayFits> fits(kept_count);
+    for (std::size_t i = 0; i < kept_count; ++i) {
+        const auto gray = thumbnail(candidates[i]);
+        shapes.push_back(evidence_shape(gray));
+        const auto images = replay_images(gray);
+        for (std::size_t j = 0; j < folds.size(); ++j)
+            fits[i][j] = fit_replay(images, observed, folds[j]);
+    }
+
+    std::vector<RepresentativeReplacement> replacements;
+    for (std::size_t i = kept_count; i < candidates.size(); ++i) {
+        const auto gray = thumbnail(candidates[i]);
+        const auto shape = evidence_shape(gray);
+        RepresentativeReplacement proposal{0, i, std::numeric_limits<double>::infinity(),
+                                            std::numeric_limits<double>::infinity(), {}};
+        for (std::size_t j = 0; j < kept_count; ++j) {
+            const double distance = evidence_distance(shape, shapes[j]);
+            if (distance < proposal.distance) {
+                proposal.distance = distance;
+                proposal.previous = j;
+            }
+        }
+        if (proposal.distance > .15 || shape.detail_strength <
+            std::max(.98 * observed_detail, .84 * shapes[proposal.previous].detail_strength))
+            continue;
+        const auto images = replay_images(gray);
+        bool supported = true;
+        for (std::size_t j = 0; j < folds.size(); ++j) {
+            const auto& fit = fits[proposal.previous][j];
+            const double gain = fit.error - replay_error(images[fit.blur], observed, folds[j].checking, fit);
+            if (gain < std::max(.00015, .03 * fit.error)) {
+                supported = false;
+                break;
+            }
+            proposal.replay_improvements[j] = gain;
+            proposal.score = std::min(proposal.score, gain / std::max(.001, fit.error));
+        }
+        if (supported)
+            replacements.push_back(proposal);
+    }
+    std::stable_sort(replacements.begin(), replacements.end(), [](const auto& a, const auto& b) {
+        return a.score > b.score;
+    });
+    for (const auto& proposal : replacements) {
+        if (visibly_different(proposal.previous, proposal.proposed))
+            continue;
+        bool distinct_from_others = true;
+        for (std::size_t i = 0; i < kept_count && distinct_from_others; ++i) {
+            if (i != proposal.previous)
+                distinct_from_others = visibly_different(i, proposal.proposed);
+        }
+        if (distinct_from_others)
+            return proposal;
+    }
+    return std::nullopt;
 }
 
 }

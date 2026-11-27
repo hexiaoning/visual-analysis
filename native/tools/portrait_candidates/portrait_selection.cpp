@@ -212,6 +212,19 @@ class Selector::Model {
 Selector::Selector(const std::filesystem::path &model) : model_(std::make_unique<Model>(model)) {}
 Selector::~Selector() = default;
 
+ShapeDescriptor Selector::describe_shape(const cv::Mat &face) {
+    if (face.type() != CV_8UC3 || face.size() != cv::Size(512, 512))
+        throw std::invalid_argument("Expected an aligned 512x512 CV_8UC3 portrait");
+    return {face, model_->points(face)};
+}
+
+bool visibly_different(const ShapeDescriptor &primary, const ShapeDescriptor &candidate) {
+    if (primary.points.size() != 98 || candidate.points.size() != 98)
+        throw std::invalid_argument("Expected two WFLW landmark sets");
+    const auto shifts = regional_shift(candidate.points, primary.points);
+    return has_visible_shape_difference(primary.image, candidate.image, primary.points, shifts);
+}
+
 std::vector<MouthVariant> Selector::mouth_variants(const cv::Mat &face, const std::vector<double> &openings) {
     if (face.type() != CV_8UC3 || face.size() != cv::Size(512, 512))
         throw std::invalid_argument("Expected an aligned 512x512 CV_8UC3 portrait");

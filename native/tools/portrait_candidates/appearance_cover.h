@@ -1,6 +1,9 @@
 #pragma once
 
 #include <cstddef>
+#include <array>
+#include <functional>
+#include <optional>
 #include <vector>
 
 #include <opencv2/core.hpp>
@@ -23,9 +26,25 @@ struct EvidenceExtension {
     std::vector<double> distances_to_kept;
 };
 
-// Preserve kept_count initial portraits. Add at most one candidate that
-// explains the observation and covers a distinct part of the finite bank.
+// Preserve kept_count initial portraits and extend the measured cover. The
+// predicate can veto a proposed pair before its candidate is added.
 EvidenceExtension extend_appearances(const cv::Mat& source, const std::vector<cv::Mat>& candidates,
-                                     std::size_t kept_count, double radius, double replay_tolerance);
+                                     std::size_t kept_count, double radius, double replay_tolerance,
+                                     std::size_t max_additions = 1,
+                                     const std::function<bool(std::size_t, std::size_t)>& compatible = {});
+
+struct RepresentativeReplacement {
+    std::size_t previous;
+    std::size_t proposed;
+    double distance;
+    double score;
+    std::array<double, 4> replay_improvements;
+};
+
+// Find a single replacement for the displayed prefix. Check that it represents
+// the same appearance as its predecessor and differs from the rest.
+std::optional<RepresentativeReplacement> refine_representative(
+    const cv::Mat& source, const std::vector<cv::Mat>& candidates, std::size_t kept_count,
+    const std::function<bool(std::size_t, std::size_t)>& visibly_different);
 
 }

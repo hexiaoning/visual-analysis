@@ -148,13 +148,27 @@ $exe = Join-Path $build.OutputDirectory 'PortraitCandidates.exe'
 
 ## 在原结果后追加有观测支持的候选
 
-`--extend-shape-cover` 接收原始糊图和同一 512×512 对齐坐标的一组候选。开头指定数量的候选按原顺序输出，后续候选最多追加一张。程序允许小幅平移和模糊回放，在分开的图块拟合及检验亮度。追加图要求脸部细频不低于糊图，回放误差不超过原结果最小误差加给定容差，而且与每张原结果的五官带通距离均大于半径。若有多张满足，优先保留能覆盖较多相近且有观测支持的备选的候选，降低近重复簇的权重。
+`--extend-shape-cover` 接收原始糊图和同一 512×512 对齐坐标的一组候选。开头指定数量的候选按原顺序输出，默认最多追加一张。程序允许小幅平移和模糊回放，在分开的图块拟合及检验亮度。追加图要求脸部细频不低于糊图，回放误差不超过原结果最小误差加给定容差，而且与每张原结果的五官带通距离均大于半径。若有多张满足，优先保留能覆盖较多相近且有观测支持的备选的候选，降低近重复簇的权重。
 
 ```powershell
 & $exe --extend-shape-cover 0.055 0.028 1 --landmarks .\hr-nosa-wflw-geometry.onnx .\source.png .\outputs .\primary.png .\alternative-1.png .\alternative-2.png
 ```
 
 可选 `--landmarks` 使用本地 HR-noSA 对追加图和每张原结果再做一次关键点及局部像素差异检验，全部通过才追加。`selection.json` 记录 `landmark_checks`、各输入的 `replay_errors`、到原结果集合的最短距离 `distance_to_protected` 及实际输出。输出直接使用所选候选像素。回放容差采用 0 到 1 的亮度标度。[配对验证](../../../docs/portrait-native-paired-evaluation.md)
+
+```powershell
+& $exe --extend-shape-cover 0.055 0.028 1 --max-additions 3 --landmarks .\hr-nosa-wflw-geometry.onnx .\source.png .\outputs .\primary.png .\alternative-1.png .\alternative-2.png
+```
+
+显式传入 `--max-additions` 时，每接受一张就更新覆盖距离。新图必须与全部已输出图满足距离门槛。启用 `--landmarks` 时，还需要逐对通过关键点及局部像素检验。被拒绝后继续尝试其他候选，能通过多少张就输出多少张。`0` 只输出指定的开头候选。该模式用 `pair_checks` 记录逐对结果，用 `max_additions` 记录追加上限。
+
+## 固定数量时复核已有候选
+
+```powershell
+& $exe --refine-representatives 2 .\hr-nosa-wflw-geometry.onnx .\source.png .\outputs .\face-1.png .\face-2.png .\alternative.png
+```
+
+保持展示数量和位置，最多替换其中一张。备选的五官带通距离需接近拟替换的图，脸部细频需接近糊图及旧候选。将脸区分成四组交错图块，每次用其中三组为旧候选拟合同一个模糊、平移及亮度变换，锁定参数后分别回放旧图和备选，用剩下一组比较误差。四组都达到至少 3% 且至少 0.00015 的改善后，再用 HR-noSA 验证两张是否落在同一外观组、备选是否与其他已展示图不同。`selection.json` 的 `replacement` 包含被替换与新候选索引、五官距离及四组回放改善。没有达标替换时为 `null`。回放分数衡量与输入的吻合程度。[配对验证](../../../docs/portrait-native-paired-evaluation.md)
 
 ## 纹理保护实验
 

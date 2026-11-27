@@ -50,6 +50,13 @@ struct MouthVariant {
     double output_opening;
 };
 
+struct ShapeDescriptor {
+    cv::Mat image;
+    std::vector<cv::Point2f> points;
+};
+
+bool visibly_different(const ShapeDescriptor &primary, const ShapeDescriptor &candidate);
+
 class Selector {
   public:
     explicit Selector(const std::filesystem::path &landmarks);
@@ -60,6 +67,7 @@ class Selector {
     Result select(const cv::Mat &source, const cv::Mat &codeformer, const cv::Mat &amd,
                   const TextureGuard *guard = nullptr);
     std::vector<MouthVariant> mouth_variants(const cv::Mat &face, const std::vector<double> &openings);
+    ShapeDescriptor describe_shape(const cv::Mat &face);
 
   private:
     class Model;
