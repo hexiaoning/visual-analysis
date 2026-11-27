@@ -6,6 +6,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -75,6 +76,84 @@ cv::Mat combine_detail_consensus(const std::array<cv::Mat, 3> &candidates) {
 const char *route_name(Route name) { return name == Route::codeformer ? "codeformer" : "amd"; }
 
 using Json = nlohmann::ordered_json;
+
+using DonorWeights = std::array<std::array<float, 3>, 4>;
+
+DonorWeights read_donor_weights(const fs::path &path) {
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream)
+        throw std::runtime_error("Cannot open local donor weights");
+    const auto model = Json::parse(stream);
+    const auto &weights = model.at("weights");
+    DonorWeights result{};
+    if (model.at("schema") != "portrait-local-donors-v1" || !weights.is_array() || weights.size() != result.size())
+        throw std::invalid_argument("Expected four facial regions in a version 1 local donor profile");
+    for (size_t region = 0; region < result.size(); ++region) {
+        const auto &row = weights.at(region);
+        if (!row.is_array() || row.size() != result[region].size())
+            throw std::invalid_argument("Expected three donor weights per facial region");
+        double total = 0.0;
+        for (size_t donor = 0; donor < result[region].size(); ++donor) {
+            if (!row[donor].is_number())
+                throw std::invalid_argument("Donor weights must be finite numbers");
+            const double weight = row[donor].get<double>();
+            if (!std::isfinite(weight) || weight < 0.0 || weight > 1.0)
+                throw std::invalid_argument("Donor weights must be between zero and one");
+            result[region][donor] = static_cast<float>(weight);
+            total += weight;
+        }
+        if (total > 1.0 + 1e-7)
+            throw std::invalid_argument("Donor weights cannot sum above one within a facial region");
+    }
+    return result;
+}
+
+cv::Mat compose_local_donors(const cv::Mat &base, const std::array<cv::Mat, 3> &donors, const DonorWeights &weights) {
+    const auto check = [](const cv::Mat &image) {
+        if (image.size() != cv::Size(512, 512) || image.type() != CV_8UC3)
+            throw std::invalid_argument("Local donor mixing requires aligned 512x512 BGR images");
+    };
+    check(base);
+    for (const auto &donor : donors)
+        check(donor);
+    struct FacialWindow { float x, y, width, height; };
+    constexpr std::array windows{
+        FacialWindow{190.0f, 240.0f, 49.0f, 40.0f}, FacialWindow{315.0f, 240.0f, 49.0f, 40.0f},
+        FacialWindow{255.0f, 302.0f, 43.0f, 39.0f}, FacialWindow{255.0f, 373.0f, 79.0f, 41.0f},
+    };
+    auto output = base.clone();
+    for (int y = 0; y < base.rows; ++y) {
+        const auto *reference = base.ptr<cv::Vec3b>(y);
+        auto *result = output.ptr<cv::Vec3b>(y);
+        const std::array pixels{donors[0].ptr<cv::Vec3b>(y), donors[1].ptr<cv::Vec3b>(y), donors[2].ptr<cv::Vec3b>(y)};
+        for (int x = 0; x < base.cols; ++x) {
+            std::array<float, windows.size()> masks{};
+            float total = 0.0f;
+            for (size_t i = 0; i < windows.size(); ++i) {
+                const auto &region = windows[i];
+                const float dx = (static_cast<float>(x) - region.x) / region.width;
+                const float dy = (static_cast<float>(y) - region.y) / region.height;
+                const float fraction = std::clamp((1.18f - dx * dx - dy * dy) / 0.57f, 0.0f, 1.0f);
+                masks[i] = fraction * fraction * (3.0f - 2.0f * fraction);
+                total += masks[i];
+            }
+            if (total == 0.0f)
+                continue;
+            std::array<float, 3> amount{};
+            for (size_t i = 0; i < windows.size(); ++i)
+                for (size_t donor = 0; donor < amount.size(); ++donor)
+                    amount[donor] += weights[i][donor] * (masks[i] / std::max(total, 1.0f));
+            for (int channel = 0; channel < 3; ++channel) {
+                const float value = reference[x][channel];
+                float adjustment = 0.0f;
+                for (size_t donor = 0; donor < amount.size(); ++donor)
+                    adjustment += amount[donor] * (static_cast<float>(pixels[donor][x][channel]) - value);
+                result[x][channel] = cv::saturate_cast<std::uint8_t>(value + adjustment);
+            }
+        }
+    }
+    return output;
+}
 
 portrait_selection::TextureGuard read_guard(const fs::path &path) {
     std::ifstream stream(path, std::ios::binary);
@@ -251,6 +330,8 @@ int wmain(int argc, wchar_t **argv) {
             "PortraitCandidates.exe --calibrate-capture-color model.json source.png candidate.png output.png\n"
             "PortraitCandidates.exe --calibrate-capture-geometry model.json source.png first-guide.png "
             "second-guide.png candidate.png output.png\n"
+            "PortraitCandidates.exe --compose-local-donors weights.json baseline.png first.png second.png "
+            "third.png output.png\n"
             "PortraitCandidates.exe --combine-detail-consensus first.png second.png third.png output.png\n"
             "PortraitCandidates.exe --select-by-replay landmarks.onnx source.png primary.png output-directory "
             "alternate.png [alternate2.png ...]";
@@ -263,6 +344,19 @@ int wmain(int argc, wchar_t **argv) {
             if (argc < 7)
                 throw std::invalid_argument(usage);
             print_output_path(select_by_replay(argv, argc));
+            return 0;
+        }
+        if (option == L"--compose-local-donors") {
+            if (argc != 8)
+                throw std::invalid_argument(usage);
+            const fs::path output(argv[7]);
+            if (fs::exists(output))
+                throw std::invalid_argument("Local donor output must be a new path");
+            cv::setNumThreads(1);
+            const auto weights = read_donor_weights(argv[2]);
+            const auto baseline = read_image(argv[3]);
+            const std::array donors{read_image(argv[4]), read_image(argv[5]), read_image(argv[6])};
+            publish_new_image(output, compose_local_donors(baseline, donors, weights));
             return 0;
         }
         if (option == L"--combine-detail-consensus") {

@@ -53,6 +53,23 @@ $exe = Join-Path $build.OutputDirectory 'PortraitCandidates.exe'
 
 中值合并减少单一路线独有的改动。用于评测的展示规则及独立配对结果另有记录。[配对评测](../../../docs/portrait-native-paired-evaluation.md)
 
+## 按五官组合多张候选
+
+`--compose-local-donors` 接收同一张糊图衍生的对齐底图和三张供体，尺寸均为 512×512。参数文件的四行依次对应画面左眼、右眼、鼻和嘴，每行按所给供体顺序列出三项权重。剩余权重分配给底图。脸部软窗外保持底图像素，重叠处利用归一化的软窗混合。结果写入一个新 PNG 路径。
+
+```json
+{
+  "schema": "portrait-local-donors-v1",
+  "weights": [[1, 0, 0], [0, 0.5, 0.25], [0, 0, 0], [0, 1, 0]]
+}
+```
+
+```powershell
+& $exe --compose-local-donors .\weights.json .\baseline.png .\first.png .\second.png .\third.png .\mixed.png
+```
+
+权重由调用方提供。该命令只完成本地像素组合。[配对评测](../../../docs/portrait-native-paired-evaluation.md)
+
 ## 单张模糊图的曝光校正
 
 `--normalize-exposure` 在生成候选之前运行，输入为一张已对齐的 512×512 BGR 图像。参数文件由公开配对数据的离线训练生成。此模式使用 C++ 和 OpenCV 估计亮度及色偏，需要提供研究参数文件，无需加载关键点模型。示例将得到一张新路径下的 PNG，可送入原生人像生成器。
