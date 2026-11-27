@@ -40,3 +40,10 @@ Windows x64 研究工具从一张对齐的 512×512 人像生成多个候选。�
 & D:\DevTools\build-portrait-moments\PortraitMoments.exe --refine-sequence GPU `
     .\jin-240.onnx .\signed-512.onnx .\portrait-1.png .\candidates-1 .\portrait-2.png .\candidates-2
 ```
+
+可用 `--positions` 从七帧中指定输出位置。默认 `1,3,5,7`。自定义列表以逗号分隔，取值为 1 至 7，每个位置只写一次。按传入顺序编号 PNG，所有输入图共用该列表。位置描述七帧模型的输出索引。
+
+```powershell
+& D:\DevTools\build-portrait-moments\PortraitMoments.exe --refine-sequence GPU `
+    .\jin-240.onnx .\signed-512.onnx --positions '2,4,6' .\portrait.png .\intermediate-candidates
+```

@@ -143,11 +143,11 @@ cv::Mat bgr(const float* rgb, int side) {
 }
 
 void renderRefinedSequence(ov::InferRequest& seed_session, ov::InferRequest& request, int side,
-                           const std::string& device, const cv::Mat& portrait, const fs::path& output) {
+                           const std::string& device, const cv::Mat& portrait, const fs::path& output,
+                           const std::vector<std::size_t>& positions) {
     constexpr int seed_side = 240;
     const auto plane = static_cast<std::size_t>(side) * side;
     constexpr std::size_t seed_plane = seed_side * seed_side;
-    constexpr std::array<std::size_t, 4> positions{0, 2, 4, 6};
     const bool original_resolution = side == portrait.rows;
     const cv::Mat tensor = rgbBlob(portrait, seed_side);
     std::copy_n(tensor.ptr<float>(), 3 * seed_plane, seed_session.get_input_tensor().data<float>());
@@ -197,7 +197,7 @@ void renderRefinedSequence(ov::InferRequest& seed_session, ov::InferRequest& req
         const auto phase = positions[index];
         auto* conditioning = reduced.data() + phase * 3 * plane;
         std::copy_n(conditioning, 3 * plane, packed + 3 * plane);
-        std::fill_n(packed + 12 * plane, plane, index == 0 || index == 3 ? 1.f : 1.f / 3.f);
+        std::fill_n(packed + 12 * plane, plane, std::abs(static_cast<int>(phase) - 3) / 3.f);
         request.infer();
         const auto prediction = request.get_output_tensor();
         auto* values = prediction.data<float>();
@@ -232,8 +232,30 @@ void renderRefinedSequence(ov::InferRequest& seed_session, ov::InferRequest& req
     });
 }
 
+std::vector<std::size_t> sequencePositions(std::wstring_view requested) {
+    std::vector<std::size_t> positions;
+    for (;;) {
+        const auto separator = requested.find(L',');
+        const auto token = requested.substr(0, separator);
+        if (token.size() != 1 || token.front() < L'1' || token.front() > L'7')
+            throw std::invalid_argument("Expected comma-separated positions from 1 to 7.");
+        const auto position = static_cast<std::size_t>(token.front() - L'1');
+        if (std::find(positions.begin(), positions.end(), position) != positions.end())
+            throw std::invalid_argument("Sequence positions must be unique.");
+        positions.push_back(position);
+        if (separator == std::wstring_view::npos)
+            return positions;
+        requested.remove_prefix(separator + 1);
+    }
+}
+
 void refineSequence(const std::string& device, wchar_t** argv, int argc) {
     constexpr int seed_side = 240;
+    const bool custom_positions = std::wstring_view(argv[5]) == L"--positions";
+    const int first_pair = custom_positions ? 7 : 5;
+    if (argc < first_pair + 2)
+        throw std::invalid_argument("Expected at least one portrait and output pair.");
+    const auto positions = custom_positions ? sequencePositions(argv[6]) : std::vector<std::size_t>{0, 2, 4, 6};
     cv::setNumThreads(1);
     ov::Core core;
     auto seed_model = compilePortraitGraph(core, device, argv[3], {1, 3, seed_side, seed_side}, {1, 21, seed_side, seed_side});
@@ -247,9 +269,9 @@ void refineSequence(const std::string& device, wchar_t** argv, int argc) {
     auto seed_request = seed_model.create_infer_request();
     auto refine_request = refine_model.create_infer_request();
     const auto executed = refine_model.get_property(ov::execution_devices).front();
-    for (int arg = 5; arg < argc; arg += 2)
+    for (int arg = first_pair; arg < argc; arg += 2)
         renderRefinedSequence(seed_request, refine_request, static_cast<int>(side), executed,
-                              readPortrait(argv[arg]), argv[arg + 1]);
+                              readPortrait(argv[arg]), argv[arg + 1], positions);
 }
 
 void produce(const std::string& device, const fs::path& graph, const cv::Mat& portrait,
@@ -289,7 +311,7 @@ int wmain(int argc, wchar_t** argv) {
         const bool refine = argc > 1 && std::wstring_view(argv[1]) == L"--refine-sequence";
         if ((refine && (argc < 7 || argc % 2 == 0)) || (!refine && argc < 5))
             throw std::invalid_argument("Use PortraitMoments.exe CPU|GPU graph.onnx portrait.png output [moment ...]\n"
-                                        "or PortraitMoments.exe --refine-sequence CPU|GPU sequence.onnx refinement.onnx "
+                                        "or PortraitMoments.exe --refine-sequence CPU|GPU sequence.onnx refinement.onnx [--positions 1,3,5,7] "
                                         "portrait.png output [portrait2.png output2 ...]");
         const std::wstring_view device(argv[refine ? 2 : 1]);
         if (device != L"CPU" && device != L"GPU")
