@@ -1,6 +1,7 @@
 #include "portrait_selection.h"
 #include "appearance_cover.h"
 #include "exposure_normalizer.h"
+#include "exposure_recombination.h"
 #include "fine_band_limit.h"
 #include "geometry_calibration.h"
 
@@ -311,6 +312,35 @@ fs::path mouth_variants(wchar_t **argv, int argc) {
     });
 }
 
+fs::path recombine_exposure_pair(const fs::path &directory, const portrait_selection::ShapeDescriptor &first,
+                                 const portrait_selection::ShapeDescriptor &second) {
+    using portrait_selection::ExposureRegion;
+    return publish_run(directory, [&](const fs::path &pending) {
+        Json variants = Json::object();
+        for (const auto &[region, name] : std::array{std::pair{ExposureRegion::eyes, "eyes"},
+                                                     std::pair{ExposureRegion::mouth, "mouth"}}) {
+            const auto pair = portrait_selection::recombine_exposure(first, second, region);
+            Json outputs = Json::array();
+            if (std::string_view(pair.status) == "generated") {
+                const std::string a = std::string(name) + "-first.png";
+                const std::string b = std::string(name) + "-second.png";
+                write_image(pending / a, pair.first);
+                write_image(pending / b, pair.second);
+                outputs = {a, b};
+            }
+            variants[name] = {{"status", pair.status}, {"pose_shift", pair.pose_shift}, {"context_error", pair.context_error},
+                              {"ideal_mean_error", pair.ideal_mean_error}, {"saved_mean_error", pair.saved_mean_error},
+                              {"saved_mean_rms", pair.saved_mean_rms}, {"changed_pixels", {pair.changed_first, pair.changed_second}},
+                              {"outputs", std::move(outputs)}};
+        }
+        std::ofstream receipt(pending / "selection.json", std::ios::binary);
+        receipt << Json{{"mode", "exposure-recombination"}, {"regions", std::move(variants)}}.dump(2) << '\n';
+        receipt.close();
+        if (!receipt)
+            throw std::runtime_error("Could not save exposure recombination report");
+    });
+}
+
 Json write_indexed_candidates(const fs::path &directory, const std::vector<cv::Mat> &portraits,
                               const std::vector<std::size_t> &indices) {
     Json outputs = Json::array();
@@ -554,6 +584,7 @@ int wmain(int argc, wchar_t **argv) {
             "third.png output.png\n"
             "PortraitCandidates.exe --combine-detail-consensus first.png second.png third.png output.png\n"
             "PortraitCandidates.exe --mouth-variants landmarks.onnx aligned.png output-directory opening [opening2 ...]\n"
+            "PortraitCandidates.exe --recombine-exposure landmarks.onnx first.png second.png output-directory [first2.png second2.png output2 ...]\n"
             "PortraitCandidates.exe --extend-shape-cover radius replay-tolerance kept-count [--max-additions count] [--landmarks model.onnx] source.png output-directory candidate.png [more.png ...]\n"
             "PortraitCandidates.exe --refine-representatives kept-count landmarks.onnx source.png output-directory shown.png [more.png ...]\n"
             "PortraitCandidates.exe --cover-shapes radius output-directory primary.png [candidate.png ...]\n"
@@ -580,6 +611,18 @@ int wmain(int argc, wchar_t **argv) {
             if (argc < 6)
                 throw std::invalid_argument(usage);
             print_output_path(mouth_variants(argv, argc));
+            return 0;
+        }
+        if (option == L"--recombine-exposure") {
+            if (argc < 6 || (argc - 3) % 3 != 0)
+                throw std::invalid_argument(usage);
+            cv::setNumThreads(1);
+            portrait_selection::Selector model(argv[2]);
+            for (int i = 3; i < argc; i += 3) {
+                const auto first = model.describe_shape(read_image(argv[i]));
+                const auto second = model.describe_shape(read_image(argv[i + 1]));
+                print_output_path(recombine_exposure_pair(argv[i + 2], first, second));
+            }
             return 0;
         }
         if (option == L"--cover-shapes") {

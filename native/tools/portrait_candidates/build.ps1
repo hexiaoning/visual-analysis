@@ -40,7 +40,7 @@ $Arguments = @(
     "/I$MsvcDirectory\include", "/I$SdkHeaders\ucrt", "/I$SdkHeaders\um", "/I$SdkHeaders\shared",
     "/Fo$Objects\", "/Fe$Output\PortraitCandidates.exe",
     (Join-Path $PSScriptRoot "main.cpp"), (Join-Path $PSScriptRoot "portrait_selection.cpp"),
-    (Join-Path $PSScriptRoot "appearance_cover.cpp"),
+    (Join-Path $PSScriptRoot "appearance_cover.cpp"), (Join-Path $PSScriptRoot "exposure_recombination.cpp"),
     (Join-Path $PSScriptRoot "duplicate_consensus.cpp"), (Join-Path $PSScriptRoot "texture_guard.cpp"),
     (Join-Path $PSScriptRoot "exposure_normalizer.cpp"), (Join-Path $PSScriptRoot "geometry_calibration.cpp"), (Join-Path $PSScriptRoot "fine_band_limit.cpp"),
     "/link", "/subsystem:console", "/incremental:no", "/libpath:$MsvcDirectory\lib\x64",

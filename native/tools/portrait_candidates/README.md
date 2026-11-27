@@ -59,6 +59,16 @@ $exe = Join-Path $build.OutputDirectory 'PortraitCandidates.exe'
 & $exe --combine-detail-consensus .\fixed-points.png .\shape-a.png .\shape-b.png .\combined.png
 ```
 
+### 重组同一曝光的两个候选
+
+`--recombine-exposure` 接收由同一张糊图生成的两个 512×512 对齐候选。用本地 HR-noSA 定位双眼和嘴，分别双向交换对应区域。两张输出使用相同的羽化遮罩，在线性 RGB 中一边增加的量恰好从另一边扣除。因此在等权曝光模型下，两张图的逐像素平均在量化前保持一致。保存在 8 位 PNG 后存在舍入误差。该命令可为一对输入各生成一对眼部图和一对口部图。
+
+```powershell
+& $exe --recombine-exposure .\hr-nosa-wflw-geometry.onnx .\phase-1.png .\phase-7.png .\exchanges
+```
+
+鼻部点位偏移过大、羽化边缘周围的颜色差过大或区域尺寸异常时会跳过相应结果。没有有效像素变化时也只写回执。`selection.json` 记录每个区域的状态、有效输出、修改的像素数以及量化前后平均值的误差。可在命令末尾追加 `first.png second.png output-directory`，复用关键点模型。[配对验证](../../../docs/portrait-native-paired-evaluation.md)
+
 中值合并减少单一路线独有的改动。用于评测的展示规则及独立配对结果另有记录。[配对评测](../../../docs/portrait-native-paired-evaluation.md)
 
 ## 按五官组合多张候选

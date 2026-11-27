@@ -125,8 +125,10 @@ try {
         throw "Shape cover regression failed with exit code $LASTEXITCODE."
     }
     $Cover = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $CoverFolder "selection.json") | ConvertFrom-Json
+    $CoverDistances = @($Cover.measured_distance)
+    $NonzeroDistances = @($CoverDistances | Where-Object { $null -eq $_ -or [double]$_ -ne 0.0 })
     if ($Cover.mode -cne "shape-cover" -or ($Cover.outputs.input_index -join ",") -cne "0,1" -or
-        ($Cover.nearest_input_index -join ",") -cne "0,1,0" -or ($Cover.measured_distance -join ",") -cne "0,0,0") {
+        ($Cover.nearest_input_index -join ",") -cne "0,1,0" -or $CoverDistances.Count -ne 3 -or $NonzeroDistances.Count -ne 0) {
         throw "Shape cover should retain both distinct fixtures and collapse the repeated image."
     }
     Test-Pixels (Join-Path $CoverFolder $Cover.outputs[0].png) 512 $CoverCase.input_hashes.codeformer
