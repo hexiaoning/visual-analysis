@@ -180,6 +180,16 @@ $exe = Join-Path $build.OutputDirectory 'PortraitCandidates.exe'
 
 保持展示数量和位置，最多替换其中一张。备选的五官带通距离需接近拟替换的图，脸部细频需接近糊图及旧候选。将脸区分成四组交错图块，每次用其中三组为旧候选拟合同一个模糊、平移及亮度变换，锁定参数后分别回放旧图和备选，用剩下一组比较误差。四组都达到至少 3% 且至少 0.00015 的改善后，再用 HR-noSA 验证两张是否落在同一外观组、备选是否与其他已展示图不同。`selection.json` 的 `replacement` 包含被替换与新候选索引、五官距离及四组回放改善。没有达标替换时为 `null`。回放分数衡量与输入的吻合程度。[配对验证](../../../docs/portrait-native-paired-evaluation.md)
 
+## 检查整组候选的展示约束
+
+```powershell
+& $exe --inspect-appearance-bank 0.055 .\hr-nosa-wflw-geometry.onnx .\source.png .\outputs .\primary.png .\alternative-1.png .\alternative-2.png
+```
+
+原糊图与候选使用同一 512×512 对齐坐标。该命令在新建的运行目录写入 `selection.json`。`source_detail` 和 `detail` 是脸区细频强度，`replay_errors` 是配准后的亮度回放误差，`distance` 为两两五官带通距离。`compatible` 要求距离高于给定半径，同时以较早输入的候选为参照通过关键点及局部像素差异检查。两张矩阵均按候选输入顺序排列，对角线分别为 0 和 `false`。这些数据用于复核选图约束。
+
+用 `--distance-only` 替代模型路径时只比较带通距离，`landmarks_enabled` 记录是否检测关键点。
+
 ## 纹理保护实验
 
 `--texture-guard <model.json>` 包含近重复拟合。仅当拟合会把主候选替换成 AMD 时，程序计算 AMD 的纹理分。分数小于或等于科研模型的固定阈值 **0.5641734981312992** 时接受替换，超过阈值则保留原先选择。模型使用绝对分数，计算过程中只读取 AMD 的候选图。近重复以外的双张展示按原规则处理。

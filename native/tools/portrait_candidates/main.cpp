@@ -354,8 +354,8 @@ Json write_indexed_candidates(const fs::path &directory, const std::vector<cv::M
 
 class ShapeComparisons {
 public:
-    ShapeComparisons(const fs::path &model, const std::vector<cv::Mat> &portraits)
-        : model_(model), portraits_(portraits), descriptions_(portraits.size()) {}
+    ShapeComparisons(const fs::path &model, const std::vector<cv::Mat> &portraits, bool record_checks = true)
+        : model_(model), portraits_(portraits), descriptions_(portraits.size()), record_checks_(record_checks) {}
 
     bool different(std::size_t previous, std::size_t proposed) {
         if (!selector_)
@@ -365,7 +365,8 @@ public:
                 descriptions_[index] = selector_->describe_shape(portraits_[index]);
         }
         const bool visible = portrait_selection::visibly_different(*descriptions_[previous], *descriptions_[proposed]);
-        checks.push_back({{"previous", previous}, {"proposed", proposed}, {"visible", visible}});
+        if (record_checks_)
+            checks.push_back({{"previous", previous}, {"proposed", proposed}, {"visible", visible}});
         return visible;
     }
 
@@ -376,7 +377,43 @@ private:
     const std::vector<cv::Mat> &portraits_;
     std::optional<portrait_selection::Selector> selector_;
     std::vector<std::optional<portrait_selection::ShapeDescriptor>> descriptions_;
+    bool record_checks_;
 };
+
+fs::path inspect_appearance_bank(wchar_t **argv, int argc) {
+    cv::setNumThreads(1);
+    const std::wstring radius_text(argv[2]);
+    std::size_t used = 0;
+    const double radius = std::stod(radius_text, &used);
+    if (used != radius_text.size() || !std::isfinite(radius) || radius <= 0. || radius > 2.)
+        throw std::invalid_argument("Expected a radius in (0, 2]");
+    const auto source = read_image(argv[4]);
+    std::vector<cv::Mat> portraits;
+    for (int i = 6; i < argc; ++i)
+        portraits.push_back(read_image(argv[i]));
+    const auto evidence = portrait_selection::analyse_appearance_bank(source, portraits);
+    const bool compare_landmarks = std::wstring_view(argv[3]) != L"--distance-only";
+    ShapeComparisons landmarks(argv[3], portraits, false);
+    std::vector<std::vector<bool>> compatible(portraits.size(), std::vector<bool>(portraits.size()));
+    for (std::size_t i = 0; i < portraits.size(); ++i) {
+        for (std::size_t j = i + 1; j < portraits.size(); ++j) {
+            const bool visible = evidence.distances[i][j] > radius && (!compare_landmarks || landmarks.different(i, j));
+            compatible[i][j] = compatible[j][i] = visible;
+        }
+    }
+    return publish_run(argv[5], [&](const fs::path &directory) {
+        const Json report = {
+            {"radius", radius}, {"source_detail", evidence.observed_detail}, {"detail", evidence.candidate_detail},
+            {"replay_errors", evidence.replay_errors}, {"distance", evidence.distances}, {"compatible", compatible},
+            {"landmarks_enabled", compare_landmarks},
+        };
+        std::ofstream receipt(directory / "selection.json", std::ios::binary);
+        receipt << report.dump() << '\n';
+        receipt.close();
+        if (!receipt)
+            throw std::runtime_error("Could not save appearance bank evidence");
+    });
+}
 
 fs::path extend_shape_cover(wchar_t **argv, int argc) {
     cv::setNumThreads(1);
@@ -587,6 +624,7 @@ int wmain(int argc, wchar_t **argv) {
             "PortraitCandidates.exe --recombine-exposure landmarks.onnx first.png second.png output-directory [first2.png second2.png output2 ...]\n"
             "PortraitCandidates.exe --extend-shape-cover radius replay-tolerance kept-count [--max-additions count] [--landmarks model.onnx] source.png output-directory candidate.png [more.png ...]\n"
             "PortraitCandidates.exe --refine-representatives kept-count landmarks.onnx source.png output-directory shown.png [more.png ...]\n"
+            "PortraitCandidates.exe --inspect-appearance-bank radius landmarks.onnx|--distance-only source.png output-directory candidate.png [more.png ...]\n"
             "PortraitCandidates.exe --cover-shapes radius output-directory primary.png [candidate.png ...]\n"
             "PortraitCandidates.exe --select-by-replay landmarks.onnx source.png primary.png output-directory "
             "alternate.png [alternate2.png ...]";
@@ -605,6 +643,12 @@ int wmain(int argc, wchar_t **argv) {
             if (argc < 7)
                 throw std::invalid_argument(usage);
             print_output_path(refine_representatives(argv, argc));
+            return 0;
+        }
+        if (option == L"--inspect-appearance-bank") {
+            if (argc < 7)
+                throw std::invalid_argument(usage);
+            print_output_path(inspect_appearance_bank(argv, argc));
             return 0;
         }
         if (option == L"--mouth-variants") {

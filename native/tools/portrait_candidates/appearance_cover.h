@@ -20,6 +20,15 @@ struct AppearanceCover {
 // applies to measured geometry in the supplied bank of candidates.
 AppearanceCover cover_appearances(const std::vector<cv::Mat>& candidates, double radius);
 
+struct AppearanceEvidence {
+    double observed_detail;
+    std::vector<double> replay_errors;
+    std::vector<double> candidate_detail;
+    std::vector<std::vector<double>> distances;
+};
+
+AppearanceEvidence analyse_appearance_bank(const cv::Mat& source, const std::vector<cv::Mat>& candidates);
+
 struct EvidenceExtension {
     std::vector<std::size_t> representatives;
     std::vector<double> replay_errors;

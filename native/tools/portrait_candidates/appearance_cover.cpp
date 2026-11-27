@@ -269,6 +269,26 @@ AppearanceCover cover_appearances(const std::vector<cv::Mat>& candidates, double
     }
 }
 
+AppearanceEvidence analyse_appearance_bank(const cv::Mat& source, const std::vector<cv::Mat>& candidates) {
+    const auto observed = thumbnail(source);
+    const auto count = candidates.size();
+    AppearanceEvidence result{evidence_shape(observed).detail_strength, {}, {},
+                              std::vector<std::vector<double>>(count, std::vector<double>(count))};
+    std::vector<EvidenceShape> shapes;
+    shapes.reserve(count);
+    for (const auto& candidate : candidates) {
+        const auto gray = thumbnail(candidate);
+        shapes.push_back(evidence_shape(gray));
+        result.candidate_detail.push_back(shapes.back().detail_strength);
+        result.replay_errors.push_back(registered_error(gray, observed));
+    }
+    for (std::size_t i = 0; i < count; ++i) {
+        for (std::size_t j = i + 1; j < count; ++j)
+            result.distances[i][j] = result.distances[j][i] = evidence_distance(shapes[i], shapes[j]);
+    }
+    return result;
+}
+
 EvidenceExtension extend_appearances(const cv::Mat& source, const std::vector<cv::Mat>& candidates,
                                      std::size_t kept_count, double radius, double replay_tolerance,
                                      std::size_t max_additions,
@@ -276,33 +296,21 @@ EvidenceExtension extend_appearances(const cv::Mat& source, const std::vector<cv
     if (kept_count == 0 || kept_count > candidates.size() || !std::isfinite(radius) || radius <= 0. || radius > 2. ||
         !std::isfinite(replay_tolerance) || replay_tolerance < 0. || replay_tolerance > 1.)
         throw std::invalid_argument("Expected a nonempty protected prefix, radius in (0, 2], and replay tolerance in [0, 1].");
-    const auto observed = thumbnail(source);
-    const double observed_detail = evidence_shape(observed).detail_strength;
+    auto evidence = analyse_appearance_bank(source, candidates);
+    const auto& distances = evidence.distances;
     const auto count = candidates.size();
     EvidenceExtension result;
-    std::vector<EvidenceShape> shapes;
-    shapes.reserve(count);
-    double anchor_error = std::numeric_limits<double>::infinity();
-    for (std::size_t i = 0; i < count; ++i) {
-        const auto gray = thumbnail(candidates[i]);
-        shapes.push_back(evidence_shape(gray));
-        result.replay_errors.push_back(registered_error(gray, observed));
-        if (i < kept_count) {
-            result.representatives.push_back(i);
-            anchor_error = std::min(anchor_error, result.replay_errors.back());
-        }
-    }
-    std::vector<std::vector<double>> distances(count, std::vector<double>(count));
-    for (std::size_t i = 0; i < count; ++i) {
-        for (std::size_t j = i + 1; j < count; ++j)
-            distances[i][j] = distances[j][i] = evidence_distance(shapes[i], shapes[j]);
-    }
+    result.replay_errors = std::move(evidence.replay_errors);
+    const double anchor_error = *std::min_element(result.replay_errors.begin(),
+                                                  result.replay_errors.begin() + kept_count);
+    for (std::size_t i = 0; i < kept_count; ++i)
+        result.representatives.push_back(i);
     result.distances_to_kept.resize(count);
     std::vector<double> weights(count);
     for (std::size_t i = 0; i < count; ++i) {
         result.distances_to_kept[i] = *std::min_element(distances[i].begin(), distances[i].begin() + kept_count);
         const double error = result.replay_errors[i];
-        if (error > anchor_error + replay_tolerance || shapes[i].detail_strength < observed_detail)
+        if (error > anchor_error + replay_tolerance || evidence.candidate_detail[i] < evidence.observed_detail)
             continue;
         double density = 0.;
         for (double distance : distances[i])
