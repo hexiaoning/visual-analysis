@@ -4916,3 +4916,21 @@ Windows 11 同机各用两条 CPU 线程，在两个固定潜变量上比较完�
 三张用户样例的两路备选在脸区的平均绝对差分别为 0.80、1.25、0.24 个 8 位灰阶。逐图对照未看到足够清楚的五官变化，第三张仍很模糊。Windows C++ 选择器在三组里均只保留既有底图，保存图像已逐像素核对。它检查的中央候选回放误差更低，但相对输入的脸部带通强度仅为 0.830、0.974、0.921，且没有通过五官差异检验。三图缺少清晰原片。
 
 本机实验目录为 `D:/DevTools/visual-analysis-dev/portrait-staged-latent-01/contour-hypotheses`。`training-finished.json` 记录选中的检查点与训练曲线，`candidate-manifest.lock` 锁定候选，`evaluation.json` 保存逐图指标，`paired-hard-review.png` 和 `three-user-review.png` 保存对照。`motion-support-audit.json` 和 `extra-motion-audit/pairs.json` 保存难度复核。
+
+### 在统一人脸坐标上测量模糊后仍保留的外观特征
+
+逐一检查前一轮读入的 HIDE 数据，103 张运动训练图和 32 张运动校准图都是 1280×720 的整帧。以糊图的 SCRFD 五点拟合同一变换裁切两幅，再核对整帧及对齐后图像的像素哈希。糊图满足检测和定位门槛的分别有 32 张及 8 张，其余 95 张没有进入此次拟合。按对齐后的五官区域复算，32 张训练图方向正确率中位 63.2%，最低 38.5%，其中五张低于 50%。八张校准图分别为 65.4%、47.5% 和三张。此统计覆盖能按该规则定位的脸，拖影更重或像素尺寸更小的人脸可能被筛掉。
+
+用 32 张运动配对和 40 张屏摄配对拟合特征投影。按视频与数据域加权，比较清晰人脸之间的特征差异与同一人脸成对退化产生的特征差异。另以 8 张运动及 21 张屏摄配对选正则和维数。与其它拍摄组的最相似参考相比，配对参考的加权余弦优势，原特征为 0.240，轻微平移和转灰度后平均的特征为 0.255，所选投影为 0.141。该投影在校准集分开的样本也由 27/29 降到 25/29。[BioDDM 的子空间引导研究](https://openaccess.thecvf.com/content/CVPR2026W/AIMS/html/Dosi_From_Pixels_to_Identity_Biometric_Subspace_Guidance_for_Diffusion-Based_Face_CVPRW_2026_paper.html)
+
+用同一候选池比较原特征和投影排序，在五张运动留出图和三张用户图上另生成受投影约束的五官位移或缩放候选。用回放将候选误差限制在原底图的 1.055 倍以内。先锁定 43 张输入的候选及排序，再打开留出的原片做评分。35 张屏摄图中，原特征排序和投影排序均通过 20 张，固定底图通过 27 张。五张运动图中所有候选均未通过。仅比较五官编辑，独立 SFace 相似度均值由底图的 0.516 到 0.520，眼鼻口平均边缘吻合由 0.350 到 0.323。观察对照中，第二张用户图仍有屏纹，第三张的五官仍糊，两张都没有达到清晰人像的目标。
+
+第二张用户样例另外完成两个 StyleGAN3 起点。每个起点做共享 12 步及分组 10 步。误差最低的分组结果回放偏差为 0.1379，原底图为 0.0426，两张生成图分别引入明显不同的嘴形和偏低的眼睛。把两个起点和各阶段送进 Windows C++ 选择器后，仍只保留原底图。
+
+实验记录在 `D:/DevTools/visual-analysis-dev/portrait-staged-latent-01/paired-subspace`。`previous-motion-rasters.json` 和 `canonical-motion-audit.json` 保存两个坐标系的复核，`calibration.json`、`candidate-manifest.lock` 和 `paired-evaluation.json` 保存拟合与盲测。对照是 `hard-review.png` 和 `users-review.png`。完整生成和两种模糊回放在同级目录 `full-case-02-review/three-inputs-and-replays.png`。
+
+三张用户样例另用 Windows C++ 筛选复测两种局部变形，均只保留原底图。筛选将三个候选都视为无明显五官差别。选入比较的版本带通强度相对原输入为 0.802、0.979、0.921。
+
+盲测锁定后，在五张重度运动样本用清晰原片的特征要求同一变形器做诊断。使用已知清晰特征投影仍为 0/5，使用完整特征为 1/5。唯一数值过线的 `GOPR1087-211`，ArcFace 从 0.540 到 0.558，跨过 0.55，独立 SFace 只从 0.856 到 0.857，四部位边缘吻合从 0.651 到 0.625。和原片并排可见眼口仍软。另用其他视频的清晰特征作错误对照，0/5 通过。给定特征的诊断不计入盲测。
+
+诊断对照和逐图测量为 `known-descriptor-review.png` 和 `known-descriptor.json`，Windows C++ 选择记录为 `native/native-selection.json`。
