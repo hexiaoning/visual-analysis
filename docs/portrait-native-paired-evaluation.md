@@ -4944,3 +4944,17 @@ Windows 11 同机各用两条 CPU 线程，在两个固定潜变量上比较完�
 在用户三张样例，两路备选之间的人脸区域平均绝对差依次为 1.36、1.48、0.44 个灰阶。三组交给 Windows C++ 筛选均只留既有底图，比较的备选都未通过五官差异检查。第三张眼口未补出高清细节，第二张仍有明显网格纹。
 
 结果在 `D:/DevTools/visual-analysis-dev/portrait-staged-latent-01/aligned-contour-hypotheses`。`aligned-data-provenance.json` 记录配对裁切及训练来源，`training-finished.json`、`candidate-manifest.lock`、`evaluation.json` 保存检查点及盲测，`native-user-candidates/native-selection.json` 保存 Windows C++ 决策。43 张输入的候选及底图均已核对文件哈希。成图对照为 `paired-hard-review.png` 和 `three-user-review.png`。此次没有发布应用新包。
+
+### 用更多高速实拍来源复核同一人像轮廓模型
+
+从 HIDE 官方高帧率视频配对档案中增取 86 张糊帧，共 29 段视频。先按视频划分训练、校准和留出测试，再结合整帧与重叠局部窗口定位人脸。只对糊图能定位的 23 张取同编号清晰参考，以糊图的仿射矩阵裁切，核对档案成员 CRC 和图像哈希。清晰裁切的自动检测漏掉了一些侧脸和暗场人脸，另在模型生成前目视核对配对。最终 14 对用于新增训练，4 对留作校准储备，4 对来自两段独立测试视频。训练集仅使用原 72 对及新增 14 对，保持原 29 对验证集不变，也没有复用训练视频作为此次测试。[HIDE 采集方法和档案](https://github.com/joanshen0508/HA_deblur)
+
+另逐张扫描 iPhoneBlur 作者提供的 40 对轻量样例，8 张能在糊图上定位人脸，经目视核对保留 7 对。4 张是实景人像，3 张看起来是翻拍的既有人像，因此保留各自成绩。3 张的手机参考仍显软，且这些参考均为高速视频中心帧。没有用 iPhoneBlur 配对更新轮廓模型。[iPhoneBlur 作者代码与采样方法](https://github.com/C-loud-Nine/iPhoneBlur) · [作者的 40 对样例](https://www.kaggle.com/datasets/shafi09/iphoneblur-samples)
+
+沿用 320 步和三路轮廓模型。扩充前后最优检查点分别为 120、160 步，同一验证集首路误差从 0.3438 到 0.3400。固定新模型和旧模型，将候选在同一个 CodeFormer 0.85 底图上生成并锁定。11 张有参考的留出图上，三路新候选并集仍为 0/11，旧模型和 CodeFormer 也为 0/11。眼鼻口局部边缘吻合均值从 CodeFormer 的 0.1915 到旧模型的 0.2380 和新模型的 0.2444。结果提升主要来自局部亮度与轮廓修正，并未补回准确的五官。样例 `IMG_2984_00118_Hard` 的参考没有眼镜，CodeFormer 引入镜框，轮廓修正仍保留该伪影。CodeFormer 的 12 次基线推理在本机 Windows 原生 DirectML 路径执行，分析的 15 张原图及候选文件共 120 个哈希均一致。
+
+三个用户样例使用原有底图，同样生成三路新候选。Windows C++ 选择器均只保留底图，比较的三张候选在模糊回放误差上略优，但相对输入的脸区带通强度为 0.825、0.969、0.886，且没有通过五官差异检查。第二张的网格仍可见，第三张的眼口仍模糊。
+
+另从 FVQ-20K 校验 16 段高画质源视频，按源视频隔离 12 段训练源和 4 段留出源。由实际相邻帧的运动和光流插帧合成较长曝光，中心原帧作为参考，再生成叠加模拟屏纹的版本。得到 28 对训练源和 11 对留出源的运动与混合退化对照。固定随机种子可复现屏纹，静态曝光平均的像素误差不超过一个灰阶。这批对照的运动版与混合版都没有五官方向吻合低于 50% 的例子，未覆盖最重档，也未用于要交付的模型训练。[FVQ-20K 数据与用途](https://huggingface.co/datasets/Human-X/FVQ-20K)
+
+本机记录在 `D:/DevTools/visual-analysis-dev/portrait-motion-pair-expansion-01`。`sampling-plan.json`、`cohort-review.json` 和 `native-codeformer-baselines.json` 保存采样、配对核验和基线。`expanded-contour/trial.lock`、`evaluation.json` 及同目录两张 PNG 保存候选与分数。`expanded-contour/native/native-selection.json` 是 Windows 实际选择。FVQ 记录为 `fvq-simulation-checks.json`。本轮没有更新交付包。
