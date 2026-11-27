@@ -4958,3 +4958,27 @@ Windows 11 同机各用两条 CPU 线程，在两个固定潜变量上比较完�
 另从 FVQ-20K 校验 16 段高画质源视频，按源视频隔离 12 段训练源和 4 段留出源。由实际相邻帧的运动和光流插帧合成较长曝光，中心原帧作为参考，再生成叠加模拟屏纹的版本。得到 28 对训练源和 11 对留出源的运动与混合退化对照。固定随机种子可复现屏纹，静态曝光平均的像素误差不超过一个灰阶。这批对照的运动版与混合版都没有五官方向吻合低于 50% 的例子，未覆盖最重档，也未用于要交付的模型训练。[FVQ-20K 数据与用途](https://huggingface.co/datasets/Human-X/FVQ-20K)
 
 本机记录在 `D:/DevTools/visual-analysis-dev/portrait-motion-pair-expansion-01`。`sampling-plan.json`、`cohort-review.json` 和 `native-codeformer-baselines.json` 保存采样、配对核验和基线。`expanded-contour/trial.lock`、`evaluation.json` 及同目录两张 PNG 保存候选与分数。`expanded-contour/native/native-selection.json` 是 Windows 实际选择。FVQ 记录为 `fvq-simulation-checks.json`。本轮没有更新交付包。
+
+### 在整脸生成前恢复轮廓，并校准缺失的模型条件
+
+从 iPhoneBlur 作者固定版本核对 MIMO-UNet 及 InstructIR 权重文件大小和公开 LFS SHA-256。公开目录未列 FFTformer 检查点。MIMO-UNet 以 4,120,006 个参数严格加载，分别导出 256 和 384 像素图。比较窄人脸及可用的原始场景输入，将去模糊残差回贴到原对齐坐标，另以两种输出分别驱动完全相同的 CodeFormer 0.85。Windows C++ OpenVINO 的 CPU 与 GPU 探针相对 PyTorch 最大浮点差均低于 4×10⁻⁶，20 次 256 和 20 次 384 的 GPU 中位分别为 0.392、0.886 秒。CodeFormer 阶段 60 次推理用 DirectML。先锁定候选及原生展示，再读其配对清晰参考。[iPhoneBlur 源码](https://github.com/C-loud-Nine/iPhoneBlur/tree/d195567c53064f0eb86f6f063202c2e773dfeb5f) · [作者发布权重](https://huggingface.co/Shafi99/iPhoneBlur_Finetune_Models/tree/6d74efc38d5249869fba58e9f64891d8e1b4c7a4) · [MIMO-UNet 论文](https://openaccess.thecvf.com/content/ICCV2021/html/Cho_Rethinking_Coarse-To-Fine_Approach_in_Single_Image_Deblurring_ICCV_2021_paper.html)
+
+四张新增 HIDE 与五张重度 HIDE 的 MIMO-UNet 单独输出和整脸生成均为 0/9。另核对作者的七张 iPhoneBlur 样例，仍是 0/7，样例与作者训练集有无重合未核实。在四张新增 HIDE，MIMO-UNet 256 单独输出的眼鼻口频带吻合为 0.178，高于 CodeFormer 的 −0.003。再进行整脸生成后降到 0.026。样例 `GOPR1072-119` 的参考眼睛有开度，整脸生成的闭眼仍保留。三张用户图的 Windows 原生筛选分别展示两张、一张及两张。额外两张为直接去模糊，第一张有强化的屏纹，第三张仍有重影。全部 20 张的 128 个输入和候选文件、40 份去模糊张量以及实际展示像素均已复核。
+
+iPhoneBlur 版本 InstructIR 的训练脚本用固定 `deblur` 文字生成一份条件向量，归档只保存图像网络，未保存生成该向量的投影头或向量。冻结所有图像权重，用此前的 14 张 HIDE 开发配对拟合一个 256 维条件向量，另用按视频隔离的 4 张校准。144 像素输入上拟合 56 步，以零向量为对照，校准误差由 0.03023 到 0.01934。将零向量和拟合向量分别固定进同一 256 像素图像模型。运行只读本地图像与 ONNX，无需文字模型。六张代表性人像上的 Windows C++ CPU 与 GPU 中位为 0.931、0.759 秒，CPU 与 GPU 最大张量差约 3.0×10⁻⁶。[InstructIR 原始实现](https://github.com/mv-lab/InstructIR/tree/3c0299ff6dc32cdd218ec02abbb92febab6fcfb2) · [iPhoneBlur 的拟合脚本](https://github.com/C-loud-Nine/iPhoneBlur/blob/d195567c53064f0eb86f6f063202c2e773dfeb5f/finetuning/train_instructir.py)
+
+| 候选 | 四张新增 HIDE | 五张重度 HIDE |
+| --- | ---: | ---: |
+| MIMO-UNet 及接 CodeFormer | 0/4 | 0/5 |
+| InstructIR 零向量 | 0/4 | 0/5 |
+| InstructIR 校准后的直接输出 | 2/4 | 0/5 |
+| 校准输出接完整 CodeFormer | 0/4 | 0/5 |
+| 校准输出加轮廓一致的生成细节 | 2/4 | 1/5 |
+| 对校准输出做等带通幅度锐化 | 2/4 | 1/5 |
+| Windows 原生筛选实际展示达标 | 0/4 | 0/5 |
+
+两张直接达标为同视频的 `GOPR1072-119` 和 `GOPR1072-174`。将参考横纵各移 −0.5、0 或 0.5 个裁切像素，二者均 9/9 通过。零向量结果经锐化匹配其脸区带通幅度，误差分别在 1.92% 和 0.44% 内，均为 0/9。两张直接输出 SFace 为 0.793、0.706，眼鼻口仍偏软。局部回贴生成高频只保留与校准图中尺度轮廓同向的部分，另补一张重度图 `GOPR1089-140`，九种参考位置也均通过。对同一校准图仅做等幅锐化可以复现这张的过线，图依然有明显拖影。原生筛选拒绝三张，前两张的校准候选在当前回放核下误差分别为原首图约 2.27 倍和 2.86 倍。
+
+用此前锁定的 FVQ-20K 四段留出视频的 11 个曝光窗口复验源隔离。校准向量未使用这些数据。运动模拟中零向量为 1/11，校准为 6/11。相同窗口另加模拟屏纹，零向量 0/11，校准为 6/11。两组共享 11 个源窗口，模糊程度低于最重档。[FVQ-20K 原始视频](https://huggingface.co/datasets/Human-X/FVQ-20K)
+
+校准和高频回贴的 Windows 原生复验给用户第二、三张各留一个备选。第二张屏纹更明显，第三张仍有眼口拖影，三张缺清晰原片。试验文件在 `D:/DevTools/visual-analysis-dev/portrait-mimo-front-end-01`。`evaluation.json`、`verified-output.json` 记录原生 MIMO 对照，`instruct-fixed/evaluation.json`、`texture-scored.json`、`fvq-scored.json` 记录逐图复验，`instruct-fixed/device-benchmark.json` 保存双设备核对。`instruct-fixed/texture-new-HIDE.png`、`texture-hard-HIDE.png` 和 `texture-user.png` 为对照。已核对后续三个清单和 322 个源或候选文件条目。本轮未更新交付包。
