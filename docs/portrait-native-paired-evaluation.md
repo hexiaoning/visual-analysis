@@ -5521,3 +5521,23 @@ Windows C++ 评测工具新增 `--transfer-guided-detail`。204 对输入产生 
 同一输入 `rb-00008-0494` 的单图流程由内部三张候选增至七张，两个配置实际均展示三张。四份实拍参考的命中从 0 增为 1。新增的第 1 份参考在九种半像素位置从 0 次到 9 次通过。单图入口对第三张用户图也选出一张新增结果，仍可见眼口拖影。这两个单图流程与上表的完整候选库试验独立统计。[单图入口的实拍及第三张用户图](<D:/Data/Build/visual-analysis-dev/portrait-local-band-set-01/single-image-outputs.png>) · [单图运行说明](../native/tools/portrait_codes/README.md)
 
 `D:/Data/Build/visual-analysis-dev/portrait-local-band-set-01` 保存 `paired.json`、`reference-diagnostic.json`、`render-verification.json`、`single-image-proof.json` 和 `single-image-stability.json`。区域组合仍为实验路线，新开关已接入本机单图工具。33 项仓库测试通过。
+### 用原图及水平镜像生成新的整脸候选
+
+继续使用同一批 48 张实拍糊图、192 份短曝光参考和三张用户图。生成只读对齐后的糊图。镜像组先水平翻转输入，再翻回生成结果，全程不插值。逐像素核对每张输入及输出的两次翻转。冻结候选后，用现有 Windows C++ 筛选保留原展示，在原有回放与五官差异门槛下每张最多追加两张。随后才读取短曝光，沿用结构、细节与外观配对门槛，并对新增命中复核九个半像素位置。
+
+本机原有的 RestoreFormer++ ONNX 在 CPU 和 DirectML 上都输出了彩色条纹。其 261 个能按名称与作者检查点同形对照的张量全部不一致。重新严格加载作者实现的 441 个张量，导出只保留图像输出的 ONNX。新图中可按名称直接核对的 261 个张量均与检查点逐值相同。在一张实拍探针上，DirectML 输出与作者 CPU 实现的最大像素差是 1 个灰阶，平均差为 0.000057 灰阶。该实拍的正向和镜像候选均未通过它的四份短曝光配对。[训练权重和原生探针记录](<D:/Data/Build/visual-analysis-dev/portrait-orientation-generators-01/trained-pilot.json>)
+
+MaDENN 镜像版在 UHD 630 的 DirectML 上生成 51 张。48 张实拍中单独命中 1/192 份短曝光，该参考在既有候选库已覆盖。合库后仍是 103/192 份短曝光、95/180 个外观组，48 张实拍中仍有 20 张能给该输入的每个已知外观组分配不同候选。原生筛选追加 16 张实拍候选，实际展示仍匹配 72/192 份短曝光和 54/180 个外观组。相对既有 MaDENN 正向输出，镜像候选的整图逐通道平均绝对差中位为 3.04 个灰阶。三张用户图有两张增加了 MaDENN 镜像候选。
+
+RestoreFormer++ 正向与镜像各生成 51 张，两路均记录到 51 次 DirectML 推理，两路的单图推理中位用时分别为 4.62 和 4.93 秒。48 张实拍上，两路间的整图平均绝对差中位为 4.41 个灰阶，两个分支合计 96 张实拍候选均未达到联合配对门槛。
+
+| 方案 | 短曝光匹配 | 外观组分配 | 覆盖全部外观组的实拍输入 | 实拍候选数 |
+| --- | ---: | ---: | ---: | ---: |
+| 既有完整候选库 | 103/192 | 95/180 | 20/48 | 6,229 |
+| 加入三个分支的完整候选库 | 103/192 | 95/180 | 20/48 | 6,373 |
+| 既有实际展示 | 72/192 | 54/180 | 2/48 | 488 |
+| 原生筛选追加三个分支候选后的实际展示 | 72/192 | 54/180 | 2/48 | 541 |
+
+三个分支加入后，旧库漏掉的 89 份短曝光仍全部漏掉。对第一张用户图，原生筛选没有追加候选。第二、三张各追加 MaDENN 和 RestoreFormer++ 的镜像候选。第二张的屏纹减弱，但眼周暗带仍遮挡眼部。第三张的五官轮廓更清楚，脸侧反光和重影仍在。三张用户图都缺同帧的清晰原片。上述筛选通过代表候选的回放和差异指标过线，真实长相仍无法核对。[三个案例的图像对照](<D:/Data/Build/visual-analysis-dev/portrait-orientation-generators-01/private.png>)
+
+`D:/Data/Build/visual-analysis-dev/portrait-orientation-generators-01` 保存候选清单 `generated.json`、逐图原生回执 `selection.json`、完整配对 `paired.json` 及权重核对 `trained-export.json`。本轮使用本机原生评测工具，33 项仓库测试通过。
