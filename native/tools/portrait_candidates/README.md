@@ -241,3 +241,12 @@ $exe = Join-Path $build.OutputDirectory 'PortraitCandidates.exe'
 ```
 
 验证脚本同时检查三种模式的选择、保护分数及阈值、观测与回放的灰度像素以及每张展示图与对应原候选的逐像素一致性。
+
+
+## 把清晰候选的细节对齐到备选轮廓
+
+```powershell
+& $exe --transfer-guided-detail .\sharp-donor.png .\shape-guide.png .\transfer
+```
+
+两张图都使用同一糊图的 512×512 对齐坐标。双向光流在较小网格估计位移，检查往返一致性，将实际位移限制到 11 像素。输出 `warped.png` 为重采样后的底图。仅在两个候选的中频轮廓方向一致处校正对比度，所得图写为 `adjusted.png`。`transfer.json` 记录光流一致性、对比度支持和位移上限。可重复给出一组底图、轮廓图和输出路径。每组输出独立发布在运行目录下。

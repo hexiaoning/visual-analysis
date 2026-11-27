@@ -4,6 +4,7 @@
 #include "exposure_recombination.h"
 #include "fine_band_limit.h"
 #include "geometry_calibration.h"
+#include "guided_detail.h"
 
 #include <algorithm>
 #include <array>
@@ -667,6 +668,23 @@ fs::path select_by_replay(wchar_t **argv, int argc) {
     return publish(argv[5], primary, alternate.image, alternate.result, true, selection, alternate.index);
 }
 
+fs::path transfer_guide(const fs::path &destination, const cv::Mat &donor, const cv::Mat &guide) {
+    const auto transfer = portrait_selection::transfer_guided_detail(donor, guide);
+    return publish_run(destination, [&](const fs::path &pending) {
+        write_image(pending / "warped.png", transfer.warped);
+        write_image(pending / "adjusted.png", transfer.adjusted);
+        const Json rating = {{"warped", "warped.png"}, {"adjusted", "adjusted.png"},
+                             {"cycle_support", transfer.cycle_support},
+                             {"contrast_support", transfer.contrast_support},
+                             {"peak_displacement", transfer.peak_displacement}};
+        std::ofstream out(pending / "transfer.json", std::ios::binary);
+        out << rating.dump(2) << '\n';
+        out.close();
+        if (!out)
+            throw std::runtime_error("Cannot write the detail transfer report");
+    });
+}
+
 void print_output_path(const fs::path &path) {
     const auto utf8 = fs::absolute(path).u8string();
     std::cout.write(reinterpret_cast<const char *>(utf8.data()), utf8.size()) << std::endl;
@@ -695,6 +713,7 @@ int wmain(int argc, wchar_t **argv) {
             "PortraitCandidates.exe --refine-representatives kept-count landmarks.onnx source.png output-directory shown.png [more.png ...]\n"
             "PortraitCandidates.exe --refine-clear-representatives kept-count added-count landmarks.onnx source.png output-directory shown.png [more.png ...]\n"
             "PortraitCandidates.exe --inspect-appearance-bank radius landmarks.onnx|--distance-only source.png output-directory candidate.png [more.png ...]\n"
+            "PortraitCandidates.exe --transfer-guided-detail donor.png guide.png output-directory [donor2.png guide2.png output2 ...]\n"
             "PortraitCandidates.exe --cover-shapes radius output-directory primary.png [candidate.png ...]\n"
             "PortraitCandidates.exe --select-by-replay landmarks.onnx source.png primary.png output-directory "
             "alternate.png [alternate2.png ...]";
@@ -743,6 +762,14 @@ int wmain(int argc, wchar_t **argv) {
                 const auto second = model.describe_shape(read_image(argv[i + 1]));
                 print_output_path(recombine_exposure_pair(argv[i + 2], first, second));
             }
+            return 0;
+        }
+        if (option == L"--transfer-guided-detail") {
+            if (argc < 5 || (argc - 2) % 3 != 0)
+                throw std::invalid_argument(usage);
+            cv::setNumThreads(1);
+            for (int i = 2; i < argc; i += 3)
+                print_output_path(transfer_guide(argv[i + 2], read_image(argv[i]), read_image(argv[i + 1])));
             return 0;
         }
         if (option == L"--cover-shapes") {
