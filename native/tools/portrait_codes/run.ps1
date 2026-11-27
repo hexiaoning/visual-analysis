@@ -8,7 +8,8 @@ param(
     [Parameter(Mandatory)][string]$CandidatesExecutable,
     [ValidateSet("GPU", "CPU")][string]$Device = "GPU",
     [switch]$RefineClarity,
-    [ValidateScript({ $_ -gt 0.0 -and $_ -lt 0.055 })][double]$CloseSeparation
+    [ValidateScript({ $_ -gt 0.0 -and $_ -lt 0.055 })][double]$CloseSeparation,
+    [switch]$TransferGuidedDetail
 )
 
 $ErrorActionPreference = "Stop"
@@ -49,6 +50,34 @@ try {
     Invoke-NativeStage $Codes @("decode", $Backend, $Models["decode.onnx"], $InputFile, "raw.bin", "direct.png",
         $InputFile, "first.bin", "first.png", $InputFile, "last.bin", "last.png") "decode.log"
     $Bank = @("direct.png", "first.png", "last.png")
+    if ($TransferGuidedDetail) {
+        $GuideDirectories = @("guided-first", "guided-last")
+        $Arguments = @("--transfer-guided-detail", "direct.png", "seeds/candidate-1.png", $GuideDirectories[0],
+            "direct.png", "seeds/candidate-2.png", $GuideDirectories[1])
+        Invoke-NativeStage $Candidates $Arguments "guided-detail-paths.log"
+        $GuidedPaths = @(Get-Content -LiteralPath "guided-detail-paths.log" | Where-Object { $_.Trim() })
+        if ($GuidedPaths.Count -ne $GuideDirectories.Count) {
+            throw "The native detail transfer did not publish both endpoints."
+        }
+        $GuidedReceipts = @()
+        for ($Index = 0; $Index -lt $GuideDirectories.Count; ++$Index) {
+            $Run = Split-Path -Leaf $GuidedPaths[$Index]
+            $Directory = Join-Path $GuideDirectories[$Index] $Run
+            $GuidedReceipt = Join-Path $Directory "transfer.json"
+            if (-not (Test-Path -LiteralPath $GuidedReceipt -PathType Leaf)) {
+                throw "Missing native detail transfer receipt at $GuidedReceipt."
+            }
+            foreach ($File in "warped.png", "adjusted.png") {
+                $Image = Join-Path $Directory $File
+                if (-not (Test-Path -LiteralPath $Image -PathType Leaf)) {
+                    throw "Missing native detail transfer candidate at $Image."
+                }
+                $Bank += $Image
+            }
+            $GuidedReceipts += $GuidedReceipt
+        }
+        Set-Content -LiteralPath "guided-detail-paths.log" -Value $GuidedReceipts -Encoding utf8
+    }
     $Arguments = @("--extend-shape-cover", ".055", ".028", "1", "--max-additions", "2")
     if ($PSBoundParameters.ContainsKey("CloseSeparation")) {
         $Arguments += @("--close-separation", $CloseSeparation.ToString("G17", [Globalization.CultureInfo]::InvariantCulture))
