@@ -214,6 +214,15 @@ $exe = Join-Path $build.OutputDirectory 'PortraitCandidates.exe'
 
 用 `--distance-only` 替代模型路径时只比较带通距离，`landmarks_enabled` 记录是否检测关键点。
 
+对近邻追加进行复核时，在半径后加 `--directed` 并提供关键点模型。此时 `compatible[i][j]` 以第 `i` 张为参照、以第 `j` 张为待加候选，两个方向分别计算。回执增加 `directed_landmarks`，可以结合带通距离复核通常追加的一次检查，以及近邻追加的双向检查。
+
+示例使用近邻半径，回执同时保留可用于通常半径的两两带通距离。
+
+```powershell
+& $exe --inspect-appearance-bank 0.025 --directed .\hr-nosa-wflw-geometry.onnx .\source.png .\outputs `
+    .\primary.png .\alternative-1.png .\alternative-2.png
+```
+
 ## 纹理保护实验
 
 `--texture-guard <model.json>` 包含近重复拟合。仅当拟合会把主候选替换成 AMD 时，程序计算 AMD 的纹理分。分数小于或等于科研模型的固定阈值 **0.5641734981312992** 时接受替换，超过阈值则保留原先选择。模型使用绝对分数，计算过程中只读取 AMD 的候选图。近重复以外的双张展示按原规则处理。

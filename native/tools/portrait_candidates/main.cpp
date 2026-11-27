@@ -389,26 +389,37 @@ fs::path inspect_appearance_bank(wchar_t **argv, int argc) {
     const double radius = std::stod(radius_text, &used);
     if (used != radius_text.size() || !std::isfinite(radius) || radius <= 0. || radius > 2.)
         throw std::invalid_argument("Expected a radius in (0, 2]");
-    const auto source = read_image(argv[4]);
+    const bool directed = std::wstring_view(argv[3]) == L"--directed";
+    const int model_index = directed ? 4 : 3;
+    const int first_candidate = model_index + 3;
+    if (argc <= first_candidate)
+        throw std::invalid_argument("Expected a landmark model, source, output directory and candidates");
+    const bool compare_landmarks = std::wstring_view(argv[model_index]) != L"--distance-only";
+    if (directed && !compare_landmarks)
+        throw std::invalid_argument("Directed comparison requires a landmark model");
+    const auto source = read_image(argv[model_index + 1]);
     std::vector<cv::Mat> portraits;
-    for (int i = 6; i < argc; ++i)
+    for (int i = first_candidate; i < argc; ++i)
         portraits.push_back(read_image(argv[i]));
     const auto evidence = portrait_selection::analyse_appearance_bank(source, portraits);
-    const bool compare_landmarks = std::wstring_view(argv[3]) != L"--distance-only";
-    ShapeComparisons landmarks(argv[3], portraits, false);
+    ShapeComparisons landmarks(argv[model_index], portraits, false);
     std::vector<std::vector<bool>> compatible(portraits.size(), std::vector<bool>(portraits.size()));
     for (std::size_t i = 0; i < portraits.size(); ++i) {
         for (std::size_t j = i + 1; j < portraits.size(); ++j) {
-            const bool visible = evidence.distances[i][j] > radius && (!compare_landmarks || landmarks.different(i, j));
-            compatible[i][j] = compatible[j][i] = visible;
+            if (evidence.distances[i][j] <= radius)
+                continue;
+            compatible[i][j] = !compare_landmarks || landmarks.different(i, j);
+            compatible[j][i] = directed ? landmarks.different(j, i) : compatible[i][j];
         }
     }
-    return publish_run(argv[5], [&](const fs::path &directory) {
-        const Json report = {
+    return publish_run(argv[model_index + 2], [&](const fs::path &directory) {
+        Json report = {
             {"radius", radius}, {"source_detail", evidence.observed_detail}, {"detail", evidence.candidate_detail},
             {"replay_errors", evidence.replay_errors}, {"distance", evidence.distances}, {"compatible", compatible},
             {"landmarks_enabled", compare_landmarks},
         };
+        if (directed)
+            report["directed_landmarks"] = true;
         std::ofstream receipt(directory / "selection.json", std::ios::binary);
         receipt << report.dump() << '\n';
         receipt.close();
@@ -753,7 +764,7 @@ int wmain(int argc, wchar_t **argv) {
             "PortraitCandidates.exe --extend-shape-cover radius replay-tolerance kept-count [--max-additions count [--close-separation radius]] [--landmarks model.onnx] source.png output-directory candidate.png [more.png ...]\n"
             "PortraitCandidates.exe --refine-representatives kept-count landmarks.onnx source.png output-directory shown.png [more.png ...]\n"
             "PortraitCandidates.exe --refine-clear-representatives kept-count added-count landmarks.onnx source.png output-directory shown.png [more.png ...]\n"
-            "PortraitCandidates.exe --inspect-appearance-bank radius landmarks.onnx|--distance-only source.png output-directory candidate.png [more.png ...]\n"
+            "PortraitCandidates.exe --inspect-appearance-bank radius [--directed] landmarks.onnx|--distance-only source.png output-directory candidate.png [more.png ...]\n"
             "PortraitCandidates.exe --transfer-guided-detail donor.png guide.png output-directory [donor2.png guide2.png output2 ...]\n"
             "PortraitCandidates.exe --bounded-exposure-directions dictionary.bin input.png anchor1.png anchor2.png seed-directory output-directory\n"
             "PortraitCandidates.exe --cover-shapes radius output-directory primary.png [candidate.png ...]\n"
