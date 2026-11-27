@@ -1,5 +1,6 @@
 #include "portrait_selection.h"
 #include "exposure_normalizer.h"
+#include "geometry_calibration.h"
 
 #include <algorithm>
 #include <array>
@@ -248,6 +249,8 @@ int wmain(int argc, wchar_t **argv) {
             "PortraitCandidates.exe --normalize-exposure model.json source.png output.png\n"
             "PortraitCandidates.exe --match-candidate-tone candidate.png guide.png output.png\n"
             "PortraitCandidates.exe --calibrate-capture-color model.json source.png candidate.png output.png\n"
+            "PortraitCandidates.exe --calibrate-capture-geometry model.json source.png first-guide.png "
+            "second-guide.png candidate.png output.png\n"
             "PortraitCandidates.exe --combine-detail-consensus first.png second.png third.png output.png\n"
             "PortraitCandidates.exe --select-by-replay landmarks.onnx source.png primary.png output-directory "
             "alternate.png [alternate2.png ...]";
@@ -297,6 +300,18 @@ int wmain(int argc, wchar_t **argv) {
             const auto result = portrait_selection::calibrate_capture_color(source, candidate, argv[2]);
             publish_new_image(output, result.image);
             std::cout << Json{{"log_gain_blue_red", result.log_gain_blue_red}}.dump() << '\n';
+            return 0;
+        }
+        if (option == L"--calibrate-capture-geometry") {
+            if (argc != 8)
+                throw std::invalid_argument(usage);
+            const fs::path output(argv[7]);
+            if (fs::exists(output))
+                throw std::invalid_argument("Geometry calibration output must be a new path");
+            cv::setNumThreads(1);
+            const std::array observations{read_image(argv[3]), read_image(argv[4]), read_image(argv[5])};
+            const auto candidate = read_image(argv[6]);
+            publish_new_image(output, portrait_selection::calibrate_capture_geometry(observations, candidate, argv[2]));
             return 0;
         }
         if (option == L"--normalize-exposure") {

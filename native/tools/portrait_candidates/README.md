@@ -85,6 +85,16 @@ $exe = Join-Path $build.OutputDirectory 'PortraitCandidates.exe'
 
 指定一个新输出文件。命令打印 `log_gain_blue_red` 两个对数增益。模型 JSON 的 `schema` 为 `portrait-capture-color-quantiles-v1`，`center`、`scale` 各有 28 项，`bias` 有两项，`weights` 为 28×2。该模式用于屏拍配对校色研究，运行时仅读取本地 JSON 和图像。[配对验证](../../../docs/portrait-native-paired-evaluation.md)
 
+## 已生成候选的局部几何校正
+
+`--calibrate-capture-geometry` 读取原始观察、由同一观察生成的两路去纹图和一张既有候选。四张图都使用同一 512×512 BGR 对齐坐标。程序从两档亮度频带测量局部位移，再用配对标定的模型预测每个窗口的有限修正量。像素经连续位移场从原候选重采样，脸部软窗外保持原样。
+
+```powershell
+& $exe --calibrate-capture-geometry .\geometry.json .\source.png .\guide-a.png .\guide-b.png .\candidate.png .\corrected.png
+```
+
+模型 JSON 的 `schema` 为 `portrait-capture-geometry-linear-v1`，`center` 和 `scale` 各有 31 项，`bias` 有两项，`weights` 为 31×2。研究命令仅使用本地输入，结果存到新的 PNG 路径。[配对验证与选择限制](../../../docs/portrait-native-paired-evaluation.md)
+
 ## 选择规则和输出
 
 - 默认保留 CodeFormer。同时展示 AMD 要求其回放误差不超过 CodeFormer 加 0.007，清晰度至少为 CodeFormer 的 96%，并有一个区域同时通过位移和像素检验。区域扣除整体相似变换后的平均位移须大于 3 像素。以主候选关键点覆盖区域外扩 8 像素计算亮度带通差异，原幅度差的均方根须达到 1.5 个灰阶，按局部带通强度归一化后的均方根须达到 0.25。`visible_shape_difference` 记录这两项检验的联合结果。

@@ -41,7 +41,7 @@ $Arguments = @(
     "/Fo$Objects\", "/Fe$Output\PortraitCandidates.exe",
     (Join-Path $PSScriptRoot "main.cpp"), (Join-Path $PSScriptRoot "portrait_selection.cpp"),
     (Join-Path $PSScriptRoot "duplicate_consensus.cpp"), (Join-Path $PSScriptRoot "texture_guard.cpp"),
-    (Join-Path $PSScriptRoot "exposure_normalizer.cpp"),
+    (Join-Path $PSScriptRoot "exposure_normalizer.cpp"), (Join-Path $PSScriptRoot "geometry_calibration.cpp"),
     "/link", "/subsystem:console", "/incremental:no", "/libpath:$MsvcDirectory\lib\x64",
     "/libpath:$SdkLib\ucrt\x64", "/libpath:$SdkLib\um\x64",
     (Join-Path $OrtNative "onnxruntime.lib"), $World[0].FullName
