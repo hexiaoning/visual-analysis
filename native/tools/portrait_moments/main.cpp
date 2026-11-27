@@ -142,13 +142,22 @@ cv::Mat bgr(const float* rgb, int side) {
     return out;
 }
 
-void renderRefinedSequence(ov::InferRequest& seed_session, ov::InferRequest& request, int side,
-                           const std::string& device, const cv::Mat& portrait, const fs::path& output,
-                           const std::vector<std::size_t>& positions) {
-    constexpr int seed_side = 240;
-    const auto plane = static_cast<std::size_t>(side) * side;
-    constexpr std::size_t seed_plane = seed_side * seed_side;
-    const bool original_resolution = side == portrait.rows;
+constexpr int seed_side = 240;
+constexpr std::size_t seed_plane = seed_side * seed_side;
+
+struct SequenceConditioning {
+    cv::Mat observation;
+    std::vector<float> frames;
+};
+
+struct Refinement {
+    int side;
+    std::string device;
+    ov::CompiledModel model;
+    ov::InferRequest request;
+};
+
+SequenceConditioning sequenceConditioning(ov::InferRequest& seed_session, const cv::Mat& portrait) {
     const cv::Mat tensor = rgbBlob(portrait, seed_side);
     std::copy_n(tensor.ptr<float>(), 3 * seed_plane, seed_session.get_input_tensor().data<float>());
     seed_session.infer();
@@ -158,7 +167,14 @@ void renderRefinedSequence(ov::InferRequest& seed_session, ov::InferRequest& req
         throw std::runtime_error("The sequence graph returned non-finite pixels.");
     std::vector<float> seed_values(raw_values, raw_values + raw_seeds.get_size());
     for (auto& pixel : seed_values) pixel = std::clamp(pixel, 0.f, 1.f);
+    return {tensor, std::move(seed_values)};
+}
 
+std::vector<float> prepareRefinement(Refinement& refinement, const cv::Mat& portrait,
+                                     const SequenceConditioning& conditioning) {
+    const int side = refinement.side;
+    const auto plane = static_cast<std::size_t>(side) * side;
+    const bool original_resolution = side == portrait.rows;
     const auto resize_planes = [&](const float* source, float* target) {
         for (std::size_t channel = 0; channel < 3; ++channel) {
             const cv::Mat image(seed_side, seed_side, CV_32F, const_cast<float*>(source + channel * seed_plane));
@@ -173,13 +189,13 @@ void renderRefinedSequence(ov::InferRequest& seed_session, ov::InferRequest& req
     };
     std::vector<float> reduced(21 * plane);
     for (std::size_t phase = 0; phase < 7; ++phase)
-        resize_planes(seed_values.data() + phase * 3 * seed_plane, reduced.data() + phase * 3 * plane);
-    auto* packed = request.get_input_tensor().data<float>();
+        resize_planes(conditioning.frames.data() + phase * 3 * seed_plane, reduced.data() + phase * 3 * plane);
+    auto* packed = refinement.request.get_input_tensor().data<float>();
     if (original_resolution) {
         const cv::Mat full_observation = rgbBlob(portrait, side);
         std::copy_n(full_observation.ptr<float>(), 3 * plane, packed);
     } else {
-        resize_planes(tensor.ptr<float>(), packed);
+        resize_planes(conditioning.observation.ptr<float>(), packed);
     }
     for (std::size_t element = 0; element < 3 * plane; ++element) {
         float mean = 0.f, low = 1.f, high = 0.f;
@@ -192,24 +208,40 @@ void renderRefinedSequence(ov::InferRequest& seed_session, ov::InferRequest& req
         packed[element + 6 * plane] = mean / 7.f;
         packed[element + 9 * plane] = high - low;
     }
-    publishPortraits(output, positions.size(), [&](const fs::path& path, std::size_t index) {
+    return reduced;
+}
+
+void renderRefinedSequence(ov::InferRequest& seed_request, std::vector<Refinement>& refinements,
+                           const cv::Mat& portrait, const fs::path& output,
+                           const std::vector<std::size_t>& positions) {
+    const auto sequence = sequenceConditioning(seed_request, portrait);
+    std::vector<float> reduced;
+    publishPortraits(output, positions.size() * refinements.size(), [&](const fs::path& path, std::size_t index) {
+        const auto head = index / positions.size();
+        const auto step = index % positions.size();
+        auto& refinement = refinements[head];
+        if (step == 0)
+            reduced = prepareRefinement(refinement, portrait, sequence);
         const auto started = std::chrono::steady_clock::now();
-        const auto phase = positions[index];
-        auto* conditioning = reduced.data() + phase * 3 * plane;
+        const auto phase = positions[step];
+        const int side = refinement.side;
+        const auto plane = static_cast<std::size_t>(side) * side;
+        auto* packed = refinement.request.get_input_tensor().data<float>();
+        const auto* conditioning = reduced.data() + phase * 3 * plane;
         std::copy_n(conditioning, 3 * plane, packed + 3 * plane);
         std::fill_n(packed + 12 * plane, plane, std::abs(static_cast<int>(phase) - 3) / 3.f);
-        request.infer();
-        const auto prediction = request.get_output_tensor();
+        refinement.request.infer();
+        const auto prediction = refinement.request.get_output_tensor();
         auto* values = prediction.data<float>();
         if (!std::all_of(values, values + 3 * plane, [](float v) { return std::isfinite(v); }))
             throw std::runtime_error("The refinement graph returned non-finite pixels.");
         cv::Mat seed, patch, original;
-        if (original_resolution) {
+        if (side == portrait.rows) {
             seed = bgr(conditioning, side);
             patch = bgr(values, side) - seed;
         } else {
             const cv::Mat delta = bgr(values, side) - bgr(conditioning, side);
-            cv::resize(bgr(seed_values.data() + phase * 3 * seed_plane, seed_side), seed, portrait.size(), 0, 0,
+            cv::resize(bgr(sequence.frames.data() + phase * 3 * seed_plane, seed_side), seed, portrait.size(), 0, 0,
                        cv::INTER_CUBIC);
             seed.convertTo(original, CV_8UC3, 255.0);
             original.convertTo(seed, CV_32FC3, 1. / 255.);
@@ -227,8 +259,10 @@ void renderRefinedSequence(ov::InferRequest& seed_session, ov::InferRequest& req
         }
         seed.convertTo(original, CV_8UC3, 255.0);
         writeImage(path, original);
-        std::cout << path.filename().string() << " position=" << phase + 1 << " device=" << device
-                  << " seconds=" << std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count() << '\n';
+        std::cout << path.filename().string() << " position=" << phase + 1 << " device=" << refinement.device;
+        if (refinements.size() > 1)
+            std::cout << " refinement=" << head + 1;
+        std::cout << " seconds=" << std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count() << '\n';
     });
 }
 
@@ -249,29 +283,49 @@ std::vector<std::size_t> sequencePositions(std::wstring_view requested) {
     }
 }
 
-void refineSequence(const std::string& device, wchar_t** argv, int argc) {
-    constexpr int seed_side = 240;
-    const bool custom_positions = std::wstring_view(argv[5]) == L"--positions";
-    const int first_pair = custom_positions ? 7 : 5;
-    if (argc < first_pair + 2)
-        throw std::invalid_argument("Expected at least one portrait and output pair.");
-    const auto positions = custom_positions ? sequencePositions(argv[6]) : std::vector<std::size_t>{0, 2, 4, 6};
-    cv::setNumThreads(1);
-    ov::Core core;
-    auto seed_model = compilePortraitGraph(core, device, argv[3], {1, 3, seed_side, seed_side}, {1, 21, seed_side, seed_side});
-    auto refine_model = compileFloatGraph(core, device, argv[4]);
-    const auto input = refine_model.input().get_shape();
+Refinement compileRefinement(ov::Core& core, const std::string& device, const fs::path& file) {
+    auto model = compileFloatGraph(core, device, file);
+    const auto input = model.input().get_shape();
     if (input != ov::Shape{1, 13, 192, 192} && input != ov::Shape{1, 13, 512, 512})
         throw std::invalid_argument("Expected a 192 or 512 pixel refinement graph with 13 input planes.");
     const auto side = input[2];
-    if (refine_model.output().get_shape() != ov::Shape{1, 3, side, side})
+    if (model.output().get_shape() != ov::Shape{1, 3, side, side})
         throw std::invalid_argument("Expected an RGB refinement at the input resolution.");
+    auto target = model.get_property(ov::execution_devices).front();
+    auto request = model.create_infer_request();
+    return {static_cast<int>(side), std::move(target), std::move(model), std::move(request)};
+}
+
+void refineSequence(const std::string& device, wchar_t** argv, int argc) {
+    std::vector<fs::path> graphs{argv[4]};
+    int first_pair = 5;
+    while (first_pair < argc && std::wstring_view(argv[first_pair]) == L"--additional-refinement") {
+        if (first_pair + 1 >= argc)
+            throw std::invalid_argument("Expected the additional refinement graph.");
+        graphs.emplace_back(argv[first_pair + 1]);
+        first_pair += 2;
+    }
+    std::vector<std::size_t> positions{0, 2, 4, 6};
+    if (first_pair < argc && std::wstring_view(argv[first_pair]) == L"--positions") {
+        if (first_pair + 1 >= argc)
+            throw std::invalid_argument("Expected at least one refinement position.");
+        positions = sequencePositions(argv[first_pair + 1]);
+        first_pair += 2;
+    }
+    if (argc < first_pair + 2)
+        throw std::invalid_argument("Expected at least one portrait and output pair.");
+
+    cv::setNumThreads(1);
+    ov::Core core;
+    auto seed_model = compilePortraitGraph(core, device, argv[3], {1, 3, seed_side, seed_side}, {1, 21, seed_side, seed_side});
+    std::vector<Refinement> refinements;
+    refinements.reserve(graphs.size());
+    for (const auto& graph : graphs)
+        refinements.push_back(compileRefinement(core, device, graph));
+
     auto seed_request = seed_model.create_infer_request();
-    auto refine_request = refine_model.create_infer_request();
-    const auto executed = refine_model.get_property(ov::execution_devices).front();
     for (int arg = first_pair; arg < argc; arg += 2)
-        renderRefinedSequence(seed_request, refine_request, static_cast<int>(side), executed,
-                              readPortrait(argv[arg]), argv[arg + 1], positions);
+        renderRefinedSequence(seed_request, refinements, readPortrait(argv[arg]), argv[arg + 1], positions);
 }
 
 void produce(const std::string& device, const fs::path& graph, const cv::Mat& portrait,
@@ -311,7 +365,8 @@ int wmain(int argc, wchar_t** argv) {
         const bool refine = argc > 1 && std::wstring_view(argv[1]) == L"--refine-sequence";
         if ((refine && (argc < 7 || argc % 2 == 0)) || (!refine && argc < 5))
             throw std::invalid_argument("Use PortraitMoments.exe CPU|GPU graph.onnx portrait.png output [moment ...]\n"
-                                        "or PortraitMoments.exe --refine-sequence CPU|GPU sequence.onnx refinement.onnx [--positions 1,3,5,7] "
+                                        "or PortraitMoments.exe --refine-sequence CPU|GPU sequence.onnx refinement.onnx "
+                                        "[--additional-refinement graph.onnx ...] [--positions 1,3,5,7] "
                                         "portrait.png output [portrait2.png output2 ...]");
         const std::wstring_view device(argv[refine ? 2 : 1]);
         if (device != L"CPU" && device != L"GPU")

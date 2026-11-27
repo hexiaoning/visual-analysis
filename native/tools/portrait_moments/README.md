@@ -47,3 +47,12 @@ Windows x64 研究工具从一张对齐的 512×512 人像生成多个候选。�
 & D:\Data\Build\portrait-moments\PortraitMoments.exe --refine-sequence GPU `
     .\jin-240.onnx .\signed-512.onnx --positions '2,4,6' .\portrait.png .\intermediate-candidates
 ```
+
+
+`--additional-refinement` 可重复指定其他修复模型，放在首个修复模型之后、`--positions` 之前。每张输入只运行一次七帧模型。输出按模型顺序分组，再按指定位置顺序编号。日志用 `refinement` 记录模型序号。以默认四个位置和两个模型为例，`candidate-1.png` 至 `candidate-4.png` 属于首个模型，`candidate-5.png` 至 `candidate-8.png` 属于第二个模型。同一张输入的所有结果齐全后才发布目录。
+
+```powershell
+& D:\Data\Build\portrait-moments\PortraitMoments.exe --refine-sequence GPU `
+    .\jin-240.onnx .\decoder-a.onnx --additional-refinement .\decoder-b.onnx `
+    .\portrait.png .\eight-candidates
+```
