@@ -9,6 +9,7 @@
 #include <opencv2/imgproc.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -81,77 +82,186 @@ std::vector<float> moments(int argc, wchar_t** argv) {
     return results;
 }
 
-void produce(const std::string& device, const fs::path& graph, const cv::Mat& portrait,
-             const fs::path& output, const std::vector<float>& requested) {
-    constexpr int side = 256;
-    constexpr std::size_t plane = side * side;
-    cv::setNumThreads(1);
-    cv::Mat reduced;
-    cv::resize(portrait, reduced, {side, side}, 0, 0, cv::INTER_AREA);
-    const cv::Mat tensor = cv::dnn::blobFromImage(reduced, 1. / 255.0, {side, side}, {}, true);
-
-    ov::Core core;
-    core.add_extension(std::make_shared<ov::frontend::onnx::ConversionExtension>("DeformConv", convertDeformableConvolution));
+ov::CompiledModel compilePortraitGraph(ov::Core& core, const std::string& device, const fs::path& graph,
+                                       const ov::Shape& input, const ov::Shape& output) {
     auto parameters = ov::AnyMap{ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY),
                                  ov::hint::inference_precision(ov::element::f32)};
     if (device == "CPU") parameters.emplace(ov::inference_num_threads.name(), 3);
     auto compiled = core.compile_model(graph.wstring(), device, parameters);
     const auto devices = compiled.get_property(ov::execution_devices);
     if (devices.empty() || !std::ranges::all_of(devices, [&](const std::string& d) { return d.starts_with(device); }) ||
-        compiled.input().get_shape() != ov::Shape{1, 4, side, side} ||
-        compiled.output().get_shape() != ov::Shape{1, 3, side, side} ||
+        compiled.input().get_shape() != input || compiled.output().get_shape() != output ||
         compiled.input().get_element_type() != ov::element::f32 || compiled.output().get_element_type() != ov::element::f32) {
         throw std::runtime_error("The compiled portrait graph or execution device differs from the requested contract.");
     }
+    return compiled;
+}
 
+template <class Write>
+void publishPortraits(const fs::path& output, std::size_t count, Write write) {
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
     fs::path pending = output;
     pending += L".pending-" + std::to_wstring(stamp);
     if (fs::exists(output) || !fs::create_directory(pending))
         throw std::runtime_error("Use a new destination inside an existing directory.");
+    const auto name = [](std::size_t index) { return "candidate-" + std::to_string(index + 1) + ".png"; };
     try {
-        auto request = compiled.create_infer_request();
-        auto input = request.get_input_tensor();
-        std::copy_n(tensor.ptr<float>(), 3 * plane, input.data<float>());
-        for (std::size_t index = 0; index < requested.size(); ++index) {
-            const auto time = std::chrono::steady_clock::now();
-            std::fill_n(input.data<float>() + 3 * plane, plane, requested[index]);
-            request.infer();
-            auto result = request.get_output_tensor();
-            auto* values = result.data<float>();
-            if (!std::all_of(values, values + 3 * plane, [](float x) { return std::isfinite(x); }))
-                throw std::runtime_error("The model returned non-finite pixels.");
-            const std::vector<cv::Mat> planes{
-                {side, side, CV_32F, values + 2 * plane}, {side, side, CV_32F, values + plane}, {side, side, CV_32F, values}};
-            cv::Mat small, expanded, image;
-            cv::merge(planes, small);
-            cv::resize(small, expanded, portrait.size(), 0, 0, cv::INTER_CUBIC);
-            expanded.convertTo(image, CV_8UC3, 255.0);
-            const std::string name = "candidate-" + std::to_string(index + 1) + ".png";
-            writeImage(pending / name, image);
-            std::cout << name << " moment=" << requested[index] << " device=" << devices.front()
-                      << " seconds=" << std::chrono::duration<double>(std::chrono::steady_clock::now() - time).count()
-                      << '\n';
-        }
+        for (std::size_t index = 0; index < count; ++index)
+            write(pending / name(index), index);
         fs::rename(pending, output);
     } catch (...) {
         std::error_code ignored;
-        for (std::size_t i = 0; i < requested.size(); ++i)
-            fs::remove(pending / ("candidate-" + std::to_string(i + 1) + ".png"), ignored);
+        for (std::size_t i = 0; i < count; ++i)
+            fs::remove(pending / name(i), ignored);
         fs::remove(pending, ignored);
         throw;
     }
+}
+
+cv::Mat rgbBlob(const cv::Mat& portrait, int side) {
+    cv::Mat reduced;
+    cv::resize(portrait, reduced, {side, side}, 0, 0, cv::INTER_AREA);
+    return cv::dnn::blobFromImage(reduced, 1. / 255.0, {side, side}, {}, true);
+}
+
+cv::Mat bgr(const float* rgb, int side) {
+    const auto plane = static_cast<std::size_t>(side) * side;
+    // OpenCV's plane headers borrow this read-only input for the merge.
+    auto* pixels = const_cast<float*>(rgb);
+    const std::array<cv::Mat, 3> planes{{{side, side, CV_32F, pixels + 2 * plane},
+                                        {side, side, CV_32F, pixels + plane}, {side, side, CV_32F, pixels}}};
+    cv::Mat out;
+    cv::merge(planes.data(), planes.size(), out);
+    return out;
+}
+
+void refineSequence(const std::string& device, const fs::path& seed_graph,
+                    const fs::path& refine_graph, const cv::Mat& portrait, const fs::path& output) {
+    constexpr int seed_side = 240;
+    constexpr int side = 192;
+    constexpr std::size_t plane = side * side;
+    constexpr std::size_t seed_plane = seed_side * seed_side;
+    constexpr std::array<std::size_t, 4> positions{0, 2, 4, 6};
+    cv::setNumThreads(1);
+    ov::Core core;
+    auto seed_model = compilePortraitGraph(core, device, seed_graph, {1, 3, seed_side, seed_side}, {1, 21, seed_side, seed_side});
+    auto refine_model = compilePortraitGraph(core, device, refine_graph, {1, 13, side, side}, {1, 3, side, side});
+    auto seed_session = seed_model.create_infer_request();
+    const cv::Mat tensor = rgbBlob(portrait, seed_side);
+    std::copy_n(tensor.ptr<float>(), 3 * seed_plane, seed_session.get_input_tensor().data<float>());
+    seed_session.infer();
+    const auto raw_seeds = seed_session.get_output_tensor();
+    const auto* raw_values = raw_seeds.data<const float>();
+    if (!std::all_of(raw_values, raw_values + raw_seeds.get_size(), [](float v) { return std::isfinite(v); }))
+        throw std::runtime_error("The sequence graph returned non-finite pixels.");
+    std::vector<float> seed_values(raw_values, raw_values + raw_seeds.get_size());
+    for (auto& pixel : seed_values) pixel = std::clamp(pixel, 0.f, 1.f);
+
+    const auto reduce_planes = [](const float* source, float* target) {
+        for (std::size_t channel = 0; channel < 3; ++channel) {
+            const cv::Mat image(seed_side, seed_side, CV_32F, const_cast<float*>(source + channel * seed_plane));
+            cv::Mat reduced(side, side, CV_32F, target + channel * plane);
+            cv::resize(image, reduced, {side, side}, 0, 0, cv::INTER_AREA);
+        }
+    };
+    std::vector<float> reduced(21 * plane);
+    for (std::size_t phase = 0; phase < 7; ++phase)
+        reduce_planes(seed_values.data() + phase * 3 * seed_plane, reduced.data() + phase * 3 * plane);
+    auto request = refine_model.create_infer_request();
+    auto* packed = request.get_input_tensor().data<float>();
+    reduce_planes(tensor.ptr<float>(), packed);
+    for (std::size_t element = 0; element < 3 * plane; ++element) {
+        float mean = 0.f, low = 1.f, high = 0.f;
+        for (std::size_t phase = 0; phase < 7; ++phase) {
+            const float value = reduced[element + phase * 3 * plane];
+            mean += value;
+            low = std::min(low, value);
+            high = std::max(high, value);
+        }
+        packed[element + 6 * plane] = mean / 7.f;
+        packed[element + 9 * plane] = high - low;
+    }
+    const auto devices = refine_model.get_property(ov::execution_devices);
+    publishPortraits(output, positions.size(), [&](const fs::path& path, std::size_t index) {
+        const auto started = std::chrono::steady_clock::now();
+        const auto phase = positions[index];
+        auto* conditioning = reduced.data() + phase * 3 * plane;
+        std::copy_n(conditioning, 3 * plane, packed + 3 * plane);
+        std::fill_n(packed + 12 * plane, plane, index == 0 || index == 3 ? 1.f : 1.f / 3.f);
+        request.infer();
+        const auto prediction = request.get_output_tensor();
+        auto* values = prediction.data<float>();
+        if (!std::all_of(values, values + 3 * plane, [](float v) { return std::isfinite(v); }))
+            throw std::runtime_error("The refinement graph returned non-finite pixels.");
+        const cv::Mat delta = bgr(values, side) - bgr(conditioning, side);
+        cv::Mat seed, patch, original;
+        cv::resize(bgr(seed_values.data() + phase * 3 * seed_plane, seed_side), seed, portrait.size(), 0, 0, cv::INTER_CUBIC);
+        seed.convertTo(original, CV_8UC3, 255.0);
+        original.convertTo(seed, CV_32FC3, 1. / 255.);
+        cv::resize(delta, patch, portrait.size(), 0, 0, cv::INTER_CUBIC);
+        for (int y = 0; y < seed.rows; ++y) {
+            auto* pixels = seed.ptr<cv::Vec3f>(y);
+            const auto* edits = patch.ptr<cv::Vec3f>(y);
+            const double dy = (y - 280.) / 207.;
+            for (int x = 0; x < seed.cols; ++x) {
+                const double dx = (x - 256.) / 189.;
+                const float weight = static_cast<float>(std::clamp((1. - dx * dx - dy * dy) / .52, 0., 1.));
+                pixels[x] += edits[x] * (weight * weight * (3.f - 2.f * weight));
+            }
+        }
+        seed.convertTo(original, CV_8UC3, 255.0);
+        writeImage(path, original);
+        std::cout << path.filename().string() << " position=" << phase + 1 << " device=" << devices.front()
+                  << " seconds=" << std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count() << '\n';
+    });
+}
+
+void produce(const std::string& device, const fs::path& graph, const cv::Mat& portrait,
+             const fs::path& output, const std::vector<float>& requested) {
+    constexpr int side = 256;
+    constexpr std::size_t plane = side * side;
+    cv::setNumThreads(1);
+    const cv::Mat tensor = rgbBlob(portrait, side);
+
+    ov::Core core;
+    core.add_extension(std::make_shared<ov::frontend::onnx::ConversionExtension>("DeformConv", convertDeformableConvolution));
+    auto compiled = compilePortraitGraph(core, device, graph, {1, 4, side, side}, {1, 3, side, side});
+    const auto devices = compiled.get_property(ov::execution_devices);
+    auto request = compiled.create_infer_request();
+    auto input = request.get_input_tensor();
+    std::copy_n(tensor.ptr<float>(), 3 * plane, input.data<float>());
+    publishPortraits(output, requested.size(), [&](const fs::path& path, std::size_t index) {
+        const auto time = std::chrono::steady_clock::now();
+        std::fill_n(input.data<float>() + 3 * plane, plane, requested[index]);
+        request.infer();
+        auto result = request.get_output_tensor();
+        auto* values = result.data<float>();
+        if (!std::all_of(values, values + 3 * plane, [](float x) { return std::isfinite(x); }))
+            throw std::runtime_error("The model returned non-finite pixels.");
+        cv::Mat expanded, image;
+        cv::resize(bgr(values, side), expanded, portrait.size(), 0, 0, cv::INTER_CUBIC);
+        expanded.convertTo(image, CV_8UC3, 255.0);
+        writeImage(path, image);
+        std::cout << path.filename().string() << " moment=" << requested[index] << " device=" << devices.front()
+                  << " seconds=" << std::chrono::duration<double>(std::chrono::steady_clock::now() - time).count() << '\n';
+    });
 }
 }
 
 int wmain(int argc, wchar_t** argv) {
     try {
-        if (argc < 5)
-            throw std::invalid_argument("Use PortraitMoments.exe CPU|GPU graph.onnx portrait.png output [moment ...]");
-        const std::wstring_view device(argv[1]);
+        const bool refine = argc > 1 && std::wstring_view(argv[1]) == L"--refine-sequence";
+        if ((refine && argc != 7) || (!refine && argc < 5))
+            throw std::invalid_argument("Use PortraitMoments.exe CPU|GPU graph.onnx portrait.png output [moment ...]\n"
+                                        "or PortraitMoments.exe --refine-sequence CPU|GPU sequence.onnx refinement.onnx portrait.png output");
+        const std::wstring_view device(argv[refine ? 2 : 1]);
         if (device != L"CPU" && device != L"GPU")
             throw std::invalid_argument("Expected CPU or GPU.");
-        produce(device == L"CPU" ? "CPU" : "GPU", argv[2], readPortrait(argv[3]), argv[4], moments(argc, argv));
+        const std::string backend = device == L"CPU" ? "CPU" : "GPU";
+        if (refine)
+            refineSequence(backend, argv[3], argv[4], readPortrait(argv[5]), argv[6]);
+        else
+            produce(backend, argv[2], readPortrait(argv[3]), argv[4], moments(argc, argv));
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

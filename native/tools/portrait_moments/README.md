@@ -22,3 +22,14 @@ Windows x64 研究工具从一张对齐的 512×512 人像生成多个候选。�
 & D:\DevTools\build-portrait-moments\PortraitMoments.exe CPU `
     .\cfmd-native.onnx .\portrait.png .\candidates 0 0.5 1
 ```
+
+## 从单张糊图生成四张联合训练的候选
+
+`--refine-sequence` 以同一张 512×512 对齐糊图运行 Jin 七帧 ONNX，再用局部修复模型处理第 1、3、5、7 个位置。模型读取糊图、当前帧以及七帧的均值和变化范围，把修正量接回原始帧的脸区。输出目录有四张 PNG，顺序对应七帧模型的位置。
+
+```powershell
+& D:\DevTools\build-portrait-moments\PortraitMoments.exe --refine-sequence GPU `
+    .\jin-240.onnx .\set-192.onnx .\portrait.png .\candidates
+```
+
+七帧图接受 `[1,3,240,240]`，输出 `[1,21,240,240]`。修复图接受 `[1,13,192,192]`，输出 `[1,3,192,192]`，两者均为本地 FP32 模型。已验证的七帧图及修复图分别位于 `D:/DevTools/visual-analysis-dev/portrait-hypercut-01/jin-240.onnx` 和 `D:/DevTools/visual-analysis-dev/portrait-unordered-refinement-01/set-192.onnx`。构建和推理均可在 Windows 上使用本地依赖。[训练与配对评测](../../../docs/portrait-native-paired-evaluation.md)
