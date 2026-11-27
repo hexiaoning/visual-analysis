@@ -4982,3 +4982,17 @@ iPhoneBlur 版本 InstructIR 的训练脚本用固定 `deblur` 文字生成一�
 用此前锁定的 FVQ-20K 四段留出视频的 11 个曝光窗口复验源隔离。校准向量未使用这些数据。运动模拟中零向量为 1/11，校准为 6/11。相同窗口另加模拟屏纹，零向量 0/11，校准为 6/11。两组共享 11 个源窗口，模糊程度低于最重档。[FVQ-20K 原始视频](https://huggingface.co/datasets/Human-X/FVQ-20K)
 
 校准和高频回贴的 Windows 原生复验给用户第二、三张各留一个备选。第二张屏纹更明显，第三张仍有眼口拖影，三张缺清晰原片。试验文件在 `D:/DevTools/visual-analysis-dev/portrait-mimo-front-end-01`。`evaluation.json`、`verified-output.json` 记录原生 MIMO 对照，`instruct-fixed/evaluation.json`、`texture-scored.json`、`fvq-scored.json` 记录逐图复验，`instruct-fixed/device-benchmark.json` 保存双设备核对。`instruct-fixed/texture-new-HIDE.png`、`texture-hard-HIDE.png` 和 `texture-user.png` 为对照。已核对后续三个清单和 322 个源或候选文件条目。本轮未更新交付包。
+
+### 同一低清输入下的多原像覆盖试验
+
+从四段各自独立的 FVQ-20K 留出视频取一张清晰帧。对每张保留真实帧，并制作四张眼睑、鼻部、嘴部或组合变化的参考。512 像素参考按 16 或 32 像素方块求均值，四组分别得到 32 或 16 像素的输入。用量化区间约束使同一组的五张参考回放到逐通道完全相同的观测。变化参考属于受控构造。生成阶段仅读取观测及固定模型，冻结后再用 20 张参考计算覆盖代理指标。[FVQ-20K 原始视频](https://huggingface.co/datasets/Human-X/FVQ-20K) · [DDNM 的零空间一致性方法](https://arxiv.org/abs/2212.00490) · [MCS 的人脸多解生成](https://arxiv.org/abs/2511.14213)
+
+用 Windows C++ DirectML 跑 CodeFormer 产生底图，对眼睑、鼻宽和嘴形各取三个取值，给每个观测生成 27 个不同参数的候选。首轮普通块投影和大幅变形造成块边界和眼睑拉伸。限制变形的局部面积倍率下界，并改用仓库已有的平滑精确投影。对相同提案比较整数块修正与平滑修正，方块边缘相比邻近位置增加的色阶跳变在四组从 3.24–5.79 降到 0.0010–0.0023。修正版 108 张 PNG 及 20 张参考全部通过独立回放校验。目视仍可见个别备选的眼睑被拉伸，严重低清组与参考的嘴形和眉眼仍有差异。
+
+从每张参考到其最近候选的五官频带误差取中位，CodeFormer 为 0.04392，平滑后首张为 0.04380，盲选前四张为 0.04246，全部 27 张为 0.04137。该指标也用于候选多样性排序，外观评审表保留 20 张 `unreviewed`，无外观覆盖结论。`D:/DevTools/visual-analysis-dev/portrait-ambiguity-coverage-01/refined` 保存 `before-after.png`、`comparison.png`、`evaluation.json`、`review-sheet.json` 和 `replay-review.json`。
+
+### 在真实配对上复验回放漏选
+
+另在一张手机配对、八张双相机配对、三张 ReLoBlur 配对和三张用户屏拍上生成候选。它们未用于拟合 InstructIR 条件向量。OpenVINO Windows C++ GPU 上零向量和校准向量各处理 15 张，中位时间分别为 0.856、0.744 秒。CodeFormer 对照全程采用 DirectML。先确定同一组可供所有候选使用的三个成像核，在脸部外圈拟合，在内圈的两个分组检验回放；也试过额外保留外观有差异且部分回放核支持的候选。随后读取清晰参考评分。
+
+真实配对中，原 RSBlur 候选在双相机和 ReLoBlur 分别达到 6/8 和 1/3；校准 InstructIR 分别为 5/8 和 1/3，均已被 RSBlur 覆盖。手机样本所有候选均未达到配对评分阈值。两种回放筛选都漏掉了候选池中已有达标结果的七张。三张用户图分别留下两张、两张、一张，前两组有明显屏纹，第三张眼口仍软。`D:/DevTools/visual-analysis-dev/portrait-instruct-common-replay-01` 保存 `evaluation.json`、`alternate-evaluation.json` 和 `private-alternates.png`。试验覆盖生成及离线回放评估，未更新应用或交付包。

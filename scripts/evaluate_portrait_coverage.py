@@ -13,7 +13,10 @@ beside the manifest if using relative paths. For each reference and candidate,
 replace "unreviewed" with "same" or "different" using the agreed visual criterion.
 Run again on the edited sheet for the report. Missing judgments are unreviewed.
 Reports describe the listed references only. Optional replay checks require
-numpy and opencv-python, the original native JPEG, and the frozen motion kernel.
+numpy and opencv-python. The motion recipe uses an original native JPEG and
+the frozen motion kernel. For block-average fixtures, use a native PNG and
+{"kind": "block-mean-rgb8-v1", "scale": 16}. Both references and candidates
+must match every decoded observation pixel under that recipe.
 """
 import argparse
 from hashlib import sha256
@@ -84,6 +87,35 @@ def verify_motion_replay(recipe, root, references, observed):
             raise ValueError(f"{key}: replay from the clear reference differs from the observation JPEG bytes")
 
 
+def verify_block_replay(recipe, references, candidates, observed):
+    if set(recipe) != {"kind", "scale"}:
+        raise ValueError("Block replay requires kind and scale")
+    import cv2
+    import numpy as np
+    from portrait_preimage import BlockMeanCamera
+
+    camera = BlockMeanCamera(recipe["scale"])
+
+    def decode(pixels, label):
+        image = cv2.imdecode(np.frombuffer(pixels, np.uint8), cv2.IMREAD_UNCHANGED)
+        if image is None or image.dtype != np.uint8 or image.ndim != 3 or image.shape[2] != 3:
+            raise ValueError(f"{label}: expected an 8-bit three-channel image")
+        return image
+
+    observation = decode(observed, "observation")
+    for role, files in (("reference", references), ("candidate", candidates)):
+        seen = set()
+        for key, path in files.items():
+            sharp = decode(path.read_bytes(), f"{role} {key}")
+            if not camera.contains(observation, sharp):
+                raise ValueError(f"{role} {key}: block replay differs from the observation pixels")
+            if role == "reference":
+                digest = fingerprint(sharp.tobytes())
+                if digest in seen:
+                    raise ValueError(f"reference {key}: repeated reference pixels")
+                seen.add(digest)
+
+
 def evaluate_group(group, root, require_replay, make_sheet):
     observation = (root / group["observation"]).read_bytes()
     refs = image_files(root, group["references"], 2, "references")
@@ -93,12 +125,19 @@ def evaluate_group(group, root, require_replay, make_sheet):
     hashes["observation"] = fingerprint(observation)
     if len(set(hashes["references"].values())) != len(refs):
         raise ValueError("Repeated reference files")
+    recipe = group.get("replay")
+    if recipe is not None and not isinstance(recipe, dict):
+        raise ValueError("Expected a replay recipe object")
+    recipe_kind = recipe.get("kind") if recipe is not None else None
+    if recipe_kind == "block-mean-rgb8-v1":
+        hashes["block_replay_recipe"] = fingerprint(json.dumps(recipe, sort_keys=True).encode())
     binding = fingerprint(json.dumps(hashes, sort_keys=True).encode())
     previous = group.get("review_set_sha256")
     if previous is not None and previous != binding:
         raise ValueError("Reviewed files or IDs changed")
-    recipe = group.get("replay")
-    if recipe is not None:
+    if recipe_kind == "block-mean-rgb8-v1":
+        verify_block_replay(recipe, refs, candidates, observation)
+    elif recipe is not None:
         verify_motion_replay(recipe, root, refs, observation)
     elif require_replay:
         raise ValueError("A replay recipe is required")
@@ -122,7 +161,8 @@ def evaluate_group(group, root, require_replay, make_sheet):
         matrix[ref] = cells
     if make_sheet:
         return {**group, "review_set_sha256": binding, "reviews": matrix}
-    return {"jpeg_replay": "verified_from_all_references" if recipe is not None else "unchecked",
+    return {"jpeg_replay": "verified_from_all_references" if recipe_kind == "motion-jpeg65-v1" else "unchecked",
+            "block_replay": "verified_from_all_references_and_candidates" if recipe_kind == "block-mean-rgb8-v1" else "unchecked",
             "all_known_references": ("missed" if by_status["missed"] else
                                      "unreviewed" if by_status["unreviewed"] else "covered"),
             **by_status, "reviews": matrix, "files_sha256": hashes}
@@ -149,7 +189,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("manifest", type=Path)
     parser.add_argument("--review-sheet", action="store_true", help="emit an editable judgment matrix")
-    parser.add_argument("--require-replay", action="store_true", help="require byte-identical re-encoding for every group")
+    parser.add_argument("--require-replay", action="store_true", help="require exact replay under each group's recipe")
     args = parser.parse_args()
     try:
         data = json.loads(args.manifest.read_text(encoding="utf-8-sig"), object_pairs_hook=unique_mapping)

@@ -87,6 +87,37 @@ class PortraitCoverageTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "s: replay from the clear reference differs"):
             evaluate(self.data, self.root)
 
+    def test_block_replay_checks_candidates_and_binds_the_recipe(self):
+        try:
+            import cv2
+            import numpy as np
+        except ImportError:
+            self.skipTest("Block replay requires numpy and OpenCV")
+
+        def write(name, pixels):
+            ok, data = cv2.imencode(".png", pixels)
+            self.assertTrue(ok)
+            (self.root / name).write_bytes(data.tobytes())
+
+        self.group["observation"] = "native.png"
+        self.group["replay"] = {"kind": "block-mean-rgb8-v1", "scale": 2}
+        base = np.full((2, 2, 3), 100, dtype=np.uint8)
+        altered = base.copy()
+        altered[0, 0, 0], altered[1, 1, 0] = 45, 155
+        for name, pixels in (("r.png", base), ("s.png", altered), ("a.png", altered), ("b.png", base)):
+            write(name, pixels)
+        write("native.png", base[:1, :1])
+        report = evaluate(self.data, self.root, require_replay=True)["groups"]["test"]
+        self.assertEqual(report["block_replay"], "verified_from_all_references_and_candidates")
+        self.assertEqual(report["all_known_references"], "unreviewed")
+        sheet = evaluate(self.data, self.root, make_sheet=True)
+        sheet["groups"]["test"]["replay"] = {"kind": "block-mean-rgb8-v1", "scale": 4}
+        with self.assertRaisesRegex(ValueError, "files or IDs changed"):
+            evaluate(sheet, self.root, require_replay=True)
+        write("a.png", np.full_like(base, 101))
+        with self.assertRaisesRegex(ValueError, "candidate a: block replay differs"):
+            evaluate(self.data, self.root, require_replay=True)
+
 
 if __name__ == "__main__":
     unittest.main()
