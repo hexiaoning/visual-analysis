@@ -7,7 +7,8 @@ param(
     [Parameter(Mandatory)][string]$CodesExecutable,
     [Parameter(Mandatory)][string]$CandidatesExecutable,
     [ValidateSet("GPU", "CPU")][string]$Device = "GPU",
-    [switch]$RefineClarity
+    [switch]$RefineClarity,
+    [ValidateScript({ $_ -gt 0.0 -and $_ -lt 0.055 })][double]$CloseSeparation
 )
 
 $ErrorActionPreference = "Stop"
@@ -48,8 +49,11 @@ try {
     Invoke-NativeStage $Codes @("decode", $Backend, $Models["decode.onnx"], $InputFile, "raw.bin", "direct.png",
         $InputFile, "first.bin", "first.png", $InputFile, "last.bin", "last.png") "decode.log"
     $Bank = @("direct.png", "first.png", "last.png")
-    $Arguments = @("--extend-shape-cover", ".055", ".028", "1", "--max-additions", "2",
-        "--landmarks", $Models["hr-nosa-wflw-geometry.onnx"], $InputFile, "selected") + $Bank
+    $Arguments = @("--extend-shape-cover", ".055", ".028", "1", "--max-additions", "2")
+    if ($PSBoundParameters.ContainsKey("CloseSeparation")) {
+        $Arguments += @("--close-separation", $CloseSeparation.ToString("G17", [Globalization.CultureInfo]::InvariantCulture))
+    }
+    $Arguments += @("--landmarks", $Models["hr-nosa-wflw-geometry.onnx"], $InputFile, "selected") + $Bank
     Invoke-NativeStage $Candidates $Arguments "selection-path.log"
 
     $Selection = (Get-Content -LiteralPath "selection-path.log" -Raw).Trim()
