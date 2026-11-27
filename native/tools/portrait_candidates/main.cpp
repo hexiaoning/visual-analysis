@@ -309,6 +309,73 @@ fs::path mouth_variants(wchar_t **argv, int argc) {
     });
 }
 
+Json write_indexed_candidates(const fs::path &directory, const std::vector<cv::Mat> &portraits,
+                              const std::vector<std::size_t> &indices) {
+    Json outputs = Json::array();
+    for (const auto index : indices) {
+        const std::string filename = "candidate-" + std::to_string(outputs.size() + 1) + ".png";
+        write_image(directory / filename, portraits[index]);
+        outputs.push_back({{"input_index", index}, {"png", filename}});
+    }
+    return outputs;
+}
+
+fs::path extend_shape_cover(wchar_t **argv, int argc) {
+    cv::setNumThreads(1);
+    const auto parse = [](const wchar_t *argument) {
+        const std::wstring text(argument);
+        std::size_t used = 0;
+        const double number = std::stod(text, &used);
+        if (used != text.size())
+            throw std::invalid_argument("Invalid shape extension parameter");
+        return number;
+    };
+    const double radius = parse(argv[2]);
+    const double tolerance = parse(argv[3]);
+    const std::wstring text(argv[4]);
+    std::size_t used = 0;
+    const auto kept = std::stoull(text, &used);
+    const bool compare_landmarks = std::wstring_view(argv[5]) == L"--landmarks";
+    const int source_index = compare_landmarks ? 7 : 5;
+    const int first_candidate = source_index + 2;
+    if (argc <= first_candidate)
+        throw std::invalid_argument("Expected the source, output directory and at least one candidate");
+    if (used != text.size() || kept == 0 || kept > static_cast<unsigned long long>(argc - first_candidate))
+        throw std::invalid_argument("Expected a positive protected count within the candidate bank");
+    const auto source = read_image(argv[source_index]);
+    std::vector<cv::Mat> portraits;
+    portraits.reserve(static_cast<std::size_t>(argc - first_candidate));
+    for (int arg = first_candidate; arg < argc; ++arg)
+        portraits.push_back(read_image(argv[arg]));
+    const auto protected_count = static_cast<std::size_t>(kept);
+    auto chosen = portrait_selection::extend_appearances(source, portraits, protected_count, radius, tolerance);
+    Json landmark_checks = Json::array();
+    if (compare_landmarks && chosen.representatives.size() > protected_count) {
+        portrait_selection::Selector selector(argv[6]);
+        const auto &extra = portraits[chosen.representatives.back()];
+        bool distinct = true;
+        for (std::size_t i = 0; i < protected_count; ++i) {
+            const bool visible = selector.select(source, portraits[i], extra).visible_shape_difference;
+            landmark_checks.push_back(visible);
+            distinct = distinct && visible;
+        }
+        if (!distinct)
+            chosen.representatives.pop_back();
+    }
+    return publish_run(argv[source_index + 1], [&](const fs::path &pending) {
+        const Json report = {{"mode", "evidence-extension"}, {"radius", radius}, {"replay_tolerance", tolerance},
+                             {"kept_count", kept}, {"replay_errors", chosen.replay_errors},
+                             {"distance_to_protected", chosen.distances_to_kept},
+                             {"landmarks_enabled", compare_landmarks}, {"landmark_checks", landmark_checks},
+                             {"outputs", write_indexed_candidates(pending, portraits, chosen.representatives)}};
+        std::ofstream receipt(pending / "selection.json", std::ios::binary);
+        receipt << report.dump(2) << '\n';
+        receipt.close();
+        if (!receipt)
+            throw std::runtime_error("Could not save evidence extension report");
+    });
+}
+
 fs::path cover_shapes(wchar_t **argv, int argc) {
     cv::setNumThreads(1);
     const std::wstring value(argv[2]);
@@ -322,15 +389,9 @@ fs::path cover_shapes(wchar_t **argv, int argc) {
         portraits.push_back(read_image(argv[arg]));
     const auto cover = portrait_selection::cover_appearances(portraits, radius);
     return publish_run(argv[3], [&](const fs::path &pending) {
-        Json outputs = Json::array();
-        for (const auto index : cover.representatives) {
-            const std::string filename = "candidate-" + std::to_string(outputs.size() + 1) + ".png";
-            write_image(pending / filename, portraits[index]);
-            outputs.push_back({{"input_index", index}, {"png", filename}});
-        }
         Json report = {
             {"mode", "shape-cover"}, {"radius", radius}, {"nearest_input_index", cover.nearest},
-            {"measured_distance", cover.distances}, {"outputs", std::move(outputs)},
+            {"measured_distance", cover.distances}, {"outputs", write_indexed_candidates(pending, portraits, cover.representatives)},
         };
         std::ofstream receipt(pending / "selection.json", std::ios::binary);
         receipt << report.dump(2) << '\n';
@@ -406,6 +467,7 @@ int wmain(int argc, wchar_t **argv) {
             "third.png output.png\n"
             "PortraitCandidates.exe --combine-detail-consensus first.png second.png third.png output.png\n"
             "PortraitCandidates.exe --mouth-variants landmarks.onnx aligned.png output-directory opening [opening2 ...]\n"
+            "PortraitCandidates.exe --extend-shape-cover radius replay-tolerance kept-count [--landmarks model.onnx] source.png output-directory candidate.png [more.png ...]\n"
             "PortraitCandidates.exe --cover-shapes radius output-directory primary.png [candidate.png ...]\n"
             "PortraitCandidates.exe --select-by-replay landmarks.onnx source.png primary.png output-directory "
             "alternate.png [alternate2.png ...]";
@@ -414,6 +476,12 @@ int wmain(int argc, wchar_t **argv) {
             return 0;
         }
         const std::wstring_view option = argc > 1 ? argv[1] : L"";
+        if (option == L"--extend-shape-cover") {
+            if (argc < 8)
+                throw std::invalid_argument(usage);
+            print_output_path(extend_shape_cover(argv, argc));
+            return 0;
+        }
         if (option == L"--mouth-variants") {
             if (argc < 6)
                 throw std::invalid_argument(usage);

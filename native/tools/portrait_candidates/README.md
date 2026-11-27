@@ -146,6 +146,16 @@ $exe = Join-Path $build.OutputDirectory 'PortraitCandidates.exe'
 
 输出的候选 PNG 与对应输入像素一致。`selection.json` 中的 `outputs` 按保留顺序列出原输入序号及文件名。`nearest_input_index` 和 `measured_distance` 为每张输入列出最近代表的原输入序号及距离。所有序号从 0 开始。该半径只约束候选库中已生成的图和上述距离，外观评审仍需与可能的清晰原像比较。
 
+## 在原结果后追加有观测支持的候选
+
+`--extend-shape-cover` 接收原始糊图和同一 512×512 对齐坐标的一组候选。开头指定数量的候选按原顺序输出，后续候选最多追加一张。程序允许小幅平移和模糊回放，在分开的图块拟合及检验亮度。追加图要求脸部细频不低于糊图，回放误差不超过原结果最小误差加给定容差，而且与每张原结果的五官带通距离均大于半径。若有多张满足，优先保留能覆盖较多相近且有观测支持的备选的候选，降低近重复簇的权重。
+
+```powershell
+& $exe --extend-shape-cover 0.055 0.028 1 --landmarks .\hr-nosa-wflw-geometry.onnx .\source.png .\outputs .\primary.png .\alternative-1.png .\alternative-2.png
+```
+
+可选 `--landmarks` 使用本地 HR-noSA 对追加图和每张原结果再做一次关键点及局部像素差异检验，全部通过才追加。`selection.json` 记录 `landmark_checks`、各输入的 `replay_errors`、到原结果集合的最短距离 `distance_to_protected` 及实际输出。输出直接使用所选候选像素。回放容差采用 0 到 1 的亮度标度。[配对验证](../../../docs/portrait-native-paired-evaluation.md)
+
 ## 纹理保护实验
 
 `--texture-guard <model.json>` 包含近重复拟合。仅当拟合会把主候选替换成 AMD 时，程序计算 AMD 的纹理分。分数小于或等于科研模型的固定阈值 **0.5641734981312992** 时接受替换，超过阈值则保留原先选择。模型使用绝对分数，计算过程中只读取 AMD 的候选图。近重复以外的双张展示按原规则处理。
