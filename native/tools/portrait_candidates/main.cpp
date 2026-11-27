@@ -247,6 +247,7 @@ int wmain(int argc, wchar_t **argv) {
             "codeformer.png amd.png output-directory [source2.png codeformer2.png amd2.png output2 ...]\n"
             "PortraitCandidates.exe --normalize-exposure model.json source.png output.png\n"
             "PortraitCandidates.exe --match-candidate-tone candidate.png guide.png output.png\n"
+            "PortraitCandidates.exe --calibrate-capture-color model.json source.png candidate.png output.png\n"
             "PortraitCandidates.exe --combine-detail-consensus first.png second.png third.png output.png\n"
             "PortraitCandidates.exe --select-by-replay landmarks.onnx source.png primary.png output-directory "
             "alternate.png [alternate2.png ...]";
@@ -282,6 +283,20 @@ int wmain(int argc, wchar_t **argv) {
             const auto candidate = read_image(argv[2]);
             const auto guide = read_image(argv[3]);
             publish_new_image(output, portrait_selection::match_candidate_tone(candidate, guide));
+            return 0;
+        }
+        if (option == L"--calibrate-capture-color") {
+            if (argc != 6)
+                throw std::invalid_argument(usage);
+            const fs::path output(argv[5]);
+            if (fs::exists(output))
+                throw std::invalid_argument("Color calibration output must be a new path");
+            cv::setNumThreads(1);
+            const auto source = read_image(argv[3]);
+            const auto candidate = read_image(argv[4]);
+            const auto result = portrait_selection::calibrate_capture_color(source, candidate, argv[2]);
+            publish_new_image(output, result.image);
+            std::cout << Json{{"log_gain_blue_red", result.log_gain_blue_red}}.dump() << '\n';
             return 0;
         }
         if (option == L"--normalize-exposure") {

@@ -285,4 +285,182 @@ cv::Mat match_candidate_tone(const cv::Mat &candidate, const cv::Mat &guide) {
     }
     return result;
 }
+
+namespace {
+constexpr size_t capture_color_features = 28;
+const cv::Vec3f luminance_bgr{.114f, .587f, .299f};
+
+struct CaptureColorModel {
+    Row<capture_color_features> center;
+    Row<capture_color_features> scale;
+    Row<2> bias;
+    std::array<Row<2>, capture_color_features> weights;
+};
+
+CaptureColorModel read_capture_color_model(const std::filesystem::path &path) {
+    std::ifstream stream(path);
+    if (!stream)
+        throw std::runtime_error("Cannot open capture color model");
+    const auto json = nlohmann::json::parse(stream);
+    if (json.at("schema") != "portrait-capture-color-quantiles-v1")
+        throw std::invalid_argument("Unsupported capture color model schema");
+    const auto has_size = [](const auto &array, size_t size) { return array.is_array() && array.size() == size; };
+    const auto &weights = json.at("weights");
+    if (!has_size(json.at("center"), capture_color_features) || !has_size(json.at("scale"), capture_color_features) ||
+        !has_size(json.at("bias"), 2) || !has_size(weights, capture_color_features) ||
+        !std::all_of(weights.begin(), weights.end(), [&](const auto &row) { return has_size(row, 2); }))
+        throw std::invalid_argument("Invalid capture color model dimensions");
+    CaptureColorModel model{json.at("center").get<Row<capture_color_features>>(),
+                            json.at("scale").get<Row<capture_color_features>>(), json.at("bias").get<Row<2>>(),
+                            weights.get<decltype(CaptureColorModel::weights)>()};
+    const auto finite = [](const auto &row) {
+        return std::all_of(row.begin(), row.end(), [](double v) { return std::isfinite(v); });
+    };
+    if (!finite(model.center) || !finite(model.scale) || !finite(model.bias) ||
+        !std::all_of(model.weights.begin(), model.weights.end(), finite) ||
+        std::any_of(model.scale.begin(), model.scale.end(), [](double v) { return v <= 0.; }))
+        throw std::invalid_argument("Invalid capture color model coefficients");
+    return model;
+}
+
+bool capture_color_stats(const cv::Mat &image, double *values) {
+    const auto decoded = log_linear_bgr(image);
+    cv::Mat linear, blurred;
+    cv::exp(decoded, linear);
+    linear -= cv::Scalar::all(linear_floor);
+    cv::GaussianBlur(linear, blurred, {0, 0}, 1.55);
+    const cv::Rect region{80, 125, 352, 322};
+    struct Pixel {
+        float brightness;
+        Row<2> log_chroma;
+    };
+    std::vector<Pixel> pixels;
+    Values sorted;
+    pixels.reserve(region.area());
+    sorted.reserve(region.area());
+    for (int y = region.y; y < region.br().y; ++y) {
+        const auto *row = blurred.ptr<cv::Vec3f>(y);
+        for (int x = region.x; x < region.br().x; ++x) {
+            const auto pixel = row[x];
+            const float y_value = pixel.dot(luminance_bgr);
+            if (y_value <= .045f || y_value >= .96f || std::max({pixel[0], pixel[1], pixel[2]}) >= .965f)
+                continue;
+            const float green = std::max(pixel[1], .004f);
+            const auto ratio = [&](int ch) { return std::log(std::max(pixel[ch], .004f) / green); };
+            pixels.push_back({y_value, {ratio(0), ratio(2)}});
+            sorted.push_back(y_value);
+        }
+    }
+    if (pixels.size() < 700)
+        return false;
+    std::sort(sorted.begin(), sorted.end());
+    constexpr std::array probabilities{.12, .27, .52, .76, .92};
+    for (size_t i = 0; i < probabilities.size(); ++i)
+        values[i] = quantile(sorted, probabilities[i]);
+    for (size_t i = 0; i + 1 < probabilities.size(); ++i) {
+        std::array<Values, 2> chroma;
+        for (const auto &pixel : pixels) {
+            if (pixel.brightness < values[i] || pixel.brightness > values[i + 1])
+                continue;
+            chroma[0].push_back(pixel.log_chroma[0]);
+            chroma[1].push_back(pixel.log_chroma[1]);
+        }
+        for (size_t ch = 0; ch < chroma.size(); ++ch) {
+            auto &entries = chroma[ch];
+            std::sort(entries.begin(), entries.end());
+            if (!entries.empty())
+                values[5 + 2 * i + ch] = entries.size() == 1 ? entries.front() : quantile(entries, .5);
+        }
+    }
+    values[13] = static_cast<double>(pixels.size()) / (side * side);
+    return true;
+}
+
+cv::Mat apply_capture_color(const cv::Mat &candidate, const Row<2> &gain) {
+    if (std::max(std::abs(gain[0]), std::abs(gain[1])) < 1.e-7)
+        return candidate;
+
+    std::array<std::array<float, 256>, 2> channel_delta{};
+    for (size_t ch = 0; ch < channel_delta.size(); ++ch) {
+        const float scale = std::exp(static_cast<float>(gain[ch]));
+        for (size_t i = 0; i < channel_delta[ch].size(); ++i) {
+            const float encoded = static_cast<float>(i) / 255.f;
+            const float linear = encoded <= .04045f ? encoded / 12.92f : std::pow((encoded + .055f) / 1.055f, 2.4f);
+            const float adjusted = linear * scale;
+            const float srgb = adjusted <= .0031308f ? 12.92f * adjusted : 1.055f * std::pow(adjusted, 1.f / 2.4f) - .055f;
+            channel_delta[ch][i] = srgb - encoded;
+        }
+    }
+    cv::Mat result(candidate.size(), candidate.type());
+    for (int y = 0; y < side; ++y) {
+        const auto *original = candidate.ptr<cv::Vec3b>(y);
+        auto *changed = result.ptr<cv::Vec3b>(y);
+        const float dy = (static_cast<float>(y) - 290.f) / 141.f;
+        for (int x = 0; x < side; ++x) {
+            const float dx = (static_cast<float>(x) - 255.f) / 162.f;
+            const float mask = std::clamp((1.11f - (dx * dx + dy * dy)) / .33f, 0.f, 1.f);
+            const float weight = mask * mask * (3.f - 2.f * mask);
+            cv::Vec3f delta{channel_delta[0][original[x][0]], 0.f, channel_delta[1][original[x][2]]};
+            delta = (delta - cv::Vec3f::all(delta.dot(luminance_bgr))) * weight;
+            const cv::Vec3f base = cv::Vec3f(original[x]) / 255.f;
+            float amount = 1.f;
+            for (int ch = 0; ch < 3; ++ch) {
+                if (delta[ch] > 1.e-8f)
+                    amount = std::min(amount, (1.f - base[ch]) / delta[ch]);
+                else if (delta[ch] < -1.e-8f)
+                    amount = std::min(amount, -base[ch] / delta[ch]);
+            }
+            for (int ch = 0; ch < 3; ++ch)
+                changed[x][ch] = cv::saturate_cast<uchar>((base[ch] + amount * delta[ch]) * 255.f);
+        }
+    }
+
+    // Preserve the exact integer grayscale used by downstream geometry tools after quantization.
+    cv::Mat original_gray, result_gray;
+    cv::cvtColor(candidate, original_gray, cv::COLOR_BGR2GRAY);
+    cv::cvtColor(result, result_gray, cv::COLOR_BGR2GRAY);
+    for (int y = 0; y < side; ++y) {
+        const auto *original = candidate.ptr<cv::Vec3b>(y);
+        auto *changed = result.ptr<cv::Vec3b>(y);
+        const auto *before = original_gray.ptr<uchar>(y);
+        const auto *after = result_gray.ptr<uchar>(y);
+        for (int x = 0; x < side; ++x) {
+            const int offset = before[x] - after[x];
+            auto &pixel = changed[x];
+            if (std::min({pixel[0], pixel[1], pixel[2]}) + offset < 0 ||
+                std::max({pixel[0], pixel[1], pixel[2]}) + offset > 255) {
+                pixel = original[x];
+                continue;
+            }
+            for (int ch = 0; ch < 3; ++ch)
+                pixel[ch] = static_cast<uchar>(pixel[ch] + offset);
+        }
+    }
+    return result;
+}
+} // namespace
+
+CaptureColorResult calibrate_capture_color(const cv::Mat &source, const cv::Mat &candidate,
+                                           const std::filesystem::path &model_path) {
+    for (const auto *image : {&source, &candidate})
+        if (image->type() != CV_8UC3 || image->size() != cv::Size(side, side))
+            throw std::invalid_argument("Capture color calibration requires two aligned 512x512 BGR images");
+    const auto model = read_capture_color_model(model_path);
+    Row<capture_color_features> values{};
+    if (!capture_color_stats(source, values.data()) ||
+        !capture_color_stats(candidate, values.data() + capture_color_features / 2))
+        return {candidate, {0., 0.}};
+    Row<2> estimation = model.bias;
+    for (size_t i = 0; i < values.size(); ++i) {
+        const double x = std::clamp((values[i] - model.center[i]) / model.scale[i], -3.5, 3.5);
+        for (size_t ch = 0; ch < estimation.size(); ++ch)
+            estimation[ch] += model.weights[i][ch] * x;
+    }
+    for (double &value : estimation) {
+        if (!std::isfinite(value))
+            throw std::invalid_argument("Capture color model produced a nonfinite gain");
+        value = std::clamp(value, -.57, .57);
+    }
+    return {apply_capture_color(candidate, estimation), estimation};
+}
 }
