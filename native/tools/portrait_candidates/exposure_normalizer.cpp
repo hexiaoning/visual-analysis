@@ -246,6 +246,42 @@ ExposureResult normalize_exposure(const cv::Mat &image, const std::filesystem::p
     return {correct(pixels, grid, gain, black), gain, black, evidence, grid, true};
 }
 
+cv::Mat condition_candidate_tone(const cv::Mat &candidate, const cv::Mat &guide, double scale) {
+    if (!std::isfinite(scale) || scale < 4. || scale > 24.)
+        throw std::invalid_argument("Expected a tone conditioning scale between 4 and 24 pixels");
+    for (const auto *image : {&candidate, &guide}) {
+        if (image->type() != CV_8UC3 || image->size() != cv::Size(side, side))
+            throw std::invalid_argument("Tone conditioning requires two aligned 512x512 BGR images");
+    }
+    cv::Mat base, target, correction;
+    candidate.convertTo(base, CV_32FC3, 1. / 255.);
+    guide.convertTo(target, CV_32FC3, 1. / 255.);
+    cv::GaussianBlur(target - base, correction, {}, scale, 0., cv::BORDER_REFLECT_101);
+    const static cv::Mat weight = [] {
+        cv::Mat result(side, side, CV_32F);
+        for (int y = 0; y < side; ++y) {
+            for (int x = 0; x < side; ++x) {
+                double radius = std::hypot((x - 256.) / 204., (y - 290.) / 207.);
+                const double fade = std::clamp((radius - .68) / .32, 0., 1.);
+                result.at<float>(y, x) = static_cast<float>(.85 * (.5 + .5 * std::cos(CV_PI * fade)));
+            }
+        }
+        return result;
+    }();
+    for (int y = 0; y < side; ++y) {
+        auto *pixels = base.ptr<cv::Vec3f>(y);
+        const auto *delta = correction.ptr<cv::Vec3f>(y);
+        const auto *mix = weight.ptr<float>(y);
+        for (int x = 0; x < side; ++x) {
+            for (int channel = 0; channel < 3; ++channel)
+                pixels[x][channel] += mix[x] * std::clamp(delta[x][channel], -.12f, .12f);
+        }
+    }
+    cv::Mat output;
+    base.convertTo(output, CV_8UC3, 255.);
+    return output;
+}
+
 cv::Mat match_candidate_tone(const cv::Mat &candidate, const cv::Mat &guide) {
     for (const auto *image : {&candidate, &guide}) {
         if (image->type() != CV_8UC3 || image->size() != cv::Size(side, side))

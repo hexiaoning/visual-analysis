@@ -116,6 +116,12 @@ $exe = Join-Path $build.OutputDirectory 'PortraitCandidates.exe'
 & $exe --match-candidate-tone .\candidate.png .\guide.png .\tone-matched.png
 ```
 
+`--condition-candidate-tone` 也使用两张 512×512 对齐彩色图。它将参照和候选的 BGR 差值按给定像素尺度平滑，再在脸部软窗内向候选加入有限的低频校正。尺度取 4 到 24。窗外像素逐个保持，输出使用新路径。对屏拍的试验使用从同一输入测得周期后得到的去纹图作为参照。
+
+```powershell
+& $exe --condition-candidate-tone 6 .\candidate.png .\depatterned-observation.png .\conditioned.png
+```
+
 此研究模式使用固定校正强度。评测中不同候选的效果有差异，可将输出送入同一糊图的回放筛选，核对是否适合作为单张结果。[配对评测](../../../docs/portrait-native-paired-evaluation.md)
 
 ## 已生成候选的屏拍颜色校准

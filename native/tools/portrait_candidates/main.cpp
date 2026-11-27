@@ -613,6 +613,7 @@ int wmain(int argc, wchar_t **argv) {
             "codeformer.png amd.png output-directory [source2.png codeformer2.png amd2.png output2 ...]\n"
             "PortraitCandidates.exe --normalize-exposure model.json source.png output.png\n"
             "PortraitCandidates.exe --match-candidate-tone candidate.png guide.png output.png\n"
+            "PortraitCandidates.exe --condition-candidate-tone scale candidate.png guide.png output.png\n"
             "PortraitCandidates.exe --calibrate-capture-color model.json source.png candidate.png output.png\n"
             "PortraitCandidates.exe --calibrate-capture-geometry model.json source.png first-guide.png "
             "second-guide.png candidate.png output.png\n"
@@ -721,6 +722,23 @@ int wmain(int argc, wchar_t **argv) {
             cv::setNumThreads(1);
             const std::array candidates{read_image(argv[2]), read_image(argv[3]), read_image(argv[4])};
             publish_new_image(output, combine_detail_consensus(candidates));
+            return 0;
+        }
+        if (option == L"--condition-candidate-tone") {
+            if (argc != 6)
+                throw std::invalid_argument(usage);
+            const std::wstring parameter(argv[2]);
+            std::size_t used = 0;
+            const double scale = std::stod(parameter, &used);
+            if (used != parameter.size())
+                throw std::invalid_argument("Invalid tone conditioning scale");
+            const fs::path output(argv[5]);
+            if (fs::exists(output))
+                throw std::invalid_argument("Conditioned output must be a new path");
+            cv::setNumThreads(1);
+            const auto candidate = read_image(argv[3]);
+            const auto guide = read_image(argv[4]);
+            publish_new_image(output, portrait_selection::condition_candidate_tone(candidate, guide, scale));
             return 0;
         }
         if (option == L"--match-candidate-tone") {

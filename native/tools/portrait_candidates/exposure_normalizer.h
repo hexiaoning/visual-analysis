@@ -16,6 +16,7 @@ struct ExposureResult {
 
 ExposureResult normalize_exposure(const cv::Mat &image, const std::filesystem::path &model_path);
 cv::Mat match_candidate_tone(const cv::Mat &candidate, const cv::Mat &guide);
+cv::Mat condition_candidate_tone(const cv::Mat &candidate, const cv::Mat &guide, double scale);
 
 struct CaptureColorResult {
     cv::Mat image;
