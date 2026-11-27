@@ -1,5 +1,6 @@
 #include "portrait_selection.h"
 #include "exposure_normalizer.h"
+#include "fine_band_limit.h"
 #include "geometry_calibration.h"
 
 #include <algorithm>
@@ -330,6 +331,7 @@ int wmain(int argc, wchar_t **argv) {
             "PortraitCandidates.exe --calibrate-capture-color model.json source.png candidate.png output.png\n"
             "PortraitCandidates.exe --calibrate-capture-geometry model.json source.png first-guide.png "
             "second-guide.png candidate.png output.png\n"
+            "PortraitCandidates.exe --cap-fine-band aligned.png max-rms output.png\n"
             "PortraitCandidates.exe --compose-local-donors weights.json baseline.png first.png second.png "
             "third.png output.png\n"
             "PortraitCandidates.exe --combine-detail-consensus first.png second.png third.png output.png\n"
@@ -344,6 +346,24 @@ int wmain(int argc, wchar_t **argv) {
             if (argc < 7)
                 throw std::invalid_argument(usage);
             print_output_path(select_by_replay(argv, argc));
+            return 0;
+        }
+        if (option == L"--cap-fine-band") {
+            if (argc != 5)
+                throw std::invalid_argument(usage);
+            const fs::path output(argv[4]);
+            if (fs::exists(output))
+                throw std::invalid_argument("Fine band output must be a new path");
+            const std::wstring value(argv[3]);
+            size_t used = 0;
+            const double maximum = std::stod(value, &used);
+            if (used != value.size())
+                throw std::invalid_argument("Invalid fine band limit");
+            cv::setNumThreads(1);
+            const auto limited = portrait_selection::cap_fine_band(read_image(argv[2]), maximum);
+            publish_new_image(output, limited.image);
+            std::cout << Json{{"target_rms", maximum}, {"output_rms", limited.rms}, {"reached", limited.reached}}.dump()
+                      << '\n';
             return 0;
         }
         if (option == L"--compose-local-donors") {

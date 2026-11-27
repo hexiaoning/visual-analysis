@@ -70,6 +70,14 @@ $exe = Join-Path $build.OutputDirectory 'PortraitCandidates.exe'
 
 权重由调用方提供。该命令只完成本地像素组合。[配对评测](../../../docs/portrait-native-paired-evaluation.md)
 
+## 限制候选的细带强度
+
+`--cap-fine-band` 接收一张 512×512 对齐候选和以归一化亮度表示的细带 RMS 上限。程序只在脸部软窗内调整亮度，保持每个像素的 BGR 通道差。上限由调用方提供。结果写入一个新 PNG 路径，标准输出同时报告 `target_rms`、`output_rms` 以及在 2% 容差内是否达到目标的 `reached`。窗外细节、每像素限幅和整数化都可能使设定上限无法达到。
+
+```powershell
+& $exe --cap-fine-band .\candidate.png 0.025 .\limited.png
+```
+
 ## 单张模糊图的曝光校正
 
 `--normalize-exposure` 在生成候选之前运行，输入为一张已对齐的 512×512 BGR 图像。参数文件由公开配对数据的离线训练生成。此模式使用 C++ 和 OpenCV 估计亮度及色偏，需要提供研究参数文件，无需加载关键点模型。示例将得到一张新路径下的 PNG，可送入原生人像生成器。
