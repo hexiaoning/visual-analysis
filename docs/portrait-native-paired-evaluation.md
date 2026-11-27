@@ -4844,3 +4844,15 @@ Windows 原生工具增加 `--cap-fine-band`，接受指定的细带亮度强度
 Windows 原生点位程序在六张图上重跑，DirectML 全部挂载。该机 CPU 和 DirectML 的中位耗时分别为 820 和 234 毫秒，最大点位坐标差为 0.00083 像素。三张用户样本用 Windows 原生回放筛选重新验证，最终均选中既有底图，未保留轮廓备选。三张缺少清晰参考，第二、三张的眼部细节依然不清楚。本轮结论仅用于评测，轮廓变形未进入交付版。
 
 本机实验目录为 `D:/DevTools/visual-analysis-dev/portrait-shape-posterior-01`。`archive-test.json` 和 `interval-measured.json` 记录点位误差与覆盖率，`paint.lock` 和 `eye-frozen.json` 记录评分前固定的候选及校验值，`real-score.json` 和 `eye-scored.json` 记录逐样本评分。`three-shape-candidates.png` 和 `inpainting-shape-diagnostic.png` 分别是三张用户样本和七张有参考样本的对照图。`native-landmark-proof.json` 与 `native-case-verification.json` 记录原生复测。
+
+### 用高清生成先验和统一模糊回放检查候选
+
+参考 GenR 的生成器潜变量反演思路，使用 NVIDIA 的 StyleGAN3-T FFHQ-U 256 权重建立实验。先固定 20 个种子，按糊图五官粗定位对齐并比较回放，每图保留两个起点。快速路线拟合每张起点的平移、角度、尺度、亮度和偏色。拟合和选图取自同一输入的交错图块，清晰参考只在候选锁定后读取。Windows 11 上使用 CPU 生成。研究权重限制商业用途。[GenR 论文](https://doi.org/10.1016/j.patrec.2026.04.021) · [NVIDIA 权重和实现](https://github.com/NVlabs/stylegan3) · [NVIDIA 许可](https://github.com/NVlabs/stylegan3/blob/main/LICENSE.txt)
+
+另用固定模糊核把生成图和既有底图的差分投影到受观测限制较弱的频带。对同一候选试两个固定投影强度，保持脸外像素，回放后用预留图块评分。输入为三张用户样例，以及八张已知难例的配对，包括两张屏摄、四张运动模糊和两张独立 HIDE 运动模糊。两条路线均为 0/8 通过原有联合门槛，查看原片后遍选也未新增通过。对八张的最终候选单独计算 ArcFace 余弦相似度，既有底图均值 0.583，快速拟合 0.171，回放投影 0.513。投影在其中两张 HIDE 对照上提高了该指标，整体清晰度和相似度联合要求仍未达到。这里复用了此前诊断过的难例，不能据此估算一般样本的成功率。
+
+三张用户样例中，快速拟合的图块回放误差分别为 0.1054、0.1113、0.0645。投影后分别为 0.0454、0.0496、0.0252，靠近既有底图的 0.0452、0.0492、0.0266。直接生成有明显眼、口细节，也引入了露齿笑和眼镜。投影压低了部分明显偏差，第二张依旧缺少清楚的眼部细节，第三张只有较弱的新轮廓。已有 Windows C++ 筛选器核对两条路线的输出，两次都仅保留既有底图，并逐像素核对了保存结果。这里的回放误差衡量与输入的吻合度，三张无清晰参考，无法核验真实长相。
+
+完整潜变量路线先拟合共享的 W，再放开四组层的 W。参考实现首次反向时进程提交内存约 6.8 GB，实验进程随即停止。改成分块 FIR 滤波和反向重算后，28+4 通道对照的前向与梯度最大差均为 0。完整模型单步前向 7.10 秒，前向加反向 32.09 秒。模糊回放拟合使用本机文件，运行时拦截 Python 发起的网络连接。完整路线的逐图优化仍在运行，本节的配对结果只覆盖快速拟合和投影。
+
+实验目录为 `D:/DevTools/visual-analysis-dev/portrait-staged-latent-01`。`initial-fit` 和 `replay-projection` 下各有 `inversion.lock`、`inversion-scored.json`、`native-selection.json`、`three-inputs-and-replays.png` 及 `paired-inversion-review.png`。`direct-reference-embedding.json` 保存八张的直接特征相似度。两条已完成路线未进入交付版。
