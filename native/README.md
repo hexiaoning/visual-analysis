@@ -22,11 +22,11 @@
 GUI 默认在 EXE 同级的 `models/` 读取权重。向构建脚本传入 `-ModelDirectory`，可在校验 SHA-256 后复制 SCRFD、PCFlow 及 GFPGAN 权重。PCFlow 与 GFPGAN 使用现有已校验的产物，无需安装原项目 Python SDK。[PCFlow](https://github.com/aiimaginglab/PCFlow) · [GFPGAN](https://github.com/TencentARC/GFPGAN)
 
 ```powershell
-$exe = 'D:\DevTools\visual-analysis-dev\native\build\VisualAnalysis.exe'
+$exe = 'D:\Data\Build\visual-analysis-dev\native\build\VisualAnalysis.exe'
 $argsRun = @('--check-restoration-cases', 'D:\visual-analysis\cases\inputs',
     '--case-output', 'D:\visual-analysis\cases\outputs',
     '--report', 'D:\visual-analysis\cases\outputs\native-report.json',
-    '--models', 'D:\DevTools\visual-analysis-dev\models', '--prefer-recall')
+    '--models', 'D:\Data\Build\visual-analysis-dev\models', '--prefer-recall')
 $run = Start-Process -FilePath $exe -ArgumentList $argsRun -WindowStyle Hidden -Wait -PassThru
 if ($run.ExitCode) { throw "Native case check failed." }
 ```

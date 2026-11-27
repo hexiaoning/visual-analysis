@@ -14,7 +14,7 @@ Windows x64 研究工具从一张对齐的 512×512 人像生成多个候选。�
 
 ## 运行
 
-模型接受 `[1,4,256,256]` 浮点数，前三个平面为 0 到 1 的 RGB，最后一个平面为控制值。输出为 `[1,3,256,256]` 浮点 RGB。测试用的本地导出在 `D:/DevTools/visual-analysis-dev/portrait-exposure-inversion-01/cfmd-native.onnx`。模型来源和数值对照见[评测记录](../../../docs/portrait-native-paired-evaluation.md)。
+模型接受 `[1,4,256,256]` 浮点数，前三个平面为 0 到 1 的 RGB，最后一个平面为控制值。输出为 `[1,3,256,256]` 浮点 RGB。测试用的本地导出在 `D:/Data/Build/visual-analysis-dev/portrait-exposure-inversion-01/cfmd-native.onnx`。模型来源和数值对照见[评测记录](../../../docs/portrait-native-paired-evaluation.md)。
 
 将 OpenVINO `libs` 及 OpenCV `x64\vc16\bin` 目录加入 `PATH`。输入是一张已对齐的人像，输出目录使用新路径。完成全部候选后才发布目录，PNG 按控制值的参数顺序编号。
 
@@ -32,7 +32,7 @@ Windows x64 研究工具从一张对齐的 512×512 人像生成多个候选。�
     .\jin-240.onnx .\set-192.onnx .\portrait.png .\candidates
 ```
 
-七帧图接受 `[1,3,240,240]`，输出 `[1,21,240,240]`。修复图接受 `[1,13,H,H]`，输出 `[1,3,H,H]`，支持 `H=192` 和 `H=512`。输入、输出均为本地 FP32。192 像素修复图使用下采样观察并把修正放回 512 像素。512 像素修复图直接使用原观察，七帧以立方插值和 8 位量化对齐到同一分辨率。已验证的七帧图及 192 像素修复图分别位于 `D:/DevTools/visual-analysis-dev/portrait-hypercut-01/jin-240.onnx` 和 `D:/DevTools/visual-analysis-dev/portrait-unordered-refinement-01/set-192.onnx`。[训练与配对评测](../../../docs/portrait-native-paired-evaluation.md)
+七帧图接受 `[1,3,240,240]`，输出 `[1,21,240,240]`。修复图接受 `[1,13,H,H]`，输出 `[1,3,H,H]`，支持 `H=192` 和 `H=512`。输入、输出均为本地 FP32。192 像素修复图使用下采样观察并把修正放回 512 像素。512 像素修复图直接使用原观察，七帧以立方插值和 8 位量化对齐到同一分辨率。已验证的七帧图及 192 像素修复图分别位于 `D:/Data/Build/visual-analysis-dev/portrait-hypercut-01/jin-240.onnx` 和 `D:/Data/Build/visual-analysis-dev/portrait-unordered-refinement-01/set-192.onnx`。[训练与配对评测](../../../docs/portrait-native-paired-evaluation.md)
 
 可在同一命令末尾重复提供 `portrait.png output`，复用已编译的两张模型图及推理请求。每张输入的四张图完整写出后单独发布，使用互不相同的新输出路径。
 
