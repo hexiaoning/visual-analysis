@@ -186,6 +186,15 @@ $exe = Join-Path $build.OutputDirectory 'PortraitCandidates.exe'
 
 保持展示数量和位置，最多替换其中一张。备选的五官带通距离需接近拟替换的图，脸部细频需接近糊图及旧候选。将脸区分成四组交错图块，每次用其中三组为旧候选拟合同一个模糊、平移及亮度变换，锁定参数后分别回放旧图和备选，用剩下一组比较误差。四组都达到至少 3% 且至少 0.00015 的改善后，再用 HR-noSA 验证两张是否落在同一外观组、备选是否与其他已展示图不同。`selection.json` 的 `replacement` 包含被替换与新候选索引、五官距离及四组回放改善。没有达标替换时为 `null`。回放分数衡量与输入的吻合程度。[配对验证](../../../docs/portrait-native-paired-evaluation.md)
 
+可用 `--refine-clear-representatives` 检查同一外观组中更清晰的候选。先给要复核的原代表数量和应保护的追加数量，再按原代表、已追加候选、其余候选的顺序列出文件。输出保持原显示数量，每次至多替换一张原代表。
+
+```powershell
+& $exe --refine-clear-representatives 1 1 .\hr-nosa-wflw-geometry.onnx .\source.png .\outputs `
+    .\primary.png .\previous-addition.png .\alternative.png
+```
+
+在双眼、鼻和口测量与粗边缘同向的细梯度，要求候选在至少两个部位有清晰度提升。四折回放确认它与原图的吻合度。关键点及局部像素检查保留已有的五官差异。替换后若会与已追加的外观重复，就保留之前的组合。回执 `replacement` 记录各部位清晰度变化、四折误差变化及容差和最大位移变化。
+
 ## 检查整组候选的展示约束
 
 ```powershell

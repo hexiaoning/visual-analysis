@@ -5,6 +5,7 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 
 #include <opencv2/imgproc.hpp>
@@ -25,11 +26,11 @@ struct Patch {
 
 using Geometry = std::array<Patch, regions.size()>;
 
-cv::Mat thumbnail(const cv::Mat& portrait) {
+cv::Mat thumbnail(const cv::Mat& portrait, int side = 128) {
     if (portrait.type() != CV_8UC3 || portrait.size() != cv::Size(512, 512))
         throw std::invalid_argument("Expected an aligned 512x512 BGR portrait");
     cv::Mat reduced, gray;
-    cv::resize(portrait, reduced, {128, 128}, 0, 0, cv::INTER_AREA);
+    cv::resize(portrait, reduced, {side, side}, 0, 0, cv::INTER_AREA);
     cv::cvtColor(reduced, gray, cv::COLOR_BGR2GRAY);
     gray.convertTo(gray, CV_32F, 1. / 255.);
     return gray;
@@ -208,15 +209,17 @@ double replay_error(const cv::Mat& image, const cv::Mat& observed,
     return error / pixels.size();
 }
 
-ReplayFit fit_replay(const ReplayImages& images, const cv::Mat& observed, const ReplayFold& fold) {
+template<std::size_t count_images>
+ReplayFit fit_replay(const std::array<cv::Mat, count_images>& images, const cv::Mat& observed,
+                     const ReplayFold& fold, int max_offset = 3, double variance_floor = .00001) {
     ReplayFit best{0, {}, 1., 0., std::numeric_limits<double>::infinity()};
     const double count = static_cast<double>(fold.training.size());
     double observed_sum = 0.;
     for (const auto& point : fold.training)
         observed_sum += observed.at<float>(point);
     for (std::size_t i = 0; i < images.size(); ++i) {
-        for (int y = -3; y <= 3; ++y) {
-            for (int x = -3; x <= 3; ++x) {
+        for (int y = -max_offset; y <= max_offset; ++y) {
+            for (int x = -max_offset; x <= max_offset; ++x) {
                 const cv::Point offset(x, y);
                 double image_sum = 0., image_squared = 0., cross = 0.;
                 for (const auto& point : fold.training) {
@@ -227,7 +230,7 @@ ReplayFit fit_replay(const ReplayImages& images, const cv::Mat& observed, const 
                 }
                 const double covariance = cross - image_sum * observed_sum / count;
                 const double variance = image_squared - image_sum * image_sum / count;
-                const double gain = std::clamp(covariance / std::max(variance, .00001), .72, 1.38);
+                const double gain = std::clamp(covariance / std::max(variance, variance_floor), .72, 1.38);
                 const double bias = std::clamp((observed_sum - gain * image_sum) / count, -.12, .12);
                 ReplayFit fit{i, offset, gain, bias, 0.};
                 fit.error = replay_error(images[i], observed, fold.training, fit);
@@ -238,6 +241,80 @@ ReplayFit fit_replay(const ReplayImages& images, const cv::Mat& observed, const 
     }
     best.error = replay_error(images[best.blur], observed, fold.checking, best);
     return best;
+}
+
+using RegionalClarity = std::array<std::optional<double>, 4>;
+
+std::array<cv::Mat, 2> gradients(const cv::Mat& gray, double sigma) {
+    std::array<cv::Mat, 2> result;
+    const auto image = smooth(gray, sigma);
+    cv::Sobel(image, result[0], CV_32F, 1, 0, 3, .125);
+    cv::Sobel(image, result[1], CV_32F, 0, 1, 3, .125);
+    return result;
+}
+
+RegionalClarity oriented_clarity(const cv::Mat& portrait) {
+    const auto gray = thumbnail(portrait, 256);
+    const auto fine = gradients(gray, .6);
+    const auto coarse = gradients(gray, 1.6);
+    const cv::Mat gx2 = coarse[0].mul(coarse[0]), gy2 = coarse[1].mul(coarse[1]);
+    const cv::Mat xx = smooth(gx2, 2.), yy = smooth(gy2, 2.);
+    const cv::Mat xy = smooth(coarse[0].mul(coarse[1]), 2.);
+    cv::Mat strength = gx2 + gy2, projected = fine[0].mul(coarse[0]) + fine[1].mul(coarse[1]);
+    cv::Mat orientation;
+    cv::magnitude(xx - yy, xy * 2., orientation);
+    cv::divide(orientation, xx + yy + 1.e-6, orientation);
+    RegionalClarity result;
+    for (std::size_t i = 0; i < evidence_parts.size(); ++i) {
+        const auto part = evidence_parts[i];
+        const cv::Rect area(part.x * 2, part.y * 2, part.width * 2, part.height * 2);
+        double weighted_gain = 0., support = 0.;
+        for (int y = area.y; y < area.br().y; ++y) {
+            const auto* directions = orientation.ptr<float>(y);
+            const auto* coarse_energy = strength.ptr<float>(y);
+            const auto* fine_aligned = projected.ptr<float>(y);
+            for (int x = area.x; x < area.br().x; ++x) {
+                const double weight = std::max(0., (directions[x] - .52) / .48) * coarse_energy[x];
+                const double gain = std::clamp(fine_aligned[x] / std::max(coarse_energy[x], 1.e-6f), 0.f, 3.f);
+                support += weight;
+                weighted_gain += weight * gain;
+            }
+        }
+        if (support >= .015)
+            result[i] = weighted_gain / support;
+    }
+    return result;
+}
+
+bool clarity_improvement(const RegionalClarity& previous, const RegionalClarity& candidate,
+                         ClearRepresentativeReplacement& proposal) {
+    std::vector<double> gains;
+    for (std::size_t i = 0; i < previous.size(); ++i) {
+        if (previous[i].value_or(0.) <= 0. || !candidate[i])
+            continue;
+        const double gain = *candidate[i] / *previous[i] - 1.;
+        if (gain < -.018)
+            return false;
+        proposal.regional_gain[i] = gain;
+        gains.push_back(gain);
+        proposal.clarity_gain += gain;
+    }
+    if (gains.size() < 3)
+        return false;
+    std::sort(gains.begin(), gains.end());
+    const auto middle = gains.size() / 2;
+    const double median = gains.size() % 2 ? gains[middle] : (gains[middle - 1] + gains[middle]) * .5;
+    proposal.clarity_gain /= gains.size();
+    return median >= .033 && gains[gains.size() - 2] >= .021;
+}
+
+ReplayFits fit_clear_replays(const cv::Mat& portrait, const cv::Mat& observed, const ReplayFolds& folds) {
+    const auto gray = thumbnail(portrait);
+    const std::array images{gray, smooth(gray, .65), smooth(gray, 1.25), smooth(gray, 2.1)};
+    ReplayFits fits;
+    for (std::size_t i = 0; i < fits.size(); ++i)
+        fits[i] = fit_replay(images, observed, folds[i], 2, 1.e-6);
+    return fits;
 }
 
 }
@@ -411,6 +488,97 @@ std::optional<RepresentativeReplacement> refine_representative(
         }
         if (distinct_from_others)
             return proposal;
+    }
+    return std::nullopt;
+}
+
+std::optional<ClearRepresentativeReplacement> refine_clear_representative(
+    const cv::Mat& source, const std::vector<cv::Mat>& candidates,
+    std::size_t kept_count, std::size_t added_count,
+    const std::function<bool(std::size_t, std::size_t)>& visibly_different) {
+    if (kept_count == 0 || kept_count > candidates.size() ||
+        added_count > candidates.size() - kept_count || !visibly_different)
+        throw std::invalid_argument("Expected a nonempty representative prefix and a valid addition count");
+    const auto displayed_count = kept_count + added_count;
+    const auto observed = thumbnail(source);
+    if (displayed_count == candidates.size())
+        return std::nullopt;
+    const auto folds = replay_folds(observed);
+    if (std::any_of(folds.begin(), folds.end(), [](const auto& fold) { return fold.checking.size() < 80; }))
+        return std::nullopt;
+
+    constexpr double radius = .055;
+    constexpr double minimum_pair_distance = 1.e-7;
+    const auto evidence = analyse_appearance_bank(source, candidates);
+    std::vector<std::optional<RegionalClarity>> original_clarity(kept_count);
+    std::vector<ClearRepresentativeReplacement> proposals;
+    for (std::size_t i = kept_count; i < candidates.size(); ++i) {
+        const auto& distances = evidence.distances[i];
+        const auto nearest = std::min_element(distances.begin(), distances.begin() + kept_count);
+        const auto previous = static_cast<std::size_t>(nearest - distances.begin());
+        if (*nearest > radius || evidence.candidate_detail[i] < .98 * evidence.observed_detail ||
+            evidence.replay_errors[i] > evidence.replay_errors[previous] + .004)
+            continue;
+        bool loses_separation = false;
+        for (std::size_t j = 0; j < kept_count; ++j) {
+            if (j != previous && evidence.distances[previous][j] > radius && distances[j] <= radius) {
+                loses_separation = true;
+                break;
+            }
+        }
+        if (loses_separation)
+            continue;
+        if (!original_clarity[previous])
+            original_clarity[previous] = oriented_clarity(candidates[previous]);
+        ClearRepresentativeReplacement proposal{};
+        proposal.previous = previous;
+        proposal.proposed = i;
+        proposal.distance = *nearest;
+        if (clarity_improvement(*original_clarity[previous], oriented_clarity(candidates[i]), proposal))
+            proposals.push_back(proposal);
+    }
+    std::sort(proposals.begin(), proposals.end(), [](const auto& left, const auto& right) {
+        return std::tie(left.clarity_gain, left.previous, left.proposed) >
+               std::tie(right.clarity_gain, right.previous, right.proposed);
+    });
+
+    std::vector<std::optional<ReplayFits>> original_replays(kept_count);
+    const auto different = [&](std::size_t first, std::size_t second) {
+        return evidence.distances[first][second] > minimum_pair_distance && visibly_different(first, second);
+    };
+    for (auto proposal : proposals) {
+        const auto previous = proposal.previous, next = proposal.proposed;
+        if (!original_replays[previous])
+            original_replays[previous] = fit_clear_replays(candidates[previous], observed, folds);
+        const auto& prior = *original_replays[previous];
+        const auto trial = fit_clear_replays(candidates[next], observed, folds);
+        bool supported = true;
+        for (std::size_t i = 0; i < folds.size(); ++i) {
+            proposal.replay_deltas[i] = trial[i].error - prior[i].error;
+            proposal.replay_limits[i] = std::clamp(.06 * prior[i].error, .0006, .0013);
+            const auto nudge = trial[i].offset - prior[i].offset;
+            proposal.maximum_offset_change = std::max({proposal.maximum_offset_change,
+                                                        std::abs(nudge.x), std::abs(nudge.y)});
+            if (proposal.replay_deltas[i] > proposal.replay_limits[i] || proposal.maximum_offset_change > 1) {
+                supported = false;
+                break;
+            }
+        }
+        if (!supported || different(previous, next) || different(next, previous))
+            continue;
+        for (std::size_t j = 0; j < kept_count && supported; ++j) {
+            if (j != previous && different(previous, j) && !different(next, j))
+                supported = false;
+        }
+        if (!supported)
+            continue;
+        // Use the same addition guard after a replacement has been chosen.
+        // The existing display remains the fallback for a conflicting proposal.
+        for (std::size_t j = kept_count; j < displayed_count; ++j) {
+            if (evidence.distances[next][j] <= radius || !visibly_different(next, j))
+                return std::nullopt;
+        }
+        return proposal;
     }
     return std::nullopt;
 }

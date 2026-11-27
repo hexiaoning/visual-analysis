@@ -530,6 +530,53 @@ fs::path refine_representatives(wchar_t **argv, int argc) {
     });
 }
 
+fs::path refine_clear_representatives(wchar_t **argv, int argc) {
+    cv::setNumThreads(1);
+    const auto read_count = [](const wchar_t* argument) {
+        const std::wstring_view text(argument);
+        if (text.empty() || !std::ranges::all_of(text, [](wchar_t c) { return c >= L'0' && c <= L'9'; }))
+            throw std::invalid_argument("Expected unsigned representative and addition counts");
+        return std::stoull(argument);
+    };
+    const auto kept = read_count(argv[2]), added = read_count(argv[3]);
+    const auto count = static_cast<std::size_t>(argc - 7);
+    if (kept == 0 || kept > count || added > count - kept)
+        throw std::invalid_argument("Displayed counts exceed the candidate bank or omit its first representative");
+    const auto source = read_image(argv[5]);
+    std::vector<cv::Mat> portraits;
+    portraits.reserve(count);
+    for (int i = 7; i < argc; ++i)
+        portraits.push_back(read_image(argv[i]));
+    ShapeComparisons comparisons(argv[4], portraits);
+    const auto replacement = portrait_selection::refine_clear_representative(
+        source, portraits, static_cast<std::size_t>(kept), static_cast<std::size_t>(added),
+        [&](auto previous, auto proposed) { return comparisons.different(previous, proposed); });
+    std::vector<std::size_t> selected(static_cast<std::size_t>(kept + added));
+    std::iota(selected.begin(), selected.end(), 0);
+    Json outcome = nullptr;
+    if (replacement) {
+        selected[replacement->previous] = replacement->proposed;
+        Json regional = Json::array();
+        for (const auto gain : replacement->regional_gain)
+            regional.push_back(gain ? Json(*gain) : Json(nullptr));
+        outcome = {{"previous", replacement->previous}, {"proposed", replacement->proposed},
+                   {"distance", replacement->distance}, {"clarity_gain", replacement->clarity_gain},
+                   {"regional_gain", regional}, {"replay_deltas", replacement->replay_deltas},
+                   {"replay_limits", replacement->replay_limits},
+                   {"maximum_offset_change", replacement->maximum_offset_change}};
+    }
+    return publish_run(argv[6], [&](const fs::path &pending) {
+        const Json report = {{"mode", "clarity-refinement"}, {"kept_count", kept}, {"added_count", added},
+                             {"replacement", outcome}, {"pair_checks", comparisons.checks},
+                             {"outputs", write_indexed_candidates(pending, portraits, selected)}};
+        std::ofstream receipt(pending / "selection.json", std::ios::binary);
+        receipt << report.dump(2) << '\n';
+        receipt.close();
+        if (!receipt)
+            throw std::runtime_error("Could not write clarity refinement receipt");
+    });
+}
+
 fs::path cover_shapes(wchar_t **argv, int argc) {
     cv::setNumThreads(1);
     const std::wstring value(argv[2]);
@@ -625,6 +672,7 @@ int wmain(int argc, wchar_t **argv) {
             "PortraitCandidates.exe --recombine-exposure landmarks.onnx first.png second.png output-directory [first2.png second2.png output2 ...]\n"
             "PortraitCandidates.exe --extend-shape-cover radius replay-tolerance kept-count [--max-additions count] [--landmarks model.onnx] source.png output-directory candidate.png [more.png ...]\n"
             "PortraitCandidates.exe --refine-representatives kept-count landmarks.onnx source.png output-directory shown.png [more.png ...]\n"
+            "PortraitCandidates.exe --refine-clear-representatives kept-count added-count landmarks.onnx source.png output-directory shown.png [more.png ...]\n"
             "PortraitCandidates.exe --inspect-appearance-bank radius landmarks.onnx|--distance-only source.png output-directory candidate.png [more.png ...]\n"
             "PortraitCandidates.exe --cover-shapes radius output-directory primary.png [candidate.png ...]\n"
             "PortraitCandidates.exe --select-by-replay landmarks.onnx source.png primary.png output-directory "
@@ -644,6 +692,12 @@ int wmain(int argc, wchar_t **argv) {
             if (argc < 7)
                 throw std::invalid_argument(usage);
             print_output_path(refine_representatives(argv, argc));
+            return 0;
+        }
+        if (option == L"--refine-clear-representatives") {
+            if (argc < 8)
+                throw std::invalid_argument(usage);
+            print_output_path(refine_clear_representatives(argv, argc));
             return 0;
         }
         if (option == L"--inspect-appearance-bank") {

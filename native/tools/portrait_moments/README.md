@@ -7,7 +7,7 @@ Windows x64 研究工具从一张对齐的 512×512 人像生成多个候选。�
 从该工具目录运行以下命令。参数使用 Visual Analysis 同一套 Windows SDK、MSVC、OpenCV 和 OpenVINO 目录。
 
 ```powershell
-.\build.ps1 -OutputDirectory D:\DevTools\build-portrait-moments `
+.\build.ps1 -OutputDirectory D:\Data\Build\portrait-moments `
     -OpenVinoDirectory $env:OPENVINO_DIR -OpenCvDirectory $env:OPENCV_BUILD `
     -MsvcDirectory $env:MSVC_TOOLS -WindowsSdkDirectory $env:WINDOWS_SDK
 ```
@@ -19,7 +19,7 @@ Windows x64 研究工具从一张对齐的 512×512 人像生成多个候选。�
 将 OpenVINO `libs` 及 OpenCV `x64\vc16\bin` 目录加入 `PATH`。输入是一张已对齐的人像，输出目录使用新路径。完成全部候选后才发布目录，PNG 按控制值的参数顺序编号。
 
 ```powershell
-& D:\DevTools\build-portrait-moments\PortraitMoments.exe CPU `
+& D:\Data\Build\portrait-moments\PortraitMoments.exe CPU `
     .\cfmd-native.onnx .\portrait.png .\candidates 0 0.5 1
 ```
 
@@ -28,7 +28,7 @@ Windows x64 研究工具从一张对齐的 512×512 人像生成多个候选。�
 `--refine-sequence` 以同一张 512×512 对齐糊图运行 Jin 七帧 ONNX，再用局部修复模型处理第 1、3、5、7 个位置。模型读取糊图、当前帧以及七帧的均值和变化范围，把修正量接回原始帧的脸区。输出目录有四张 PNG，顺序对应七帧模型的位置。
 
 ```powershell
-& D:\DevTools\build-portrait-moments\PortraitMoments.exe --refine-sequence GPU `
+& D:\Data\Build\portrait-moments\PortraitMoments.exe --refine-sequence GPU `
     .\jin-240.onnx .\set-192.onnx .\portrait.png .\candidates
 ```
 
@@ -37,13 +37,13 @@ Windows x64 研究工具从一张对齐的 512×512 人像生成多个候选。�
 可在同一命令末尾重复提供 `portrait.png output`，复用已编译的两张模型图及推理请求。每张输入的四张图完整写出后单独发布，使用互不相同的新输出路径。
 
 ```powershell
-& D:\DevTools\build-portrait-moments\PortraitMoments.exe --refine-sequence GPU `
+& D:\Data\Build\portrait-moments\PortraitMoments.exe --refine-sequence GPU `
     .\jin-240.onnx .\signed-512.onnx .\portrait-1.png .\candidates-1 .\portrait-2.png .\candidates-2
 ```
 
 可用 `--positions` 从七帧中指定输出位置。默认 `1,3,5,7`。自定义列表以逗号分隔，取值为 1 至 7，每个位置只写一次。按传入顺序编号 PNG，所有输入图共用该列表。位置描述七帧模型的输出索引。
 
 ```powershell
-& D:\DevTools\build-portrait-moments\PortraitMoments.exe --refine-sequence GPU `
+& D:\Data\Build\portrait-moments\PortraitMoments.exe --refine-sequence GPU `
     .\jin-240.onnx .\signed-512.onnx --positions '2,4,6' .\portrait.png .\intermediate-candidates
 ```

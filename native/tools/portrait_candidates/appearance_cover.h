@@ -56,4 +56,22 @@ std::optional<RepresentativeReplacement> refine_representative(
     const cv::Mat& source, const std::vector<cv::Mat>& candidates, std::size_t kept_count,
     const std::function<bool(std::size_t, std::size_t)>& visibly_different);
 
+struct ClearRepresentativeReplacement {
+    std::size_t previous;
+    std::size_t proposed;
+    double distance;
+    double clarity_gain;
+    std::array<std::optional<double>, 4> regional_gain;
+    std::array<double, 4> replay_deltas;
+    std::array<double, 4> replay_limits;
+    int maximum_offset_change;
+};
+
+// The bank starts with the original representatives and then the previous
+// additions. A replacement for an original cannot collapse an added mode.
+std::optional<ClearRepresentativeReplacement> refine_clear_representative(
+    const cv::Mat& source, const std::vector<cv::Mat>& candidates,
+    std::size_t kept_count, std::size_t added_count,
+    const std::function<bool(std::size_t, std::size_t)>& visibly_different);
+
 }

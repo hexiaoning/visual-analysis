@@ -4282,7 +4282,7 @@ MZNet 使用 Windows C++ OpenVINO 离线推理。实际运行 84 次 CPU 和其�
 
 剩余 00190 的主要差距是边缘位置与强度。即便直接从参考图取得宽尺度明暗差，边缘吻合仍约为 0.629，低于 0.688 的门槛。把早期分支的候选补回时，Windows 原生回放找回了该样本的旧候选，边缘吻合从 0.626 到 0.718，九个参考位置均达标。再对具备早期候选的全部 40 张公开 CoC 统一补回。只补早期首选和补全八种早期候选，独立组都从 24/28 变为 23/28，均换回这 1 张并损失 2 张。强屏纹和斜拍各维持 6/6。
 
-三张用户图没有清晰原帧。实验回放对第三张换到校光图，前两张沿用此前首图。该实验只产生明暗与细节幅度变化，没有给出足以确认真实眼形、鼻形或嘴形的新证据。生产路径没有接入这轮校正和排序，也未生成新交付包。四例对照与评估清单保存在本机研究目录 `D:/DevTools/visual-analysis-dev/portrait-capture-colour-01`。
+三张用户图没有清晰原帧。实验回放对第三张换到校光图，前两张沿用此前首图。该实验只产生明暗与细节幅度变化，没有给出足以确认真实眼形、鼻形或嘴形的新证据。生产路径没有接入这轮校正和排序，也未生成新交付包。四例对照与评估清单保存在本机研究目录 `D:/Data/Build/visual-analysis-dev/portrait-capture-colour-01`。
 
 ### 从同形候选选一张，以及保留不同五官的备选
 
@@ -4310,7 +4310,7 @@ MZNet 使用 Windows C++ OpenVINO 离线推理。实际运行 84 次 CPU 和其�
 
 将候选合成单张时，要求候选与首图双向五官差异检查均未通过，且亮度带通相关至少为 0.88。比较等权融合和按拍摄图支持控制细节增量的融合。仅在两种留出均选中同一备选且相对分差至少 0.05 时才融合，共处理 42 张公开配对。两种混合法均为 49/61，补回小米 0021 和距离 id58，同时损失两张原本达标图。两张原候选池未覆盖的样本均未补回。本轮筛选、校准和融合均用于配对评测。
 
-研究目录为 `D:/DevTools/visual-analysis-dev/portrait-candidate-coverage-01`，含四张公开图对照、三个用户案例的候选排序对照与冻结明细。
+研究目录为 `D:/Data/Build/visual-analysis-dev/portrait-candidate-coverage-01`，含四张公开图对照、三个用户案例的候选排序对照与冻结明细。
 
 ### 用已有轮廓补回被去纹压低的细节
 
@@ -4339,7 +4339,7 @@ P40 0066 的原屏摄边缘吻合为 0.748，原首图为 0.709。只替换带�
 
 本轮没有将评测候选接入正式应用，也未打包。三张案例的图板只使用本机文件。
 
-研究目录为 `D:/DevTools/visual-analysis-dev/portrait-difficult-observation-01`。
+研究目录为 `D:/Data/Build/visual-analysis-dev/portrait-difficult-observation-01`。
 
 ### 固定细节回贴在同源隔离组上的复验
 
@@ -4385,7 +4385,7 @@ P40 0066 的原屏摄边缘吻合为 0.748，原首图为 0.709。只替换带�
 
 三个用户图的保守强度选择均保留首图。第三张最高余量分支采用 75% 回贴，眼口仍缺清晰轮廓。第一、二张半强度对照仍可见回贴的屏纹。三张缺清晰原帧，尚未验证是否恢复本人原貌。本轮提交评测，正式应用及发布包未更改。
 
-研究目录为 `D:/DevTools/visual-analysis-dev/portrait-treatment-choice-01`。
+研究目录为 `D:/Data/Build/visual-analysis-dev/portrait-treatment-choice-01`。
 
 ### 用实拍边缘宽度估计候选的清晰度与回贴强度
 
@@ -4401,7 +4401,7 @@ P40 0066 的原屏摄边缘吻合为 0.748，原首图为 0.709。只替换带�
 
 三张用户图也生成了局部窄化对照。第三张只在 145 个边缘采样位置中接受 20 个，校正信号的脸区均方根约为 0.15 个 8 位灰阶，眼口仍模糊。第一、二张仍可见拍摄纹理。这次复验未完成三张的真实外观验收，正式应用与发布包未更改。
 
-研究目录为 `D:/DevTools/visual-analysis-dev/portrait-edge-spread-01`。
+研究目录为 `D:/Data/Build/visual-analysis-dev/portrait-edge-spread-01`。
 
 ### 屏摄颜色相位、局部增益和原生人脸模型的配对复验
 
@@ -4422,7 +4422,7 @@ P40 0066 的原屏摄边缘吻合为 0.748，原首图为 0.709。只替换带�
 | 局部增益仅回贴细节 | 47/61 | 17/35 |
 | 将校正分支加入已冻结首图和固定回贴候选池 | 53/61 | 27/35 |
 
-局部增益单独输出救回一张开发图，同时让五张原达标图失去达标。该新增图早已由固定回贴候选覆盖。本轮留出组未触发增益校正，不能据此判断在另一个有明显屏纹的源组上是否有效。三张用户图的去纹对照和冻结清单保存在 `D:/DevTools/visual-analysis-dev/portrait-carrier-inversion-01`。
+局部增益单独输出救回一张开发图，同时让五张原达标图失去达标。该新增图早已由固定回贴候选覆盖。本轮留出组未触发增益校正，不能据此判断在另一个有明显屏纹的源组上是否有效。三张用户图的去纹对照和冻结清单保存在 `D:/Data/Build/visual-analysis-dev/portrait-carrier-inversion-01`。
 
 另在四张按固定散列选取的清晰配对原帧上，注入两方向的已知频率及空间变化幅度。在同一脸区测线性亮度。乘性光栅的平均均方根误差由 0.0361 降到全局增益的 0.00816 和局部增益的 0.00347。加性光栅由 0.0283 降到全局加性校正的 0.00793，局部增益结果为 0.0169。无光栅时，传入相同的测试频率也没有任何窗口通过，四张都保持原像素。该试验使用已知的载波频率且先后只有一项人为加扰。实拍配对的选择和结果见上表。
 
@@ -4468,7 +4468,7 @@ PCFlow 的两个输入在小米 0021 上均达标，旧固定首图没有达标�
 
 检查 96 张 PCFlow 直出的失败门槛。开发组有五张仅因带通幅度高于清晰参考上限而失败。35 张留出图都超过幅度上限，且都至少未通过一项结构门槛。事后从既有首图和固定回贴均无达标图的两个分组各取全部八张，扫描 `0.45–3.0` 像素七档高斯宽度。这项诊断允许清晰原帧检查所有候选。开发组 iPhone 0021 和 CoC 斜拍 id45_0007 在 2.3 像素时通过，九种半像素参考位置均通过。留出组八张均未通过。以固定回贴的带通幅度选择宽度时只在开发组第二例选出通过图。两例的拍摄原图使用同样的宽度平滑也达标，iPhone 例的旧首图和固定回贴也各有同宽度达标结果，因而这两个数值提升不能归因于 PCFlow 补出了真实结构。并排图仍有色彩、眼口细节差异。
 
-三张用户图按这批候选清单做盲选，第一、二张仍保留首图，第三张的旧严格规则与所有固定门槛变体都另留 PCFlow 原图输入的对照。这个试验的两路备选是固定回贴和 PCFlow，与上一节的四路输入集合不同。第三张仍缺可核对的清晰原貌。研究目录为 `D:/DevTools/visual-analysis-dev/portrait-pcflow-replay-audit-01`，包括公开漏选的 `known-case.png` 和过锐诊断 `pcflow-capped-paired.png`。正式选择和发布包未更改。
+三张用户图按这批候选清单做盲选，第一、二张仍保留首图，第三张的旧严格规则与所有固定门槛变体都另留 PCFlow 原图输入的对照。这个试验的两路备选是固定回贴和 PCFlow，与上一节的四路输入集合不同。第三张仍缺可核对的清晰原貌。研究目录为 `D:/Data/Build/visual-analysis-dev/portrait-pcflow-replay-audit-01`，包括公开漏选的 `known-case.png` 和过锐诊断 `pcflow-capped-paired.png`。正式选择和发布包未更改。
 
 ### 分离对齐、边缘结构与幅度在难例中的作用
 
@@ -4518,7 +4518,7 @@ PCFlow 的两个输入在小米 0021 上均达标，旧固定首图没有达标�
 
 局部增益对独立组的旧首图增加三张，没有退步。先形变再加局部增益合计比旧首图增加四张，没有退步，仍低于固定回贴的 27 张。在开发组，两条旧首图加局部增益路线均一增三减。开发 p40_1-part5-0076 的新增和局部平移新增是同一张，幅度与形变组合未扩大覆盖。完整候选池尚未通过的 00235 未被任一盲测增益补回。新增图并排仍可见屏纹或色偏。
 
-用现有 Windows C++ 多候选回放工具复查 p40_1-part5-0076、明亮 id55_0007、00235 和三张用户图。旧首图外给出四种形变结果及固定回贴。六例都只保留既有首图，输出 PNG 与输入候选逐像素一致。去纹、形变和增益研究输出位于 `D:/DevTools/visual-analysis-dev/portrait-cross-scale-warp-01`，包括 `paired-geometry-and-gain.png`、`sole-miss-diagnostics.png` 和 `user-cross-scale-warps.png`。正式应用和发布包未更改。
+用现有 Windows C++ 多候选回放工具复查 p40_1-part5-0076、明亮 id55_0007、00235 和三张用户图。旧首图外给出四种形变结果及固定回贴。六例都只保留既有首图，输出 PNG 与输入候选逐像素一致。去纹、形变和增益研究输出位于 `D:/Data/Build/visual-analysis-dev/portrait-cross-scale-warp-01`，包括 `paired-geometry-and-gain.png`、`sole-miss-diagnostics.png` 和 `user-cross-scale-warps.png`。正式应用和发布包未更改。
 
 ### 用颜色平面估计屏拍偏色，并锁定逐像素灰度
 
@@ -4550,7 +4550,7 @@ PCFlow 的两个输入在小米 0021 上均达标，旧固定首图没有达标�
 
 将分位数路线移至 Windows C++ 研究工具的 `--calibrate-capture-color`。99 张原生输出的整数灰度与原候选逐像素相同，面窗外逐像素保持。相较研究实现，蓝、红对数增益最大偏差为 0.000000473，8 位 RGB 最大差为一档，最少也有 99.9929% 的通道值一致。96 张公开配对的联合达标判定完全一致。原生独立组平均色度误差为 8.56，27 张维持达标，七张的单图色度误差增加超过 1。另核对零增益、纯黑观测回退、非正模型尺度、图像尺寸及拒绝覆盖输出文件。既有五个公开样例的三种原生筛选模式均通过回归。
 
-生成物及研究训练参数保存在 `D:/DevTools/visual-analysis-dev/portrait-color-plane-01`。原生逐图对照包括 `paired-native-color-tests.png` 和 `three-native-color-tests.png`。三张用户图仍没有清晰原片。新模式用于本地评测，正式应用与发布包未更改。
+生成物及研究训练参数保存在 `D:/Data/Build/visual-analysis-dev/portrait-color-plane-01`。原生逐图对照包括 `paired-native-color-tests.png` 和 `three-native-color-tests.png`。三张用户图仍没有清晰原片。新模式用于本地评测，正式应用与发布包未更改。
 
 ### 检验不对称拖影的带符号相位是否能修正五官轮廓
 
@@ -4586,7 +4586,7 @@ PCFlow 的两个输入在小米 0021 上均达标，旧固定首图没有达标�
 
 99 张输入的两条底图均实跑原生几何，输出共 198 张。和研究版比，8 位 RGB 最大差一档，最少也有 99.99949% 的通道值相同。面窗外像素全部保持，96 张公开图在两条原生路径的联合判定均与研究版一致。完全由原生几何和原生校色组成的 00235 复合图，与前述通过 6/9 的复合图逐像素一致。零位移、错误模型尺度、错误尺寸及输出覆盖测试通过，原有五样例的三种 Windows 筛选模式通过回归。
 
-图像和本地研究参数位于 `D:/DevTools/visual-analysis-dev/portrait-edge-skew-01`。配对拼图为 `native-00235-comparison.png`，用户图原生对照为 `native-three-shape-tests.png`。研究工具可以导出新候选，正式应用和发布包未更改。
+图像和本地研究参数位于 `D:/Data/Build/visual-analysis-dev/portrait-edge-skew-01`。配对拼图为 `native-00235-comparison.png`，用户图原生对照为 `native-three-shape-tests.png`。研究工具可以导出新候选，正式应用和发布包未更改。
 
 ### 验证细微几何候选能否从既有候选中被选出
 
@@ -4625,7 +4625,7 @@ PCFlow 的两个输入在小米 0021 上均达标，旧固定首图没有达标�
 
 局部 RGB 融合在开发组和独立源组各找回一张、各丢失一张。独立源 00235 的边缘吻合分从先前几何校正的 0.7953 提高到 0.8271，九种半像素对齐的验收从 6/9 提高到 9/9。Windows 原生校色保留逐像素灰度，将平均 Lab 色度差从 22.25 降至 12.08，仍通过 9/9。另一张独立源样本 `light--dark-id60_0005` 的边缘吻合分从原固定回贴的 0.7678 降到 0.7538，融合后未达标。融合未扩大已有候选覆盖。
 
-让原生回放筛选器同时比较局部融合和校色融合时，以旧首图和固定回贴为原选各跑一次。两次实际输出都逐像素和各自的原选相同。融合仍作为实验分支，未设为应用默认。三张用户图已生成融合候选，仍缺原片来验收。复核产物在 `D:/DevTools/visual-analysis-dev/portrait-geometry-selection-01`，包括 `00235-fusion-comparison.png`、`00235-blend-verification.json` 和 `blend_geometry_scores.json`。
+让原生回放筛选器同时比较局部融合和校色融合时，以旧首图和固定回贴为原选各跑一次。两次实际输出都逐像素和各自的原选相同。融合仍作为实验分支，未设为应用默认。三张用户图已生成融合候选，仍缺原片来验收。复核产物在 `D:/Data/Build/visual-analysis-dev/portrait-geometry-selection-01`，包括 `00235-fusion-comparison.png`、`00235-blend-verification.json` 和 `blend_geometry_scores.json`。
 
 ### 从脸外估计屏纹相位并核对五官边缘
 
@@ -4647,7 +4647,7 @@ PCFlow 的两个输入在小米 0021 上均达标，旧固定首图没有达标�
 
 用 64 像素方块阶段的原拍摄及去纹图复测 Windows C++ CodeFormer 0.85 和 PCFlow。两个模型各完成九次 DirectML 推理；对同一张第二案例的原图和去纹图，CodeFormer 的 GPU、CPU 单次中位耗时约 4.96、20.13 秒，PCFlow 约 2.19、7.37 秒。四组 GPU/CPU 输出的 RGB 逐通道差均至多一档。两种模型各自比较原输入与去纹输入时，第二张的部分网点明显减少。公开难例 `p40_1-part5-0076` 上，CodeFormer 的边缘吻合约从 0.439 到 0.450，PCFlow 约从 0.384 到 0.383，四张均未通过整脸评测。把该公开例和前两张用户图实际交给原生筛选对两种模型各跑一次，共六次均只保留原输入生成的候选，保存图与其输入候选逐像素相同。另将有保护的去纹图送入两个模型，每个模型各处理前两张用户图一次，诊断记录均为 DirectML。复跑筛选四次都保留原输入生成的候选。
 
-本轮将去纹保留为实验预处理。研究脚本、数据和对比图位于 `D:/DevTools/visual-analysis-dev/portrait-background-phase-01`、`D:/DevTools/visual-analysis-dev/portrait-background-phase-adaptive-01` 和 `D:/DevTools/visual-analysis-dev/portrait-background-phase-protected-01`。后者包含 `three-case-preprocessing.png`、`controlled.json`、`paired-results.json`、`carrier-audit.json`、`independent-small-sensor-controls.json` 和两种原生模型的 `*-protected-case-comparison.png`。正式应用和发布包未更改。
+本轮将去纹保留为实验预处理。研究脚本、数据和对比图位于 `D:/Data/Build/visual-analysis-dev/portrait-background-phase-01`、`D:/Data/Build/visual-analysis-dev/portrait-background-phase-adaptive-01` 和 `D:/Data/Build/visual-analysis-dev/portrait-background-phase-protected-01`。后者包含 `three-case-preprocessing.png`、`controlled.json`、`paired-results.json`、`carrier-audit.json`、`independent-small-sensor-controls.json` 和两种原生模型的 `*-protected-case-comparison.png`。正式应用和发布包未更改。
 
 ### 用低光人像模型检查暗眼与反光的候选
 
@@ -4659,7 +4659,7 @@ PCFlow 的两个输入在小米 0021 上均达标，旧固定首图没有达标�
 
 为避免直接采用模型的过亮输出，只从其可靠亮度区域估计平滑增益，保护已有高亮，再对偏暗的脸限量应用。实际改变六张公开配对中的五张。该组固定回贴有 6/6 联合达标，直接 CodeFormer、Low-FaceNet 后 CodeFormer 和有保护的分支均为 0/6。第二张用户图的脸区中位亮度从 0.236 升至 0.446，眼区仍被深色区域覆盖。第一和第三张用户图的保护分支不触发。三个实拍案例仍无清晰原片，无法核实生成的眼形。
 
-另做严格的等亮度 Gamma 对照，把中央脸区平均亮度匹配到距 Low-FaceNet 小于 0.002。该对照在模拟阴影和反光组的平均输入亮度 RMS 分别为 50.43、78.81 档。等亮度对照在偏暗实拍六张和模拟六张均没有联合通过。等亮度批次与另一个 GPU 会话同时运行时遇到 DirectML 内存不足，改用顺序执行后，15 张均有 DirectML 执行记录。原生回放从所有提亮路线中检查三张用户案例，均保留各自的原输入生成候选。研究输出位于 `D:/DevTools/visual-analysis-dev/portrait-low-facenet-01`，包括 `review-three-lighting-cases.png`、`controlled-scores.json` 和 `native-selection.json`。
+另做严格的等亮度 Gamma 对照，把中央脸区平均亮度匹配到距 Low-FaceNet 小于 0.002。该对照在模拟阴影和反光组的平均输入亮度 RMS 分别为 50.43、78.81 档。等亮度对照在偏暗实拍六张和模拟六张均没有联合通过。等亮度批次与另一个 GPU 会话同时运行时遇到 DirectML 内存不足，改用顺序执行后，15 张均有 DirectML 执行记录。原生回放从所有提亮路线中检查三张用户案例，均保留各自的原输入生成候选。研究输出位于 `D:/Data/Build/visual-analysis-dev/portrait-low-facenet-01`，包括 `review-three-lighting-cases.png`、`controlled-scores.json` 和 `native-selection.json`。
 
 ### 用配对原帧评估局部组合和盲选
 
@@ -4677,7 +4677,7 @@ PCFlow 的两个输入在小米 0021 上均达标，旧固定首图没有达标�
 
 两个供体的联合组合没有扩充本轮与之比较的既有候选池。直接区域盲选在开发组救回 `control--oblique-id10_0005`，同时失去 `develop--transfer--distance-id51_0005`，对半像素参考位移的通过数分别为 3/9 到 8/9、9/9 到 0/9。源隔离组救回 00235，未失去原达标项。该张从同一供体选中双眼和鼻的局部校正，单一部位无法达标。参考边缘吻合为 0.804，九个参考位置中通过七个。99 张盲选实际写出 PNG，解码像素哈希与冻结组合一致。原生筛选复核三个改变通过状态的公开例和前两张用户图，均保留固定回贴。第三张的区域盲选已与固定回贴逐像素相同。要求开发组零退步且在至少两个源组有收益时，两种排序均无可用门槛。回顾性地把最大改动部位限制为两个时，开发组 50/61，源隔离组退回 27/35。
 
-低光和局部组合保留为实验路线，正式应用和发布包未更改。组合产物在 `D:/DevTools/visual-analysis-dev/portrait-region-interaction-01`，包括 `additive-replay-reference.png`、`three-cases-local-donor.png`、`selection.json` 和 `additive-verification.json`。用户样例无同帧清晰原貌来验证。
+低光和局部组合保留为实验路线，正式应用和发布包未更改。组合产物在 `D:/Data/Build/visual-analysis-dev/portrait-region-interaction-01`，包括 `additive-replay-reference.png`、`three-cases-local-donor.png`、`selection.json` 和 `additive-verification.json`。用户样例无同帧清晰原貌来验证。
 
 ### 各五官独立选择或混合供体
 
@@ -4699,7 +4699,7 @@ PCFlow 的两个输入在小米 0021 上均达标，旧固定首图没有达标�
 
 针对当前比较用候选池未达标的开发、源隔离各七张，另从每处含底图的四个选择组成 256 种固定规则。用原帧做带通近似排序，再对各图最前面的 12 个组合做整脸评分，十四张均无新增通过。这个诊断只使用原帧排名，组合本身仍只取拍摄图派生像素。源隔离的七张在带通边缘一项有组合超过门槛，候选仍受整体清晰度、结构或相似度限制。现有筛选器对前述成功和退步的四张公开例逐一核对，均保留各自固定底图。三张用户图的可生成组合未达到现有五官差异条件，原生筛选各只显示底图。用户图缺少同帧清晰参考。
 
-原生研究工具增加 `--compose-local-donors`，直接读取四行权重、底图和三张供体。本轮实跑 113 张输入的硬选及回放共 226 张输出，解码后的 8 位 BGR 均与研究图逐像素相同。脸外不变、零权重、非法权重形状、现有路径保护及错误尺寸已复核。同一 Windows 11 机器的单图流程含启动、解码和编码，中位约 85–87 毫秒。原有五个配对案例的三种筛选模式均通过回归。权重推断仍属于实验流程。研究产物在 `D:/DevTools/visual-analysis-dev/portrait-donor-mixture-01`，包括 `selected-native-witnesses.png`、`three-user-local-mixes.png`、`evaluated.json` 和 `native-proof.json`。正式应用和发布包未更改。
+原生研究工具增加 `--compose-local-donors`，直接读取四行权重、底图和三张供体。本轮实跑 113 张输入的硬选及回放共 226 张输出，解码后的 8 位 BGR 均与研究图逐像素相同。脸外不变、零权重、非法权重形状、现有路径保护及错误尺寸已复核。同一 Windows 11 机器的单图流程含启动、解码和编码，中位约 85–87 毫秒。原有五个配对案例的三种筛选模式均通过回归。权重推断仍属于实验流程。研究产物在 `D:/Data/Build/visual-analysis-dev/portrait-donor-mixture-01`，包括 `selected-native-witnesses.png`、`three-user-local-mixes.png`、`evaluated.json` 和 `native-proof.json`。正式应用和发布包未更改。
 
 ### 区分五官的跨尺度纹理和缺乏观测支持的细纹
 
@@ -4719,7 +4719,7 @@ PCFlow 的两个输入在小米 0021 上均达标，旧固定首图没有达标�
 
 三张用户图在固定回贴上使用相干性保护时，输出逐像素保持。对同一组旧的 CodeFormer、PCFlow 候选另使用先前去纹观察和限幅修正。六次原生回放里，只有第三张的 CodeFormer 接受了小幅降锐，回放误差约从 0.006114 到 0.006082，细节强度约为该候选的 0.908 倍，五官形状没有可辨差异。三个用户案例仍无清晰原片用于验证。结果见 `three-native-picks.png` 和 `private-phase-then-residue.png`。
 
-Windows 原生工具增加 `--cap-fine-band`，接受指定的细带亮度强度上限，报告实际强度与是否达到。对 113 张输入实跑后，85 张与研究实现逐像素一致，差异最大的通道为一个 8 位灰阶。所有输出保持脸窗外像素和每像素的 BGR 通道差。110 张在 2% 容差内达到各自指定的上限。35 张实际发生像素改动，含启动、解码、编码的耗时中位数为 0.458 秒。另复核了超小上限、错误参数和尺寸、Unicode 路径、禁止覆盖目标路径、上限已满足时的逐像素保持。五个既有配对在三种筛选模式下共十五次通过回归。实测记录及对照图在 `D:/DevTools/visual-analysis-dev/portrait-cross-band-residue-01`，其中 `native-band-cap.json` 保存原生检查。该工具由调用方提供强度目标，本轮未接入交付应用。
+Windows 原生工具增加 `--cap-fine-band`，接受指定的细带亮度强度上限，报告实际强度与是否达到。对 113 张输入实跑后，85 张与研究实现逐像素一致，差异最大的通道为一个 8 位灰阶。所有输出保持脸窗外像素和每像素的 BGR 通道差。110 张在 2% 容差内达到各自指定的上限。35 张实际发生像素改动，含启动、解码、编码的耗时中位数为 0.458 秒。另复核了超小上限、错误参数和尺寸、Unicode 路径、禁止覆盖目标路径、上限已满足时的逐像素保持。五个既有配对在三种筛选模式下共十五次通过回归。实测记录及对照图在 `D:/Data/Build/visual-analysis-dev/portrait-cross-band-residue-01`，其中 `native-band-cap.json` 保存原生检查。该工具由调用方提供强度目标，本轮未接入交付应用。
 
 ### 用糊图筛选五官有可见差异的候选
 
@@ -4743,7 +4743,7 @@ Windows 原生工具增加 `--cap-fine-band`，接受指定的细带亮度强度
 
 另外对前两张分别用同坐标的去纹观察、更换去纹底图，以及同时更换这两项复验。两张的 CodeFormer 回放误差均小于各自底图，换用去纹观察后对观察图的带通强度比从 0.501、0.528 提高至 0.839、0.983，仍低于当前原生门槛 1.20。六次都只保留底图。屏纹会提高糊图的带通强度，现有去纹步骤只能部分纠正该现象。该对照未改动候选像素，结果见 `native-screen-clarity.json`。
 
-研究产物位于 `D:/DevTools/visual-analysis-dev/portrait-phase-rank-01`。配对在 `rank-results.json`、`expanded-scores.json`、`paired-auto-vs-reference.png`，用户案例在 `private-score-reviewed.json`、`native-model-sweep.json`、`native-three-case-results.png`。原生复验沿用已提交的本地程序，本轮为研究评估，交付应用没有更新。
+研究产物位于 `D:/Data/Build/visual-analysis-dev/portrait-phase-rank-01`。配对在 `rank-results.json`、`expanded-scores.json`、`paired-auto-vs-reference.png`，用户案例在 `private-score-reviewed.json`、`native-model-sweep.json`、`native-three-case-results.png`。原生复验沿用已提交的本地程序，本轮为研究评估，交付应用没有更新。
 
 ### 对照眼口边缘的位置、宽度和反相细节
 
@@ -4767,7 +4767,7 @@ Windows 原生工具增加 `--cap-fine-band`，接受指定的细带亮度强度
 
 仅按反向轮廓支持排序，开发组为 48/61，源隔离屏拍仍为 27/35，找回一张并丢失一张。实拍运动组达到 8/14，找回的仍是 016，其眼镜重影可见。联合使用前向和反向直接排序时分别为 51/61、19/35、6/14。源隔离组的 PCFlow 首选从 16 张降至 4 张，整体仍低于固定底图。第一、二张的 CodeFormer 限幅候选均能在观察中找到同号线条，但强度偏差使反向缺失量约为 0.355、0.267。第三张该候选约有 12.8% 的加权边缘完全缺少足够强度的同号支持，鼻部偏差尤其明显。回放接近的三个候选仍可能各有未获得观测支持的细节。
 
-研究产物在 `D:/DevTools/visual-analysis-dev/portrait-edge-transport-01`，包括 `profile-controls.json`、`common-replay-scores.json`、`fused-scores.json`、`fusion-scores.json`、`reverse-evaluated.json` 和 `native-contour-preview.json`。预览 `three-case-contour-replay.png` 展示截图、候选及原生模糊回放，`three-contour-transfer.png` 展示局部转移结果。此次没有修改交付应用。
+研究产物在 `D:/Data/Build/visual-analysis-dev/portrait-edge-transport-01`，包括 `profile-controls.json`、`common-replay-scores.json`、`fused-scores.json`、`fusion-scores.json`、`reverse-evaluated.json` 和 `native-contour-preview.json`。预览 `three-case-contour-replay.png` 展示截图、候选及原生模糊回放，`three-contour-transfer.png` 展示局部转移结果。此次没有修改交付应用。
 
 ### 交叉校准候选与拍摄图的轮廓对比度
 
@@ -4788,7 +4788,7 @@ Windows 原生工具增加 `--cap-fine-band`，接受指定的细带亮度强度
 
 三个用户图的限幅 CodeFormer 候选中，校准使反向缺失量分别从 0.359、0.265、0.433 降到 0.026、0.011、0.150。第三张仍有约 6.5% 的加权轮廓在糊图中支持不足。实图校准让模型图的明暗反差变弱，第二张的模型皮肤纹理仍存在，第三张整体校准版更软。Windows 原生复验九次，第一、二张仍只保留底图，第三张三次均另留一张；其中中细频校准版回放误差 0.006285，略高于未再校准的 0.006082。三张均缺少清晰原片。
 
-记录在 `D:/DevTools/visual-analysis-dev/portrait-crossfit-contrast-01`，`controls.json`、`score.json`、`generated-scores.json`、`witnesses.json` 和 `native-proof.json` 有冻结计分及原生验证。配对图见 `paired-photometric-witnesses.png`，用户图见 `three-calibrated-candidates.png`。交付应用本轮没有修改。
+记录在 `D:/Data/Build/visual-analysis-dev/portrait-crossfit-contrast-01`，`controls.json`、`score.json`、`generated-scores.json`、`witnesses.json` 和 `native-proof.json` 有冻结计分及原生验证。配对图见 `paired-photometric-witnesses.png`，用户图见 `three-calibrated-candidates.png`。交付应用本轮没有修改。
 
 ### 沿拖影方向约束实拍人像复原
 
@@ -4802,7 +4802,7 @@ Windows 原生工具增加 `--cap-fine-band`，接受指定的细带亮度强度
 
 盲测完成后，额外用三张独立清晰原片拟合全脸及各五官的运动核。此处原片只用于估计运动参数和评分。每张最优直线运动核均达到搜索长度上限 38 像素，误差是各自最优各向同性核的 1.123、1.077、1.032 倍。部分部位的拟合方向相差 15° 至 30°。用全脸及局部方向校正 42 张 PULSE 候选，和其他固定处理一并事后从候选池取数值最优结果，三张最差部位的误差倍率分别为 3.504、3.469、3.725，仍高于 1.0。局部方向分支也均未达标。该诊断只验证了本次搜索的直线成像模型和校正方法。
 
-三张用户图没有足够证据启用投影修正，候选保持原像素。单独运行的 L-BAG 实验也未带来可见的五官恢复，第二张仍有屏纹，第三张眼口仍糊。研究产物位于 `D:/DevTools/visual-analysis-dev/portrait-motion-locus-01`。`known-controls.json`、`project-scores.json`、`lbag-scored.json`、`standard-independent.json` 和 `known-axis-diagnostic.json` 保存测试数据。对照图见 `lbag-case-comparison.png`、`independent-lbag-pairs.png`、`reference-axis-ceiling.png`。交付应用和发布包未更改。
+三张用户图没有足够证据启用投影修正，候选保持原像素。单独运行的 L-BAG 实验也未带来可见的五官恢复，第二张仍有屏纹，第三张眼口仍糊。研究产物位于 `D:/Data/Build/visual-analysis-dev/portrait-motion-locus-01`。`known-controls.json`、`project-scores.json`、`lbag-scored.json`、`standard-independent.json` 和 `known-axis-diagnostic.json` 保存测试数据。对照图见 `lbag-case-comparison.png`、`independent-lbag-pairs.png`、`reference-axis-ceiling.png`。交付应用和发布包未更改。
 
 ### 用专门的局部补全模型复测缺失五官
 
@@ -4827,7 +4827,7 @@ Windows 原生工具增加 `--cap-fine-band`，接受指定的细带亮度强度
 
 对 `GOPR1087-211` 再用横纵各 −0.5、0、0.5 像素的清晰参考位置复测。联合判定从 0/9 到 9/9，替换区域的边缘吻合却在九个位置全部下降。这一项不能计为真实眼部形状恢复。对同三张输入的原生 CPU、DirectML 推理，中位分别为 12.05 秒和 3.84 秒，输出所有通道的最大差均为一个 8 位灰阶。
 
-三张用户图均有补全候选。以第二处为目标时，第二张生成了一只清楚的眼睛，第三张生成了嘴唇，局部和周围糊图仍有明显落差。现有 Windows 原生筛选对三张各检验八个候选，均只保留原底图。三张没有对应清晰原片，生成细节的真实外貌无法核验。记录在 `D:/DevTools/visual-analysis-dev/portrait-context-inpainting-01`，含 `rendered.json`、`paired-scores.json`、`heavy-scores.json`、`pair-offset-audit.json` 和 `native-decisions.json`。并排图见 `private-inpainting.png`、`paired-inpainting.png`、`independent-inpainting.png`。交付应用和发布包没有更新。
+三张用户图均有补全候选。以第二处为目标时，第二张生成了一只清楚的眼睛，第三张生成了嘴唇，局部和周围糊图仍有明显落差。现有 Windows 原生筛选对三张各检验八个候选，均只保留原底图。三张没有对应清晰原片，生成细节的真实外貌无法核验。记录在 `D:/Data/Build/visual-analysis-dev/portrait-context-inpainting-01`，含 `rendered.json`、`paired-scores.json`、`heavy-scores.json`、`pair-offset-audit.json` 和 `native-decisions.json`。并排图见 `private-inpainting.png`、`paired-inpainting.png`、`independent-inpainting.png`。交付应用和发布包没有更新。
 
 ### 用配对图学习五官轮廓，再检查生成图的实际形状
 
@@ -4843,7 +4843,7 @@ Windows 原生工具增加 `--cap-fine-band`，接受指定的细带亮度强度
 
 Windows 原生点位程序在六张图上重跑，DirectML 全部挂载。该机 CPU 和 DirectML 的中位耗时分别为 820 和 234 毫秒，最大点位坐标差为 0.00083 像素。三张用户样本用 Windows 原生回放筛选重新验证，最终均选中既有底图，未保留轮廓备选。三张缺少清晰参考，第二、三张的眼部细节依然不清楚。本轮结论仅用于评测，轮廓变形未进入交付版。
 
-本机实验目录为 `D:/DevTools/visual-analysis-dev/portrait-shape-posterior-01`。`archive-test.json` 和 `interval-measured.json` 记录点位误差与覆盖率，`paint.lock` 和 `eye-frozen.json` 记录评分前固定的候选及校验值，`real-score.json` 和 `eye-scored.json` 记录逐样本评分。`three-shape-candidates.png` 和 `inpainting-shape-diagnostic.png` 分别是三张用户样本和七张有参考样本的对照图。`native-landmark-proof.json` 与 `native-case-verification.json` 记录原生复测。
+本机实验目录为 `D:/Data/Build/visual-analysis-dev/portrait-shape-posterior-01`。`archive-test.json` 和 `interval-measured.json` 记录点位误差与覆盖率，`paint.lock` 和 `eye-frozen.json` 记录评分前固定的候选及校验值，`real-score.json` 和 `eye-scored.json` 记录逐样本评分。`three-shape-candidates.png` 和 `inpainting-shape-diagnostic.png` 分别是三张用户样本和七张有参考样本的对照图。`native-landmark-proof.json` 与 `native-case-verification.json` 记录原生复测。
 
 ### 用高清生成先验和统一模糊回放检查候选
 
@@ -4855,7 +4855,7 @@ Windows 原生点位程序在六张图上重跑，DirectML 全部挂载。该机
 
 完整潜变量路线先拟合共享的 W，再放开四组层的 W。参考实现首次反向时进程提交内存约 6.8 GB，实验进程随即停止。改成分块 FIR 滤波和反向重算后，28+4 通道对照的前向与梯度最大差均为 0。完整模型单步前向 7.10 秒，前向加反向 32.09 秒。模糊回放拟合使用本机文件，运行时拦截 Python 发起的网络连接。完整路线的逐图优化仍在运行，本节的配对结果只覆盖快速拟合和投影。
 
-实验目录为 `D:/DevTools/visual-analysis-dev/portrait-staged-latent-01`。`initial-fit` 和 `replay-projection` 下各有 `inversion.lock`、`inversion-scored.json`、`native-selection.json`、`three-inputs-and-replays.png` 及 `paired-inversion-review.png`。`direct-reference-embedding.json` 保存八张的直接特征相似度。两条已完成路线未进入交付版。
+实验目录为 `D:/Data/Build/visual-analysis-dev/portrait-staged-latent-01`。`initial-fit` 和 `replay-projection` 下各有 `inversion.lock`、`inversion-scored.json`、`native-selection.json`、`three-inputs-and-replays.png` 及 `paired-inversion-review.png`。`direct-reference-embedding.json` 保存八张的直接特征相似度。两条已完成路线未进入交付版。
 
 ### 加速潜变量拟合后复测人像相似度
 
@@ -4869,7 +4869,7 @@ Windows 11 同机各用两条 CPU 线程，在两个固定潜变量上比较完�
 
 三张用户样例中的第一张已经完成长流程的一个起点，共享 12 步和分组 10 步。露齿笑变弱，眼睛和嘴形仍和原糊图中可见的轮廓有差别。Windows C++ 筛选器核对该起点的三张图，只保留既有底图，保存的图像已逐像素核对。这个起点的结果不能代表该图尚在运行的其他起点，也不能核验本人长相。
 
-本机实验目录沿用 `D:/DevTools/visual-analysis-dev/portrait-staged-latent-01`。`native-fir-evaluation.json` 记录性能和数值对照，`native-probe-paired-2` 与 `native-probe-paired-2-projection` 保存锁定候选、逐图指标和对照图，`case-01-completed-seed` 保存首张样例的完整起点和原生筛选结果。
+本机实验目录沿用 `D:/Data/Build/visual-analysis-dev/portrait-staged-latent-01`。`native-fir-evaluation.json` 记录性能和数值对照，`native-probe-paired-2` 与 `native-probe-paired-2-projection` 保存锁定候选、逐图指标和对照图，`case-01-completed-seed` 保存首张样例的完整起点和原生筛选结果。
 
 ### 用清晰配对校准五官边缘，再约束生成
 
@@ -4883,7 +4883,7 @@ Windows 11 同机各用两条 CPU 线程，在两个固定潜变量上比较完�
 
 在 `GOPR1087-211` 和 `GOPR1096-60` 的潜变量拟合中加入融合后的有符号轮廓约束，保持同一起点、模糊核、三步共享和三步分组设置。两个起点的像素与纯回放路线逐通道完全一致，两张分别约有 39% 和 67% 的可评分位置参与轮廓约束。最终成图眼鼻口的平均频带一致性由 0.025 提到 0.272，以及由 −0.101 提到 −0.020。整体外观特征相似度分别由 0.188 降到 0.067、由 0.136 变为 0.139，均低于既有底图的 0.540、0.413。纯回放与轮廓约束都为 0/2 通过联合门槛。轮廓约束的盲选在第一张退回生成起点，第二张保留分组结果。
 
-本机实验目录仍为 `D:/DevTools/visual-analysis-dev/portrait-staged-latent-01`。`paired-contour-calibration.json`、`paired-anchor-contour-calibration.json`、`expanded-contour-calibration.json` 记录三次训练和阈值复验，`contour-offset-diagnostic.json` 记录有参考的位移诊断，`contour-fit-paired-2` 保存同起点对照与指标。第三张用户样例纯回放的成图、回放图和原生选择在 `native-probe` 下。结果均属于研究评测。
+本机实验目录仍为 `D:/Data/Build/visual-analysis-dev/portrait-staged-latent-01`。`paired-contour-calibration.json`、`paired-anchor-contour-calibration.json`、`expanded-contour-calibration.json` 记录三次训练和阈值复验，`contour-offset-diagnostic.json` 记录有参考的位移诊断，`contour-fit-paired-2` 保存同起点对照与指标。第三张用户样例纯回放的成图、回放图和原生选择在 `native-probe` 下。结果均属于研究评测。
 
 ### 给定正确边缘方向后比较生成和局部修正
 
@@ -4899,7 +4899,7 @@ Windows 11 同机各用两条 CPU 线程，在两个固定潜变量上比较完�
 
 两张重度配对再用同起点的 StyleGAN3 拟合对照。三个路线的初始图逐像素一致，两段各三步，分别只用回放、用从糊图估计的方向、用清晰原片给定方向。最后一组沿用盲选位置、权重和原糊图对比度，只有方向来自原片。两张在给定正确方向时的最终特征相似度为 0.149、0.120，纯回放为 0.188、0.136。三路均为 0/2 通过。这个固定步数的生成实验未把方向正确转化为整体外观相似度。
 
-实验目录为 `D:/DevTools/visual-analysis-dev/portrait-staged-latent-01`。`contour-integration` 保存局部积分，`contour-integration/known-vector-control` 保存已知边缘对比度和位置的对照，`learned-contour-field` 保存真实配对训练、锁定候选和测量。`clear-contour-control/clear-direction-ab.json` 与同名 PNG 记录同起点生成对照。`two-completed-user-controls.png` 汇总第一、第三张用户样例，逐图的原生选择分别在 `full-case-01-review` 和 `contour-fit` 内。
+实验目录为 `D:/Data/Build/visual-analysis-dev/portrait-staged-latent-01`。`contour-integration` 保存局部积分，`contour-integration/known-vector-control` 保存已知边缘对比度和位置的对照，`learned-contour-field` 保存真实配对训练、锁定候选和测量。`clear-contour-control/clear-direction-ab.json` 与同名 PNG 记录同起点生成对照。`two-completed-user-controls.png` 汇总第一、第三张用户样例，逐图的原生选择分别在 `full-case-01-review` 和 `contour-fit` 内。
 
 ### 从模糊观察学习边缘位移、方向和对比度
 
@@ -4915,7 +4915,7 @@ Windows 11 同机各用两条 CPU 线程，在两个固定潜变量上比较完�
 
 三张用户样例的两路备选在脸区的平均绝对差分别为 0.80、1.25、0.24 个 8 位灰阶。逐图对照未看到足够清楚的五官变化，第三张仍很模糊。Windows C++ 选择器在三组里均只保留既有底图，保存图像已逐像素核对。它检查的中央候选回放误差更低，但相对输入的脸部带通强度仅为 0.830、0.974、0.921，且没有通过五官差异检验。三图缺少清晰原片。
 
-本机实验目录为 `D:/DevTools/visual-analysis-dev/portrait-staged-latent-01/contour-hypotheses`。`training-finished.json` 记录选中的检查点与训练曲线，`candidate-manifest.lock` 锁定候选，`evaluation.json` 保存逐图指标，`paired-hard-review.png` 和 `three-user-review.png` 保存对照。`motion-support-audit.json` 和 `extra-motion-audit/pairs.json` 保存难度复核。
+本机实验目录为 `D:/Data/Build/visual-analysis-dev/portrait-staged-latent-01/contour-hypotheses`。`training-finished.json` 记录选中的检查点与训练曲线，`candidate-manifest.lock` 锁定候选，`evaluation.json` 保存逐图指标，`paired-hard-review.png` 和 `three-user-review.png` 保存对照。`motion-support-audit.json` 和 `extra-motion-audit/pairs.json` 保存难度复核。
 
 ### 在统一人脸坐标上测量模糊后仍保留的外观特征
 
@@ -4927,7 +4927,7 @@ Windows 11 同机各用两条 CPU 线程，在两个固定潜变量上比较完�
 
 第二张用户样例另外完成两个 StyleGAN3 起点。每个起点做共享 12 步及分组 10 步。误差最低的分组结果回放偏差为 0.1379，原底图为 0.0426，两张生成图分别引入明显不同的嘴形和偏低的眼睛。把两个起点和各阶段送进 Windows C++ 选择器后，仍只保留原底图。
 
-实验记录在 `D:/DevTools/visual-analysis-dev/portrait-staged-latent-01/paired-subspace`。`previous-motion-rasters.json` 和 `canonical-motion-audit.json` 保存两个坐标系的复核，`calibration.json`、`candidate-manifest.lock` 和 `paired-evaluation.json` 保存拟合与盲测。对照是 `hard-review.png` 和 `users-review.png`。完整生成和两种模糊回放在同级目录 `full-case-02-review/three-inputs-and-replays.png`。
+实验记录在 `D:/Data/Build/visual-analysis-dev/portrait-staged-latent-01/paired-subspace`。`previous-motion-rasters.json` 和 `canonical-motion-audit.json` 保存两个坐标系的复核，`calibration.json`、`candidate-manifest.lock` 和 `paired-evaluation.json` 保存拟合与盲测。对照是 `hard-review.png` 和 `users-review.png`。完整生成和两种模糊回放在同级目录 `full-case-02-review/three-inputs-and-replays.png`。
 
 三张用户样例另用 Windows C++ 筛选复测两种局部变形，均只保留原底图。筛选将三个候选都视为无明显五官差别。选入比较的版本带通强度相对原输入为 0.802、0.979、0.921。
 
@@ -4943,7 +4943,7 @@ Windows 11 同机各用两条 CPU 线程，在两个固定潜变量上比较完�
 
 在用户三张样例，两路备选之间的人脸区域平均绝对差依次为 1.36、1.48、0.44 个灰阶。三组交给 Windows C++ 筛选均只留既有底图，比较的备选都未通过五官差异检查。第三张眼口未补出高清细节，第二张仍有明显网格纹。
 
-结果在 `D:/DevTools/visual-analysis-dev/portrait-staged-latent-01/aligned-contour-hypotheses`。`aligned-data-provenance.json` 记录配对裁切及训练来源，`training-finished.json`、`candidate-manifest.lock`、`evaluation.json` 保存检查点及盲测，`native-user-candidates/native-selection.json` 保存 Windows C++ 决策。43 张输入的候选及底图均已核对文件哈希。成图对照为 `paired-hard-review.png` 和 `three-user-review.png`。此次没有发布应用新包。
+结果在 `D:/Data/Build/visual-analysis-dev/portrait-staged-latent-01/aligned-contour-hypotheses`。`aligned-data-provenance.json` 记录配对裁切及训练来源，`training-finished.json`、`candidate-manifest.lock`、`evaluation.json` 保存检查点及盲测，`native-user-candidates/native-selection.json` 保存 Windows C++ 决策。43 张输入的候选及底图均已核对文件哈希。成图对照为 `paired-hard-review.png` 和 `three-user-review.png`。此次没有发布应用新包。
 
 ### 用更多高速实拍来源复核同一人像轮廓模型
 
@@ -4957,7 +4957,7 @@ Windows 11 同机各用两条 CPU 线程，在两个固定潜变量上比较完�
 
 另从 FVQ-20K 校验 16 段高画质源视频，按源视频隔离 12 段训练源和 4 段留出源。由实际相邻帧的运动和光流插帧合成较长曝光，中心原帧作为参考，再生成叠加模拟屏纹的版本。得到 28 对训练源和 11 对留出源的运动与混合退化对照。固定随机种子可复现屏纹，静态曝光平均的像素误差不超过一个灰阶。这批对照的运动版与混合版都没有五官方向吻合低于 50% 的例子，未覆盖最重档，也未用于要交付的模型训练。[FVQ-20K 数据与用途](https://huggingface.co/datasets/Human-X/FVQ-20K)
 
-本机记录在 `D:/DevTools/visual-analysis-dev/portrait-motion-pair-expansion-01`。`sampling-plan.json`、`cohort-review.json` 和 `native-codeformer-baselines.json` 保存采样、配对核验和基线。`expanded-contour/trial.lock`、`evaluation.json` 及同目录两张 PNG 保存候选与分数。`expanded-contour/native/native-selection.json` 是 Windows 实际选择。FVQ 记录为 `fvq-simulation-checks.json`。本轮没有更新交付包。
+本机记录在 `D:/Data/Build/visual-analysis-dev/portrait-motion-pair-expansion-01`。`sampling-plan.json`、`cohort-review.json` 和 `native-codeformer-baselines.json` 保存采样、配对核验和基线。`expanded-contour/trial.lock`、`evaluation.json` 及同目录两张 PNG 保存候选与分数。`expanded-contour/native/native-selection.json` 是 Windows 实际选择。FVQ 记录为 `fvq-simulation-checks.json`。本轮没有更新交付包。
 
 ### 在整脸生成前恢复轮廓，并校准缺失的模型条件
 
@@ -4981,7 +4981,7 @@ iPhoneBlur 版本 InstructIR 的训练脚本用固定 `deblur` 文字生成一�
 
 用此前锁定的 FVQ-20K 四段留出视频的 11 个曝光窗口复验源隔离。校准向量未使用这些数据。运动模拟中零向量为 1/11，校准为 6/11。相同窗口另加模拟屏纹，零向量 0/11，校准为 6/11。两组共享 11 个源窗口，模糊程度低于最重档。[FVQ-20K 原始视频](https://huggingface.co/datasets/Human-X/FVQ-20K)
 
-校准和高频回贴的 Windows 原生复验给用户第二、三张各留一个备选。第二张屏纹更明显，第三张仍有眼口拖影，三张缺清晰原片。试验文件在 `D:/DevTools/visual-analysis-dev/portrait-mimo-front-end-01`。`evaluation.json`、`verified-output.json` 记录原生 MIMO 对照，`instruct-fixed/evaluation.json`、`texture-scored.json`、`fvq-scored.json` 记录逐图复验，`instruct-fixed/device-benchmark.json` 保存双设备核对。`instruct-fixed/texture-new-HIDE.png`、`texture-hard-HIDE.png` 和 `texture-user.png` 为对照。已核对后续三个清单和 322 个源或候选文件条目。本轮未更新交付包。
+校准和高频回贴的 Windows 原生复验给用户第二、三张各留一个备选。第二张屏纹更明显，第三张仍有眼口拖影，三张缺清晰原片。试验文件在 `D:/Data/Build/visual-analysis-dev/portrait-mimo-front-end-01`。`evaluation.json`、`verified-output.json` 记录原生 MIMO 对照，`instruct-fixed/evaluation.json`、`texture-scored.json`、`fvq-scored.json` 记录逐图复验，`instruct-fixed/device-benchmark.json` 保存双设备核对。`instruct-fixed/texture-new-HIDE.png`、`texture-hard-HIDE.png` 和 `texture-user.png` 为对照。已核对后续三个清单和 322 个源或候选文件条目。本轮未更新交付包。
 
 ### 同一低清输入下的多原像覆盖试验
 
@@ -4989,13 +4989,13 @@ iPhoneBlur 版本 InstructIR 的训练脚本用固定 `deblur` 文字生成一�
 
 用 Windows C++ DirectML 跑 CodeFormer 产生底图，对眼睑、鼻宽和嘴形各取三个取值，给每个观测生成 27 个不同参数的候选。首轮普通块投影和大幅变形造成块边界和眼睑拉伸。限制变形的局部面积倍率下界，并改用仓库已有的平滑精确投影。对相同提案比较整数块修正与平滑修正，方块边缘相比邻近位置增加的色阶跳变在四组从 3.24–5.79 降到 0.0010–0.0023。修正版 108 张 PNG 及 20 张参考全部通过独立回放校验。目视仍可见个别备选的眼睑被拉伸，严重低清组与参考的嘴形和眉眼仍有差异。
 
-从每张参考到其最近候选的五官频带误差取中位，CodeFormer 为 0.04392，平滑后首张为 0.04380，盲选前四张为 0.04246，全部 27 张为 0.04137。该指标也用于候选多样性排序，外观评审表保留 20 张 `unreviewed`，无外观覆盖结论。`D:/DevTools/visual-analysis-dev/portrait-ambiguity-coverage-01/refined` 保存 `before-after.png`、`comparison.png`、`evaluation.json`、`review-sheet.json` 和 `replay-review.json`。
+从每张参考到其最近候选的五官频带误差取中位，CodeFormer 为 0.04392，平滑后首张为 0.04380，盲选前四张为 0.04246，全部 27 张为 0.04137。该指标也用于候选多样性排序，外观评审表保留 20 张 `unreviewed`，无外观覆盖结论。`D:/Data/Build/visual-analysis-dev/portrait-ambiguity-coverage-01/refined` 保存 `before-after.png`、`comparison.png`、`evaluation.json`、`review-sheet.json` 和 `replay-review.json`。
 
 ### 在真实配对上复验回放漏选
 
 另在一张手机配对、八张双相机配对、三张 ReLoBlur 配对和三张用户屏拍上生成候选。它们未用于拟合 InstructIR 条件向量。OpenVINO Windows C++ GPU 上零向量和校准向量各处理 15 张，中位时间分别为 0.856、0.744 秒。CodeFormer 对照全程采用 DirectML。先确定同一组可供所有候选使用的三个成像核，在脸部外圈拟合，在内圈的两个分组检验回放；也试过额外保留外观有差异且部分回放核支持的候选。随后读取清晰参考评分。
 
-真实配对中，原 RSBlur 候选在双相机和 ReLoBlur 分别达到 6/8 和 1/3；校准 InstructIR 分别为 5/8 和 1/3，均已被 RSBlur 覆盖。手机样本所有候选均未达到配对评分阈值。两种回放筛选都漏掉了候选池中已有达标结果的七张。三张用户图分别留下两张、两张、一张，前两组有明显屏纹，第三张眼口仍软。`D:/DevTools/visual-analysis-dev/portrait-instruct-common-replay-01` 保存 `evaluation.json`、`alternate-evaluation.json` 和 `private-alternates.png`。试验覆盖生成及离线回放评估，未更新应用或交付包。
+真实配对中，原 RSBlur 候选在双相机和 ReLoBlur 分别达到 6/8 和 1/3；校准 InstructIR 分别为 5/8 和 1/3，均已被 RSBlur 覆盖。手机样本所有候选均未达到配对评分阈值。两种回放筛选都漏掉了候选池中已有达标结果的七张。三张用户图分别留下两张、两张、一张，前两组有明显屏纹，第三张眼口仍软。`D:/Data/Build/visual-analysis-dev/portrait-instruct-common-replay-01` 保存 `evaluation.json`、`alternate-evaluation.json` 和 `private-alternates.png`。试验覆盖生成及离线回放评估，未更新应用或交付包。
 
 ### 保留有观测支持的候选并复验漏选
 
@@ -5003,7 +5003,7 @@ iPhoneBlur 版本 InstructIR 的训练脚本用固定 `deblur` 文字生成一�
 
 在看到评分后定位出屏纹误拦。改用既有 C++ 屏纹检测器，从输入不同位置找重复频率。检查相邻两个方向形成的近似方格，只在候选仍保留足够相应能量时拦截。在相同配对上回测，此前 12 张保住可达标的 7 张，另 14 张保住 8 张中的 7 张。对余下的 `016`，试验在同一外观组中用观测吻合更好且细节只小幅下降的校准 InstructIR 替换首选，保住第 8 张。这两个修订的配对结果属回测。`016` 的嘴形更接近配对照片，眼镜和眼周依然软。三张用户屏拍的候选均降到一张，沿用 CodeFormer，依然缺清晰原片。
 
-另在四段 FVQ-20K 视频的 11 个运动窗口上独立复核屏纹判据。11 张无附加屏纹的运动图均未判为规则方格，11 张额外加入已知方格的图全部检出。原有的 11 张混合模拟屏纹中检出 7 张。经既有原生周期平均处理，18 张检出的图均低于保留屏纹的拦截阈值。三个条件共用这 11 组基础帧。对照和逐图数据在 `D:/DevTools/visual-analysis-dev/portrait-observation-branches-01` 的 `lattice/diagnostics-review.png`、`lattice/comparison.json` 和 `control-report.json`。
+另在四段 FVQ-20K 视频的 11 个运动窗口上独立复核屏纹判据。11 张无附加屏纹的运动图均未判为规则方格，11 张额外加入已知方格的图全部检出。原有的 11 张混合模拟屏纹中检出 7 张。经既有原生周期平均处理，18 张检出的图均低于保留屏纹的拦截阈值。三个条件共用这 11 组基础帧。对照和逐图数据在 `D:/Data/Build/visual-analysis-dev/portrait-observation-branches-01` 的 `lattice/diagnostics-review.png`、`lattice/comparison.json` 和 `control-report.json`。
 
 ### Windows 原生候选库覆盖复核
 
@@ -5023,13 +5023,13 @@ iPhoneBlur 版本 InstructIR 的训练脚本用固定 `deblur` 文字生成一�
 
 用两组固定图块交叉拟合混合权重，比较宽窄候选共同形成原糊图的近似回放。条件向量的局部回贴在 2/11 同时优于中心候选和较优单张。相同结果上复查原生覆盖半径，0.10 和 0.05 均仅保住 1/22。回测中为开合比与已保留图相差超过 0.04 的区间分支额外保留 11 张，找回第 2 份达标参考。该回放及附加保留验证的是这批有限候选。
 
-在原生测试中，两档全脸图及两档局部图均由 Windows C++ OpenVINO 推理。四张代表图的全脸窄口路线 CPU、GPU 中位分别为 0.822、0.738 秒，宽口路线为 0.657、0.695 秒。局部路线同样比较 CPU 和 GPU，选用 GPU，25 张各路线中位为 6.64 和 6.09 毫秒。代表性 CPU/GPU 最大张量差小于 9×10⁻⁷。全套核对了 339 张输入和输出图、原生保留图及 12 组局部双设备张量。候选、评分、设备记录和 `new-coverage.png` 位于 `D:/DevTools/visual-analysis-dev/portrait-exposure-modes-01`。本轮未调整应用交付路径。
+在原生测试中，两档全脸图及两档局部图均由 Windows C++ OpenVINO 推理。四张代表图的全脸窄口路线 CPU、GPU 中位分别为 0.822、0.738 秒，宽口路线为 0.657、0.695 秒。局部路线同样比较 CPU 和 GPU，选用 GPU，25 张各路线中位为 6.64 和 6.09 毫秒。代表性 CPU/GPU 最大张量差小于 9×10⁻⁷。全套核对了 339 张输入和输出图、原生保留图及 12 组局部双设备张量。候选、评分、设备记录和 `new-coverage.png` 位于 `D:/Data/Build/visual-analysis-dev/portrait-exposure-modes-01`。本轮未调整应用交付路径。
 
 ### 先补细节，再用共享底图回放同一曝光
 
 用 Windows C++ DirectML 生成 36 张 CodeFormer 底图。分别对齐双眼、鼻、嘴，取中频亮暗方向相符区域的细节回贴到场景还原底图。以这张底图为起点，用五个时刻的插值图做曝光积分。嘴形变化由训练组估计的开合区间给出，平移由嘴部以外的观测拟合。用双线性采样的精确转置做带正则的曝光反演，再渲染两种嘴形及两个方向的运动位置。候选及原生保留结果固定后才读取清晰参考。[空间变化运动模糊模型](https://www.robots.ox.ac.uk/~vgg/publications/2012/Whyte12/)
 
-合成控制中转置相对误差为 1.75×10⁻⁸。四张图在已知轨迹上的八个端点，线性 RGB 均方误差下降 22.5%–38.6%。25 张试验输入上的回放均方误差中位降到原来的 33.5%。在 11 个留出曝光的 22 张参考上，新候选池保住 1 张。与既有候选合用仍为 2 张，11 个曝光均未同时覆盖两张参考。另 11 张真实配对也没有新增通过。回放改善说明拟合的轨迹更能解释像素，直接观察仍有嘴形和眼周细节差异。候选、回放和清晰参考对照位于 `D:/DevTools/visual-analysis-dev/portrait-exposure-inversion-01`，研究反演未接入正式应用。
+合成控制中转置相对误差为 1.75×10⁻⁸。四张图在已知轨迹上的八个端点，线性 RGB 均方误差下降 22.5%–38.6%。25 张试验输入上的回放均方误差中位降到原来的 33.5%。在 11 个留出曝光的 22 张参考上，新候选池保住 1 张。与既有候选合用仍为 2 张，11 个曝光均未同时覆盖两张参考。另 11 张真实配对也没有新增通过。回放改善说明拟合的轨迹更能解释像素，直接观察仍有嘴形和眼周细节差异。候选、回放和清晰参考对照位于 `D:/Data/Build/visual-analysis-dev/portrait-exposure-inversion-01`，研究反演未接入正式应用。
 
 ### 用 CFMD-GAN 直接生成不同曝光时刻的整脸候选
 
@@ -5039,7 +5039,7 @@ iPhoneBlur 版本 InstructIR 的训练脚本用固定 `deblur` 文字生成一�
 
 在全部 11 张留出曝光、`real-094` 和三张用户图上测试 0、0.5、1 三个控制值。45 次原生推理给出 90 张直出及残差回贴图，全部核对输入和输出散列。对同一张输入复核三个控制值，直接图和回贴图与 PyTorch 参考每个通道最多相差 1 档。CFMD-GAN 直出及回贴分别覆盖 22 张参考中的 4 张，原生筛选保住这 4 张，单用该模型的候选没有同时覆盖两个端点。三张用户图已生成候选，外观仍缺清晰参考核验。[直接读取单张 PNG 的 Windows 原生工具](../native/tools/portrait_moments/README.md)
 
-将不同控制值的整脸候选与去拖影后改变嘴形的候选合入同一候选池。留出组仍采用相同的整脸配对门槛和 0.025 开合误差上限。原生筛选加开合差超过 0.04 时额外保留的规则，实际写出的候选覆盖 22 张参考中的 5 张。11 张输入中有 1 张的两种参考外观同时通过。对这张的两份参考各试九种 ±0.5 像素位置偏移，首次写出的窄口和宽口图分别通过 9 种和 6 种，开合误差分别为 0.01955 和 0.00762。对照图中窄口候选仍有浅色牙齿痕迹，两张候选的眼周仍偏软。评分仅衡量对这批已知参考的覆盖情况。[两种外观对照图](<D:/DevTools/visual-analysis-dev/portrait-exposure-inversion-01/two-known-appearances.png>)
+将不同控制值的整脸候选与去拖影后改变嘴形的候选合入同一候选池。留出组仍采用相同的整脸配对门槛和 0.025 开合误差上限。原生筛选加开合差超过 0.04 时额外保留的规则，实际写出的候选覆盖 22 张参考中的 5 张。11 张输入中有 1 张的两种参考外观同时通过。对这张的两份参考各试九种 ±0.5 像素位置偏移，首次写出的窄口和宽口图分别通过 9 种和 6 种，开合误差分别为 0.01955 和 0.00762。对照图中窄口候选仍有浅色牙齿痕迹，两张候选的眼周仍偏软。评分仅衡量对这批已知参考的覆盖情况。[两种外观对照图](<D:/Data/Build/visual-analysis-dev/portrait-exposure-inversion-01/two-known-appearances.png>)
 
 ### 在双机真实曝光上检查不同模型间的候选互补性
 
@@ -5047,15 +5047,15 @@ iPhoneBlur 版本 InstructIR 的训练脚本用固定 `deblur` 文字生成一�
 
 按整段低频轮廓的吻合度选择两种模型之间的时间方向，将 Jin 候选的眼鼻局部对齐后转移细节。局部地标相似变换与双向光流共同约束所能转移的区域，同时考察原糊图的中频轮廓是否支持该区域。两档转移分别修改细频以及细频和部分中频，保持 CFMD 基底的嘴部不参加转移。在 FVQ 模拟曝光上由 CodeFormer 提供同图细节对照。另根据训练来源的嘴部开合区间和该图的 CFMD 变化范围，在四个目标开合量生成局部变形。采用分段单调逆映射，唇轴两端位移衰减为零，由最接近目标开合的 CFMD 候选起步。合成控制确认窄、中、宽的中心口高分别为 13、25、39 像素，中性输出及口部外的测试区域逐像素保留。光流控制已知位移为右移 5、上移 3 像素，位移误差中位数 0.256 像素。
 
-在相同的 11 张 FVQ 模拟曝光上，眼鼻融合独立覆盖 4/22，嘴形候选独立覆盖 4/22。与上轮合并的完整池为 8/22。冻结筛选结果后按实际选中 PNG 复核为 6/22，上轮 5/22。由不同候选分别匹配两种参考的输入由 1/11 到 2/11。新输出中位 8 张，上轮 6 张。按原筛选顺序截到与上轮逐图同样的数量，仍为 5/22。两条被筛掉的达标参考出现在 `3ahiFlIHvDc_1_2-2` 和 `ndZc2mO-ab0_0_0-0`。新增输出 `XVozioVBMjw_2_0-0` 的闭合嘴形与参考更近，鼻周及额纹仍偏软。[新增候选对照](<D:/DevTools/visual-analysis-dev/portrait-measured-moments-01/fvq-new-match-1.png>)
+在相同的 11 张 FVQ 模拟曝光上，眼鼻融合独立覆盖 4/22，嘴形候选独立覆盖 4/22。与上轮合并的完整池为 8/22。冻结筛选结果后按实际选中 PNG 复核为 6/22，上轮 5/22。由不同候选分别匹配两种参考的输入由 1/11 到 2/11。新输出中位 8 张，上轮 6 张。按原筛选顺序截到与上轮逐图同样的数量，仍为 5/22。两条被筛掉的达标参考出现在 `3ahiFlIHvDc_1_2-2` 和 `ndZc2mO-ab0_0_0-0`。新增输出 `XVozioVBMjw_2_0-0` 的闭合嘴形与参考更近，鼻周及额纹仍偏软。[新增候选对照](<D:/Data/Build/visual-analysis-dev/portrait-measured-moments-01/fvq-new-match-1.png>)
 
 Windows C++ 工具新增 `--mouth-variants`，直接读取本地 HR-noSA 模型和一张对齐的人脸候选，按给定开合量写 PNG 并重测。四张复核图与试验脚本输出的最大通道差为 1 个灰阶，每图平均通道差 <0.005。重复开合参数仅写一次，参数 `0.1junk` 被拒且不写结果目录。新增窄口版本使用原生 PNG 复评，在九种 ±0.5 像素的参考位置中通过五种，未移位时开合误差为 0.01635。两种已通过的宽窄候选再送原生 `--cover-shapes`，保留半径 0.055 时实际写出两张。[原生研究命令](../native/tools/portrait_candidates/README.md#生成不同嘴形的候选)
 
-真实曝光组在固定的整脸配对门槛下比较 64 张实拍参考。既有完整候选池为 22/64，加入此次分支后仍为 22/64，有任意参考过线的输入保持 7/16。CFMD 原生直出加回贴、眼鼻融合、嘴形候选各自覆盖 3、6、1 张。两种展示分别为 12/64 和 14/64，均来自 5/16 张输入。新展示在一张输入中用不同候选匹配多张参考，旧展示没有。该输入 `rb-00008-0964` 从 2 张实拍参考可匹配变为 4 张，其中至多 3 张可由不同候选一一匹配。对照仍可看出候选的眉眼细节偏软。每图展示数量的中位由 2 到 5。把新展示按筛选顺序截到同样的逐图数量，覆盖由 12/64 降为 8/64。[实拍结果对照](<D:/DevTools/visual-analysis-dev/portrait-measured-moments-01/rb-00008-0964-shown-comparison.png>)
+真实曝光组在固定的整脸配对门槛下比较 64 张实拍参考。既有完整候选池为 22/64，加入此次分支后仍为 22/64，有任意参考过线的输入保持 7/16。CFMD 原生直出加回贴、眼鼻融合、嘴形候选各自覆盖 3、6、1 张。两种展示分别为 12/64 和 14/64，均来自 5/16 张输入。新展示在一张输入中用不同候选匹配多张参考，旧展示没有。该输入 `rb-00008-0964` 从 2 张实拍参考可匹配变为 4 张，其中至多 3 张可由不同候选一一匹配。对照仍可看出候选的眉眼细节偏软。每图展示数量的中位由 2 到 5。把新展示按筛选顺序截到同样的逐图数量，覆盖由 12/64 降为 8/64。[实拍结果对照](<D:/Data/Build/visual-analysis-dev/portrait-measured-moments-01/rb-00008-0964-shown-comparison.png>)
 
-三张用户样例的候选在本机另存拼图。第一张眼鼻融合减轻了屏纹，第二张仍有明显屏纹，较宽的候选改变了嘴部轮廓。第三张仍没有形成清楚五官。三张缺少同一曝光的清晰原片，无法按留出组同样的方法核验。[三张用户样例对照](<D:/DevTools/visual-analysis-dev/portrait-measured-moments-01/three-user-cases.png>)
+三张用户样例的候选在本机另存拼图。第一张眼鼻融合减轻了屏纹，第二张仍有明显屏纹，较宽的候选改变了嘴部轮廓。第三张仍没有形成清楚五官。三张缺少同一曝光的清晰原片，无法按留出组同样的方法核验。[三张用户样例对照](<D:/Data/Build/visual-analysis-dev/portrait-measured-moments-01/three-user-cases.png>)
 
-两组所用候选和实际选中图复核放在 `D:/DevTools/visual-analysis-dev/portrait-measured-moments-01`。`{fvq,rb2v}-choices-seal.json` 保存打开清晰参考前冻结的清单，`{fvq,rb2v}-scores.json` 保存逐候选评分，`{fvq,rb2v}-fixed-budget.json` 保存等数量复核。正式应用集成待验收。
+两组所用候选和实际选中图复核放在 `D:/Data/Build/visual-analysis-dev/portrait-measured-moments-01`。`{fvq,rb2v}-choices-seal.json` 保存打开清晰参考前冻结的清单，`{fvq,rb2v}-scores.json` 保存逐候选评分，`{fvq,rb2v}-fixed-budget.json` 保存等数量复核。正式应用集成待验收。
 
 ### 核对等数量漏选与追加候选的覆盖变化
 
@@ -5071,13 +5071,13 @@ Windows C++ 工具新增 `--mouth-variants`，直接读取本地 HR-noSA 模型�
 | Jin 中心卷积调优组 | 13/64 | 16/64 | 15/16 |
 | Jin 分频残差组 | 12/64 | 17/64 | 16/16 |
 
-由至少一张候选配对过线的输入合计从 14/48 增到 20/48。可用不同候选分别匹配两张参考的输入共 5/48。多出的 12 张参考来自输出扩展。对照图仍可见部分追加图的眼口偏软，个别嘴部和头部有重影。三张用户屏拍均保留原选择，第二张屏纹和第三张重模糊仍然可见。[第一组实拍对照](<D:/DevTools/visual-analysis-dev/portrait-set-selector-01/same-native-comparison.png>) · [第三组实拍对照](<D:/DevTools/visual-analysis-dev/portrait-set-selector-01/third-native-comparison.png>) · [用户样例](<D:/DevTools/visual-analysis-dev/portrait-set-selector-01/private-native-comparison.png>)
+由至少一张候选配对过线的输入合计从 14/48 增到 20/48。可用不同候选分别匹配两张参考的输入共 5/48。多出的 12 张参考来自输出扩展。对照图仍可见部分追加图的眼口偏软，个别嘴部和头部有重影。三张用户屏拍均保留原选择，第二张屏纹和第三张重模糊仍然可见。[第一组实拍对照](<D:/Data/Build/visual-analysis-dev/portrait-set-selector-01/same-native-comparison.png>) · [第三组实拍对照](<D:/Data/Build/visual-analysis-dev/portrait-set-selector-01/third-native-comparison.png>) · [用户样例](<D:/Data/Build/visual-analysis-dev/portrait-set-selector-01/private-native-comparison.png>)
 
-Windows 原生 `--extend-shape-cover` 对 48 张实拍和三张用户图的选择与研究脚本逐张一致，实际保存的每张 PNG 均与选中输入像素相同。回放与五官距离相对脚本分别相差最多 2.92×10⁻⁸ 和 5.40×10⁻⁷。包含启动、读写与筛选的耗时中位数约 0.265 秒。完全相同的备选不会追加，无效保留数和半径不会建立输出。重构后的 `--cover-shapes` 在同一 23 张库中与已编译前版的代表序号和距离报告完全相同。原生选择清单和联合评分保存在 `D:/DevTools/visual-analysis-dev/portrait-set-selector-01`。[原生工具](../native/tools/portrait_candidates/README.md#在原结果后追加有观测支持的候选)
+Windows 原生 `--extend-shape-cover` 对 48 张实拍和三张用户图的选择与研究脚本逐张一致，实际保存的每张 PNG 均与选中输入像素相同。回放与五官距离相对脚本分别相差最多 2.92×10⁻⁸ 和 5.40×10⁻⁷。包含启动、读写与筛选的耗时中位数约 0.265 秒。完全相同的备选不会追加，无效保留数和半径不会建立输出。重构后的 `--cover-shapes` 在同一 23 张库中与已编译前版的代表序号和距离报告完全相同。原生选择清单和联合评分保存在 `D:/Data/Build/visual-analysis-dev/portrait-set-selector-01`。[原生工具](../native/tools/portrait_candidates/README.md#在原结果后追加有观测支持的候选)
 
 启用 `--landmarks` 后，追加图还需通过对每张原结果的关键点及局部像素差异检验。涉及 66 次配对。三组分别保留 12、10、8 张额外候选，通过的实拍参照分别为 14/64、15/64、14/64，合计 43/192，原展示为 37/192。至少匹配一张参考的输入为 18/48，原为 14/48。两张输入有不同候选分别匹配两份参考。这些数字是现有测试门槛的结果，支持筛选验证。更清楚的眉眼、唇缘以及更多未覆盖外观仍需由生成阶段解决。
 
-将关键点检验并入同一条 C++ 命令后，51 张的实际输出选择和保存像素逐张通过复核，缺少参数的调用未建立输出目录。对照中的第一张新增候选仍可看到眼周重影，第二张的眼镜位置更接近参考，面部细节仍偏软。正式应用集成待验收。[关键点检验后的实拍对照](<D:/DevTools/visual-analysis-dev/portrait-set-selector-01/verified-landmark-comparison.png>)
+将关键点检验并入同一条 C++ 命令后，51 张的实际输出选择和保存像素逐张通过复核，缺少参数的调用未建立输出目录。对照中的第一张新增候选仍可看到眼周重影，第二张的眼镜位置更接近参考，面部细节仍偏软。正式应用集成待验收。[关键点检验后的实拍对照](<D:/Data/Build/visual-analysis-dev/portrait-set-selector-01/verified-landmark-comparison.png>)
 
 ### 用无序短曝光配对监督四张生成候选
 
@@ -5094,13 +5094,13 @@ Windows 原生 `--extend-shape-cover` 对 48 张实拍和三张用户图的选�
 | 原 Windows 实际展示 | 14/64 | 15/64 | 14/64 | 43/192 |
 | Windows 严格筛选后实际展示 | 16/64 | 17/64 | 15/64 | 48/192 |
 
-两套模型的候选和新增的实际展示先冻结。全池补到四张此前没有达标候选的短曝光参考，其中三张来自无序模型。对这些参考分别进行九次横纵亚像素偏移复验，新图通过 8、7、9、6 次，旧池最接近的候选为 0、0、0、1 次。第一套覆盖排序没有把这四张候选写入最终展示，展示增加的五个命中均在已有达标输入上。至少一张参考过线的输入仍为 18/48，不同候选能分别匹配两份参考的输入由 2/48 增至 6/48。四份新增对照中仍可见眉眼模糊，部分侧脸有色斑。[原糊图、候选与短曝光对照](<D:/DevTools/visual-analysis-dev/portrait-unordered-refinement-01/new-reference-comparison.png>)
+两套模型的候选和新增的实际展示先冻结。全池补到四张此前没有达标候选的短曝光参考，其中三张来自无序模型。对这些参考分别进行九次横纵亚像素偏移复验，新图通过 8、7、9、6 次，旧池最接近的候选为 0、0、0、1 次。第一套覆盖排序没有把这四张候选写入最终展示，展示增加的五个命中均在已有达标输入上。至少一张参考过线的输入仍为 18/48，不同候选能分别匹配两份参考的输入由 2/48 增至 6/48。四份新增对照中仍可见眉眼模糊，部分侧脸有色斑。[原糊图、候选与短曝光对照](<D:/Data/Build/visual-analysis-dev/portrait-unordered-refinement-01/new-reference-comparison.png>)
 
 回顾性复验按回放误差由小到大逐一尝试，仍需通过同一原生关键点和像素门槛，最多追加一张。实际展示覆盖为 46/192，有达标候选的输入为 18/48，少于覆盖排序的 48/192。只按回放接近程度排序，仍无法稳定选出两张原来全漏的输入上的新达标候选。
 
-五份有数字原帧的实际屏拍复测，原展示为 2/5，追加后仍为 2/5；原拍摄图和去纹图分别驱动无序模型均为 0/5。用户第二、三张在这一条件对照中各新增一张实际输出，均来自原拍摄图的固定顺序模型。第二张仍可见屏纹，第三张眼口仍偏糊。第一张保持本试验的既有首图。三张均缺清晰原片。[实际选中图](<D:/DevTools/visual-analysis-dev/portrait-unordered-refinement-01/private-selected-comparison.png>)
+五份有数字原帧的实际屏拍复测，原展示为 2/5，追加后仍为 2/5；原拍摄图和去纹图分别驱动无序模型均为 0/5。用户第二、三张在这一条件对照中各新增一张实际输出，均来自原拍摄图的固定顺序模型。第二张仍可见屏纹，第三张眼口仍偏糊。第一张保持本试验的既有首图。三张均缺清晰原片。[实际选中图](<D:/Data/Build/visual-analysis-dev/portrait-unordered-refinement-01/private-selected-comparison.png>)
 
-`PortraitMoments.exe --refine-sequence` 将裁切后输入、七帧模型、两种模型之间的张量准备、脸区回贴和 PNG 写入串联为本地 C++ 命令。从单个输入文件开始，在 CPU 和 GPU 上复核了 12 张实际候选，和独立批次结果的最大通道差为 1 灰阶。图契约错误会中止且不发布结果。既有 CFMD 命令的重复控制参数仍只写一张，复验图逐像素相同。训练、选图和分数字段保存在 `D:/DevTools/visual-analysis-dev/portrait-unordered-refinement-01`，正式应用集成待验收。[原生命令](../native/tools/portrait_moments/README.md#从单张糊图生成四张联合训练的候选)
+`PortraitMoments.exe --refine-sequence` 将裁切后输入、七帧模型、两种模型之间的张量准备、脸区回贴和 PNG 写入串联为本地 C++ 命令。从单个输入文件开始，在 CPU 和 GPU 上复核了 12 张实际候选，和独立批次结果的最大通道差为 1 灰阶。图契约错误会中止且不发布结果。既有 CFMD 命令的重复控制参数仍只写一张，复验图逐像素相同。训练、选图和分数字段保存在 `D:/Data/Build/visual-analysis-dev/portrait-unordered-refinement-01`，正式应用集成待验收。[原生命令](../native/tools/portrait_moments/README.md#从单张糊图生成四张联合训练的候选)
 
 ### 分开检验不同外观与同组替换
 
@@ -5121,9 +5121,9 @@ Windows 原生 `--extend-shape-cover` 对 48 张实拍和三张用户图的选�
 | 另 8 张演示实拍，至少一份参考通过 | 2/8 | 2/8 | 3/8 |
 | 另 8 张演示实拍，展示图数量 | 12 | 12 | 24 |
 
-固定数量路线在 64 张输入中替换了 4 张。0494 新增一份可匹配的短曝光参考，新增一张有匹配的长曝光输入。固定数量组逐张回执的三组总计为 16、17、16，合计 49/192。仍能看到眼口偏软及耳部色斑。追加路线每接受一张就更新覆盖距离，失败后尝试下一张。每张追加图均逐对通过五官像素距离与 HR-noSA 检查，且实际 PNG 像素与选中图一致。仅取该路线第一张追加结果时，48 张实拍仍为 48/192，另 8 张为 3/32。五份屏拍多输出一张，分数无变化。[固定数量替换对照](<D:/DevTools/visual-analysis-dev/portrait-distinct-expansion-01/fixed-output-comparison.png>) · [不同外观追加对照](<D:/DevTools/visual-analysis-dev/portrait-distinct-expansion-01/expanded-comparison.png>)
+固定数量路线在 64 张输入中替换了 4 张。0494 新增一份可匹配的短曝光参考，新增一张有匹配的长曝光输入。固定数量组逐张回执的三组总计为 16、17、16，合计 49/192。仍能看到眼口偏软及耳部色斑。追加路线每接受一张就更新覆盖距离，失败后尝试下一张。每张追加图均逐对通过五官像素距离与 HR-noSA 检查，且实际 PNG 像素与选中图一致。仅取该路线第一张追加结果时，48 张实拍仍为 48/192，另 8 张为 3/32。五份屏拍多输出一张，分数无变化。[固定数量替换对照](<D:/Data/Build/visual-analysis-dev/portrait-distinct-expansion-01/fixed-output-comparison.png>) · [不同外观追加对照](<D:/Data/Build/visual-analysis-dev/portrait-distinct-expansion-01/expanded-comparison.png>)
 
-固定数量替换在三张用户图上均保持原选择。多候选路线实际输出 1、3、4 张。人工查看时，第二张多个候选的眼鼻口仍接近，同时保留大量屏纹。第三张的新增图仍看不清眼睛细节，主要差异在局部轮廓和亮度。这两张未达到清晰且五官明显不同的交付标准。三张用户图缺少清晰原片，真实外观覆盖仍无法核实。结果和回执保存在 `D:/DevTools/visual-analysis-dev/portrait-distinct-expansion-01`。两条命令用于 Windows 原生离线评估，主应用交付待验收。[用户样例二](<D:/DevTools/visual-analysis-dev/portrait-distinct-expansion-01/user--case-02-compare.png>) · [用户样例三](<D:/DevTools/visual-analysis-dev/portrait-distinct-expansion-01/user--case-03-compare.png>) · [原生工具](../native/tools/portrait_candidates/README.md#在原结果后追加有观测支持的候选)
+固定数量替换在三张用户图上均保持原选择。多候选路线实际输出 1、3、4 张。人工查看时，第二张多个候选的眼鼻口仍接近，同时保留大量屏纹。第三张的新增图仍看不清眼睛细节，主要差异在局部轮廓和亮度。这两张未达到清晰且五官明显不同的交付标准。三张用户图缺少清晰原片，真实外观覆盖仍无法核实。结果和回执保存在 `D:/Data/Build/visual-analysis-dev/portrait-distinct-expansion-01`。两条命令用于 Windows 原生离线评估，主应用交付待验收。[用户样例二](<D:/Data/Build/visual-analysis-dev/portrait-distinct-expansion-01/user--case-02-compare.png>) · [用户样例三](<D:/Data/Build/visual-analysis-dev/portrait-distinct-expansion-01/user--case-03-compare.png>) · [原生工具](../native/tools/portrait_candidates/README.md#在原结果后追加有观测支持的候选)
 
 最终 Windows 原生工具对 64 张图逐张复现固定数量选图，输出 PNG 与所选输入像素相同，四次替换的回放改善值相差小于 2×10⁻⁷。多候选编译版复测了全部追加两张以上的输入及三张用户图，共 24 张，选择回执完全一致。另验证了追加上限为 0、同一输入重复提供、非法候选数量，以及旧命令在未传上限时的回执兼容性。
 
@@ -5137,7 +5137,7 @@ Windows 原生 `--extend-shape-cover` 对 48 张实拍和三张用户图的选�
 
 Windows 原生工具直接从一张 512 像素对齐输入推理，增加成对的批量参数并复用编译图和推理请求。三个样本的 12 张实际成图在 CPU 与 Intel GPU.0 间每通道最多差 1 灰阶。512 带通监督图各候选阶段中位用时 0.0967 秒和 0.0714 秒，含 PNG 写入。初始七帧生成与模型装载另计。两套 CPU ONNX 的探针张量分别与训练框架相差最多 1.49×10⁻⁷、1.19×10⁻⁷。192 路线的旧版与新版原生工具逐像素一致，错传模型和未配对的命令参数均被拒绝且未发布目录。[Windows 原生命令](../native/tools/portrait_moments/README.md#从单张糊图生成四张联合训练的候选)
 
-在原样输入之外，带通监督模型另从本地屏纹相位处理后的输入生成候选。五张有数字原帧的实际屏拍及三张用户照片共生成 32 张，均核对到 GPU.0。五张屏拍的原样输入路线和相位处理路线均为 0/5。用户第二张的屏纹略轻，眼区仍有较重暗影。第三张的眼口仍有重影。两张未达到清晰候选的目视标准，三张用户照片亦无清晰原片可核实外观。[第二张的两条输入路线](<D:/DevTools/visual-analysis-dev/portrait-full-resolution-detail-01/user--case-02-two-input-routes.png>) · [第三张的两条输入路线](<D:/DevTools/visual-analysis-dev/portrait-full-resolution-detail-01/user--case-03-two-input-routes.png>)
+在原样输入之外，带通监督模型另从本地屏纹相位处理后的输入生成候选。五张有数字原帧的实际屏拍及三张用户照片共生成 32 张，均核对到 GPU.0。五张屏拍的原样输入路线和相位处理路线均为 0/5。用户第二张的屏纹略轻，眼区仍有较重暗影。第三张的眼口仍有重影。两张未达到清晰候选的目视标准，三张用户照片亦无清晰原片可核实外观。[第二张的两条输入路线](<D:/Data/Build/visual-analysis-dev/portrait-full-resolution-detail-01/user--case-02-two-input-routes.png>) · [第三张的两条输入路线](<D:/Data/Build/visual-analysis-dev/portrait-full-resolution-detail-01/user--case-03-two-input-routes.png>)
 
 两套原样输入模型各对 64 张图生成四个候选，共 512 张，实际使用 GPU.0。冻结生成文件和原生选图回执后再核对参考，同一批 48 张实拍的 192 份参考沿用此前门槛。另 8 张演示实拍与这 48 张没有重复曝光编号，来自同一官方测试拍摄分组。256 张等幅对照的脸区细频幅度相对误差中位为 0.0147%，最大为 0.0587%。
 
@@ -5152,9 +5152,9 @@ Windows 原生工具直接从一张 512 像素对齐输入推理，增加成对�
 | 原实际展示，固定数量替换后 | 49/192 | 2/32 | 2/5 |
 | 本轮实际展示，每张最多追加一个备选 | 49/192 | 6/32 | 2/5 |
 
-同一批 48 张实际展示 139 张，上轮 118 张，至少一张候选通过的输入保持 19/48。完整候选池覆盖增加来自 `rb-00009-0006` 和 `rb-00009-0691` 的短曝光参考；新增候选均未进入实际展示。另 8 张的实际展示由 12 张增加到 19 张，有至少一份参考通过的输入由 2/8 增至 4/8。对照可见个别新增候选仍有眉眼重影和鼻部色斑。用户三张实际选图分别为 1、3、3 张，人工核对仍无法确认新增图达到清晰和明显不同的外观要求。两套模型用于本机原生工具试验，正式应用交付待验收。[实拍参考对照](<D:/DevTools/visual-analysis-dev/portrait-full-resolution-detail-01/novel-reference-comparison.png>) · [三张用户图的实际选图](<D:/DevTools/visual-analysis-dev/portrait-full-resolution-detail-01/private-actual-selected.png>)
+同一批 48 张实际展示 139 张，上轮 118 张，至少一张候选通过的输入保持 19/48。完整候选池覆盖增加来自 `rb-00009-0006` 和 `rb-00009-0691` 的短曝光参考；新增候选均未进入实际展示。另 8 张的实际展示由 12 张增加到 19 张，有至少一份参考通过的输入由 2/8 增至 4/8。对照可见个别新增候选仍有眉眼重影和鼻部色斑。用户三张实际选图分别为 1、3、3 张，人工核对仍无法确认新增图达到清晰和明显不同的外观要求。两套模型用于本机原生工具试验，正式应用交付待验收。[实拍参考对照](<D:/Data/Build/visual-analysis-dev/portrait-full-resolution-detail-01/novel-reference-comparison.png>) · [三张用户图的实际选图](<D:/Data/Build/visual-analysis-dev/portrait-full-resolution-detail-01/private-actual-selected.png>)
 
-将新匹配的两份短曝光参考横纵各平移 −0.5、0 或 0.5 像素，0691 的候选在 9 个位置都通过，0006 的候选在 5 个位置通过。训练记录、独立区域检查和联合评分归档在 `D:/DevTools/visual-analysis-dev/portrait-full-resolution-detail-01`。`reconciled.json` 将同名的历史 RGB 候选与新增 512 像素候选分开计分，并与此前 `paired-audit.json` 的实际展示逐组核对。
+将新匹配的两份短曝光参考横纵各平移 −0.5、0 或 0.5 像素，0691 的候选在 9 个位置都通过，0006 的候选在 5 个位置通过。训练记录、独立区域检查和联合评分归档在 `D:/Data/Build/visual-analysis-dev/portrait-full-resolution-detail-01`。`reconciled.json` 将同名的历史 RGB 候选与新增 512 像素候选分开计分，并与此前 `paired-audit.json` 的实际展示逐组核对。
 
 ### 等数量替换复核和七帧模型的中间候选
 
@@ -5162,7 +5162,7 @@ Windows 原生工具直接从一张 512 像素对齐输入推理，增加成对�
 
 以最近实际展示为前缀，复测两种固定数量替换。旧路线逐图拟合，另一条路线把已展示候选按非负、总和为 1 的权重在近似线性亮度上混合。四折交错图块中，每折在训练块为旧候选固定共用模糊、平移和亮度，分别为旧组合及替换组合重估权重。取留出块的误差。至少四折均改善 2% 且 0.00006，新候选在四折的拟合权重均不小于 0.08。再要求新候选与被替换者接近、与其余已展示图明显不同。合成双帧口形控制中新帧的真实混合权重为 0.43，四折估计在 0.389–0.428。故意移错位置的控制及完全相同的控制均未获选。这些权重只描述回放拟合。单幅曝光中的候选出现顺序无法由加权平均决定。[RB2V-Face 成像和时间插值方法](https://openaccess.thecvf.com/content/CVPR2023/html/Pham_HyperCUT_Video_Sequence_From_a_Single_Blurry_Image_Using_Unsupervised_CVPR_2023_paper.html)
 
-64 张的固定数量实验中，逐图拟合替换 3 张，联合拟合替换 5 张。同一批 48 张实拍的参考覆盖从 49/192 分别降到 42/192 和 47/192，均无新增匹配。另 8 张实拍保持 6/32，五张屏摄保持 2/5。0006 的联合回放有一折误差变高，0691 四折均变高。复测说明同一张糊图的回放改善无法单独作为替换高召回候选的依据。替换继续沿用原输出作为基线。记录保存在 `D:/DevTools/visual-analysis-dev/portrait-joint-exposure-representatives-01`。
+64 张的固定数量实验中，逐图拟合替换 3 张，联合拟合替换 5 张。同一批 48 张实拍的参考覆盖从 49/192 分别降到 42/192 和 47/192，均无新增匹配。另 8 张实拍保持 6/32，五张屏摄保持 2/5。0006 的联合回放有一折误差变高，0691 四折均变高。复测说明同一张糊图的回放改善无法单独作为替换高召回候选的依据。替换继续沿用原输出作为基线。记录保存在 `D:/Data/Build/visual-analysis-dev/portrait-joint-exposure-representatives-01`。
 
 生成侧增加 `--positions` 以输出原先跳过的 2、4、6，只读同一张糊图。作者归档的偶数位置参考来自时间插值，评价仍用 1、3、5、7 的实拍短曝光，并把新增图与每份实拍参考分别比较。带通监督模型原训练用的相位值为 1 和 1/3，新增位置使用 2/3、0、2/3。该复测检验现有模型在这些新增条件下的实际结果。[Windows 原生命令](../native/tools/portrait_moments/README.md#从单张糊图生成四张联合训练的候选)
 
@@ -5174,11 +5174,11 @@ Windows 原生工具直接从一张 512 像素对齐输入推理，增加成对�
 | 原实际展示 | 49/192 | 6/32 | 2/5 |
 | 原生工具以原输出为前缀，每图最多追加一个 | 49/192 | 8/32 | 2/5 |
 
-另 8 张中，至少一份实拍参考通过的输入保持 4/8，新增一张输入通过不同候选分别匹配两份参考。完整池新增覆盖 `rb-00009-0135` 和 `rb-00008-0269` 各一份，两张候选仍未进入实际展示。展示增量主要来自已有覆盖输入。48 张实拍、另 8 张和三张用户图分别新增展示 4、3、0 张。实际追加图均通过原有回放、带通距离和关键点差异检验。三张用户图的候选仍可见第二张的屏纹和第三张的重影，缺少清晰原片核实外观。[三张用户图的新增生成对照](<D:/DevTools/visual-analysis-dev/portrait-joint-exposure-representatives-01/mid-private.png>) · [候选池新增匹配](<D:/DevTools/visual-analysis-dev/portrait-joint-exposure-representatives-01/mid-new-reference-comparison.png>)
+另 8 张中，至少一份实拍参考通过的输入保持 4/8，新增一张输入通过不同候选分别匹配两份参考。完整池新增覆盖 `rb-00009-0135` 和 `rb-00008-0269` 各一份，两张候选仍未进入实际展示。展示增量主要来自已有覆盖输入。48 张实拍、另 8 张和三张用户图分别新增展示 4、3、0 张。实际追加图均通过原有回放、带通距离和关键点差异检验。三张用户图的候选仍可见第二张的屏纹和第三张的重影，缺少清晰原片核实外观。[三张用户图的新增生成对照](<D:/Data/Build/visual-analysis-dev/portrait-joint-exposure-representatives-01/mid-private.png>) · [候选池新增匹配](<D:/Data/Build/visual-analysis-dev/portrait-joint-exposure-representatives-01/mid-new-reference-comparison.png>)
 
-另外 8 张实拍的两份展示增量都来自 `rb-00010-0156` 的第 6 个位置。使用实际写出的 PNG 重评分，两份实拍短曝光参考在各自九种 ±0.5 像素的横纵配准位置上均通过。并排检查仍可见鼻侧紫黄色斑，眼部也比短曝光参照更软。[实际新增展示](<D:/DevTools/visual-analysis-dev/portrait-joint-exposure-representatives-01/mid-shown-gains.png>)
+另外 8 张实拍的两份展示增量都来自 `rb-00010-0156` 的第 6 个位置。使用实际写出的 PNG 重评分，两份实拍短曝光参考在各自九种 ±0.5 像素的横纵配准位置上均通过。并排检查仍可见鼻侧紫黄色斑，眼部也比短曝光参照更软。[实际新增展示](<D:/Data/Build/visual-analysis-dev/portrait-joint-exposure-representatives-01/mid-shown-gains.png>)
 
-复用 FVQ-20K 的四段隔离视频、11 个模拟曝光窗口，每个窗口保留两张实际参与混合且开口有区别的原视频帧。联合门槛仍包含开口比例误差不超过 0.025。512 像素带通模型的四个原位置覆盖 3/22，七个位置覆盖 4/22，且均未同时通过某一窗口的两种参考。与已有候选池联合后从 8/22 到 10/22，新覆盖的两份参考各自也可用该模型的第 7 个位置匹配。可用两张不同候选分别匹配同一窗口两份参考的数量仍为 2/11。77 张由 Windows GPU.0 实际生成。曝光由原视频帧混合，因此这组作为独立来源的模拟对照。[FVQ-20K 原视频](https://huggingface.co/datasets/Human-X/FVQ-20K) · [视频帧对照](<D:/DevTools/visual-analysis-dev/portrait-joint-exposure-representatives-01/fvq-new-reference.png>)
+复用 FVQ-20K 的四段隔离视频、11 个模拟曝光窗口，每个窗口保留两张实际参与混合且开口有区别的原视频帧。联合门槛仍包含开口比例误差不超过 0.025。512 像素带通模型的四个原位置覆盖 3/22，七个位置覆盖 4/22，且均未同时通过某一窗口的两种参考。与已有候选池联合后从 8/22 到 10/22，新覆盖的两份参考各自也可用该模型的第 7 个位置匹配。可用两张不同候选分别匹配同一窗口两份参考的数量仍为 2/11。77 张由 Windows GPU.0 实际生成。曝光由原视频帧混合，因此这组作为独立来源的模拟对照。[FVQ-20K 原视频](https://huggingface.co/datasets/Human-X/FVQ-20K) · [视频帧对照](<D:/Data/Build/visual-analysis-dev/portrait-joint-exposure-representatives-01/fvq-new-reference.png>)
 
 Windows 原生生成 64 张图的 192 份新增位置候选，日志均为 GPU.0。两张代表性输入的六张图在 CPU 与 GPU 间相差最多每通道 1 灰阶，同一批单张细化及写入的中位耗时分别为 0.215 和 0.086 秒，不含七帧生成及启动。自定义顺序 `7,3,1,5` 及默认顺序的同位置输出与上轮 PNG 像素一致。超出范围、重复位置及缺少位置的列表被拒绝且未发布目标目录。所有留出参照在生成和展示清单冻结后计分，前述统计均为既有联合门槛的配对结果，主应用交付待验收。
 
@@ -5186,7 +5186,7 @@ Windows 原生生成 64 张图的 192 份新增位置候选，日志均为 GPU.0
 
 取同一糊图的两个 512 像素带通候选，按固定的第 1 与 7、第 3 与 5 个位置配对。用 HR-noSA 的两套点位界定共同的双眼或嘴部区域。在两个候选上用同一羽化窗，从一张向另一张转移局部线性 RGB 差分，同时反向转移等量差分。对等权的两个时刻，量化前逐像素平均不变，保留其余时刻时整个序列的平均也不变。大姿态偏移、遮罩边缘差异过大或变化不到 16 个像素的区域跳过。该试验固定局部交换、同权时刻和共同坐标，保留的是前一组候选的模拟曝光。真实相机曝光与先前近似回放仍存在偏差。[时间曝光积分模型](https://openaccess.thecvf.com/content/CVPR2023/html/Pham_HyperCUT_Video_Sequence_From_a_Single_Blurry_Image_Using_Unsupervised_CVPR_2023_paper.html) · [原生研究命令](../native/tools/portrait_candidates/README.md#重组同一曝光的两个候选)
 
-在人工构造的清晰图上，将「闭眼张嘴」及「睁眼闭嘴」重组为「睁眼张嘴」及「闭眼闭嘴」，成图与对应预期组合逐像素相同，8 位成图解码后的线性平均仍相同。另验证鼻部参考偏移 20 像素、外围加亮 35 灰阶的控制分别被拒绝。交换两张输入的顺序会交换两张输出，重复提供同一张图只写回执。非法参数及尺寸未发布目录。[精确等曝光控制](<D:/DevTools/visual-analysis-dev/portrait-exposure-recombination-01/equal-exposure-control.png>)
+在人工构造的清晰图上，将「闭眼张嘴」及「睁眼闭嘴」重组为「睁眼张嘴」及「闭眼闭嘴」，成图与对应预期组合逐像素相同，8 位成图解码后的线性平均仍相同。另验证鼻部参考偏移 20 像素、外围加亮 35 灰阶的控制分别被拒绝。交换两张输入的顺序会交换两张输出，重复提供同一张图只写回执。非法参数及尺寸未发布目录。[精确等曝光控制](<D:/Data/Build/visual-analysis-dev/portrait-exposure-recombination-01/equal-exposure-control.png>)
 
 75 个输入共处理 150 对候选，每对分别尝试双眼和嘴。215 次区域交换通过，合计 430 张图；84 次因姿态差跳过，一次因区域尺寸跳过。独立解码核对了每张 PNG。两候选量化前的线性平均数值误差最大为 1.11×10⁻¹⁶。将成图放回七帧计算 128 像素回放，改动前后线性 RGB 均方根差的中位为 2.89×10⁻⁶，最大 1.12×10⁻⁵。原七帧模拟回放与糊图之间的误差中位仍为 0.002919。新框架约束了修改带来的回放差，原有成像模型的偏差依然存在。
 
@@ -5198,11 +5198,11 @@ Windows 原生生成 64 张图的 192 份新增位置候选，日志均为 GPU.0
 | 原实际展示 | 49/192 | 8/32 | 2/5 |
 | 保留原展示、每图最多追加一个重组候选 | 50/192 | 8/32 | 2/5 |
 
-两份新增的实拍参考来自 `rb-00009-0908` 和 `rb-00008-0224`。后者的交换眼部候选进入实际展示，前者留在候选池。两份参考在横纵各 ±0.5 像素的九种配准位置中分别有六种通过。能用两张不同的实际展示图分别匹配原参考的输入，同一批 48 张从 6 增至 8，另 8 张从 1 增至 2。对照仍可看到新增入选图的口部偏软及眼周色斑。上述评测使用冻结后的独立短曝光参照和既有联合门槛。[新增实拍对照](<D:/DevTools/visual-analysis-dev/portrait-exposure-recombination-01/real-comparison.png>)
+两份新增的实拍参考来自 `rb-00009-0908` 和 `rb-00008-0224`。后者的交换眼部候选进入实际展示，前者留在候选池。两份参考在横纵各 ±0.5 像素的九种配准位置中分别有六种通过。能用两张不同的实际展示图分别匹配原参考的输入，同一批 48 张从 6 增至 8，另 8 张从 1 增至 2。对照仍可看到新增入选图的口部偏软及眼周色斑。上述评测使用冻结后的独立短曝光参照和既有联合门槛。[新增实拍对照](<D:/Data/Build/visual-analysis-dev/portrait-exposure-recombination-01/real-comparison.png>)
 
-三张用户图各生成 8、8、4 张重组候选。自动规则实际保留 1、4、4 张，第二张新增口部组合，第三张新增眼部组合。查看拼图时第二张仍有规则屏纹，第三张的眼口仍重影，新增图的整体外观与原展示接近。三张均无清晰原片，自动通过差异门槛的两个新增结果仍未达到清晰且五官明显不同的目视标准。主应用交付待验收。[三张用户图的选择对照](<D:/DevTools/visual-analysis-dev/portrait-exposure-recombination-01/private-shown.png>)
+三张用户图各生成 8、8、4 张重组候选。自动规则实际保留 1、4、4 张，第二张新增口部组合，第三张新增眼部组合。查看拼图时第二张仍有规则屏纹，第三张的眼口仍重影，新增图的整体外观与原展示接近。三张均无清晰原片，自动通过差异门槛的两个新增结果仍未达到清晰且五官明显不同的目视标准。主应用交付待验收。[三张用户图的选择对照](<D:/Data/Build/visual-analysis-dev/portrait-exposure-recombination-01/private-shown.png>)
 
-四段独立 FVQ 视频的 11 个模拟曝光窗口沿用 22 份原视频参考和 0.025 开口误差门槛。重组候选单独覆盖 1/22，与原库合并后仍为 10/22，能用不同候选同时匹配两个参考的窗口仍为 2/11。Windows 原生控制、公开样例的五组三种展示及形状覆盖回归、仓库 33 项测试通过。回放及筛选记录保存在 `D:/DevTools/visual-analysis-dev/portrait-exposure-recombination-01`。
+四段独立 FVQ 视频的 11 个模拟曝光窗口沿用 22 份原视频参考和 0.025 开口误差门槛。重组候选单独覆盖 1/22，与原库合并后仍为 10/22，能用不同候选同时匹配两个参考的窗口仍为 2/11。Windows 原生控制、公开样例的五组三种展示及形状覆盖回归、仓库 33 项测试通过。回放及筛选记录保存在 `D:/Data/Build/visual-analysis-dev/portrait-exposure-recombination-01`。
 
 ### MaDENN 与同设置 CodeFormer 的直接生成对照
 
@@ -5222,13 +5222,13 @@ Windows 原生生成 64 张图的 192 份新增位置候选，日志均为 GPU.0
 | 允许从两套模型追加后的实际展示 | 51 | 9 | 2 |
 | 只允许追加 MaDENN 后的实际展示 | 51 | 9 | 2 |
 
-主批次追加展示 30 张，只新增覆盖一份参考。有至少一份参考通过的输入由 19/48 到 20/48，可由两张不同展示候选分别匹配两份参考的输入保持 8/48。新增实际展示匹配为 `rb-00009-0605` 和另八张中的 `rb-00008-0099`，横纵分别移 ±0.5 像素的九个位置中通过 7、9 个。完整候选池中新通过的 `rb-00009-0298`、`rb-00009-0006` 和 `p40_2-part5-0041` 分别通过 9、4、6 个位置。对照可见个别胜出的眼部仍偏软，屏拍胜出图也仍有局部网状纹理。四段独立 FVQ 视频的 11 个模拟曝光窗口仍为 10/22，新增两套模型单独均未过整脸及开口门槛。[独立实拍参考对照](<D:/DevTools/visual-analysis-dev/portrait-madenn-01/novel-captured-comparison.png>)
+主批次追加展示 30 张，只新增覆盖一份参考。有至少一份参考通过的输入由 19/48 到 20/48，可由两张不同展示候选分别匹配两份参考的输入保持 8/48。新增实际展示匹配为 `rb-00009-0605` 和另八张中的 `rb-00008-0099`，横纵分别移 ±0.5 像素的九个位置中通过 7、9 个。完整候选池中新通过的 `rb-00009-0298`、`rb-00009-0006` 和 `p40_2-part5-0041` 分别通过 9、4、6 个位置。对照可见个别胜出的眼部仍偏软，屏拍胜出图也仍有局部网状纹理。四段独立 FVQ 视频的 11 个模拟曝光窗口仍为 10/22，新增两套模型单独均未过整脸及开口门槛。[独立实拍参考对照](<D:/Data/Build/visual-analysis-dev/portrait-madenn-01/novel-captured-comparison.png>)
 
 去掉对照模型的新增候选后，保持其余选择规则，重新生成 64 张输入的原生展示结果。三个配对批次共追加 25 张，比两路都可追加时少 12 张，保留相同的两份展示匹配。只允许追加 MaDENN 时，用户样图仅第三张追加一张，新增图仍可见重影。
 
-三张用户图的两套直出均更清楚。第一张的新图仍有眼形和唇形差别，第二张的鼻口更清楚，眼睛还在暗带里。筛选只在第一、三张追加了同设置 CodeFormer。第三张的 MaDENN、原展示首张和同设置 CodeFormer 的亮度回放误差依次为 0.00808、0.01472、0.00940，带通响应为输入的 2.72、0.92、2.18 倍。第三张尚有眼口重影和无法与清晰原片核实的发丝。第二张的观测带通强度受到规则屏纹影响。用脸外区域估计屏纹并预处理后，MaDENN 在第一、二张的同组回放误差略降，五官差异仍不足以追加。固定软窗只回贴五官、像素保护窗外的试验也未增加此前入选的候选。三张样图均无清晰原片，亮度回放只测量模拟拍摄后的吻合度。[三张案例生成与回放](<D:/DevTools/visual-analysis-dev/portrait-madenn-01/full-case-replay.png>) · [保护屏纹预处理对照](<D:/DevTools/visual-analysis-dev/portrait-madenn-01/phase-compare.png>)
+三张用户图的两套直出均更清楚。第一张的新图仍有眼形和唇形差别，第二张的鼻口更清楚，眼睛还在暗带里。筛选只在第一、三张追加了同设置 CodeFormer。第三张的 MaDENN、原展示首张和同设置 CodeFormer 的亮度回放误差依次为 0.00808、0.01472、0.00940，带通响应为输入的 2.72、0.92、2.18 倍。第三张尚有眼口重影和无法与清晰原片核实的发丝。第二张的观测带通强度受到规则屏纹影响。用脸外区域估计屏纹并预处理后，MaDENN 在第一、二张的同组回放误差略降，五官差异仍不足以追加。固定软窗只回贴五官、像素保护窗外的试验也未增加此前入选的候选。三张样图均无清晰原片，亮度回放只测量模拟拍摄后的吻合度。[三张案例生成与回放](<D:/Data/Build/visual-analysis-dev/portrait-madenn-01/full-case-replay.png>) · [保护屏纹预处理对照](<D:/Data/Build/visual-analysis-dev/portrait-madenn-01/phase-compare.png>)
 
-两套检查点的码本和生成器共 165 个权重张量逐字节相同。另生成外部张量共用的 ONNX，MaDENN 新增权重从 376,450,880 降至 239,154,432 字节。独立重跑一张实拍和第三张用户图，GPU 输出与完整权重版本逐像素相同。本机目录 `D:/DevTools/visual-analysis-dev/portrait-madenn-01` 保留 `export.json`、`parity.json`、`paired.json`、`paired-madenn-only.json`、`fvq.json`、`full-case-replay.json` 和 `delta.json`。既有公开原生选择回归和仓库 33 项测试通过。主应用的生成方案仍待交付验收。
+两套检查点的码本和生成器共 165 个权重张量逐字节相同。另生成外部张量共用的 ONNX，MaDENN 新增权重从 376,450,880 降至 239,154,432 字节。独立重跑一张实拍和第三张用户图，GPU 输出与完整权重版本逐像素相同。本机目录 `D:/Data/Build/visual-analysis-dev/portrait-madenn-01` 保留 `export.json`、`parity.json`、`paired.json`、`paired-madenn-only.json`、`fvq.json`、`full-case-replay.json` 和 `delta.json`。既有公开原生选择回归和仓库 33 项测试通过。主应用的生成方案仍待交付验收。
 
 ### 由同一张糊图的两个曝光端点推断不同码本候选
 
@@ -5248,17 +5248,17 @@ ONNX 编码和解码图共用同一个本地权重文件。每次传入原图最
 | 上轮实际展示 | 51 | 9 | 2 |
 | 允许追加一个端点候选后的实际展示 | 53 | 9 | 2 |
 
-主批次实际追加 21 张。有至少一份参考达标的输入从 20/48 到 21/48，能用两张不同实际候选分别匹配两份参考的输入从 8/48 到 9/48。`rb-00009-0673` 第 3 份和 `rb-00008-0099` 第 7 份补进实际展示，九种半像素参考配准分别通过 9 和 8 种。另有两份新匹配只进入候选池，九种配准均通过 5 种。新增图仍有不同程度的眉眼柔化与短曝光外观差别。FVQ 的 11 个模拟窗口继续为 10/22，端点两路均未过该组整脸及开口门槛。[新增实拍配对对照](<D:/DevTools/visual-analysis-dev/portrait-exposure-latent-01/gains.png>)
+主批次实际追加 21 张。有至少一份参考达标的输入从 20/48 到 21/48，能用两张不同实际候选分别匹配两份参考的输入从 8/48 到 9/48。`rb-00009-0673` 第 3 份和 `rb-00008-0099` 第 7 份补进实际展示，九种半像素参考配准分别通过 9 和 8 种。另有两份新匹配只进入候选池，九种配准均通过 5 种。新增图仍有不同程度的眉眼柔化与短曝光外观差别。FVQ 的 11 个模拟窗口继续为 10/22，端点两路均未过该组整脸及开口门槛。[新增实拍配对对照](<D:/Data/Build/visual-analysis-dev/portrait-exposure-latent-01/gains.png>)
 
-用新图分别替换七帧模拟曝光的两个端点。在主批次的 34/48，脸区线性光强回放误差下降。另 8 张则为 2/8，五张屏拍及三张用户图均未下降。三张用户图的脸区回放误差中位由 0.01351 到 0.01691。自动规则给用户第二、三张各追加末端候选。第二张眼睛仍在暗带内，第三张眼口仍有重影，端点之间的目视外观差别有限。该回放检查使用七帧等权近似，三张用户图均缺少清晰原片。[三张用户案例候选](<D:/DevTools/visual-analysis-dev/portrait-exposure-latent-01/three-cases.png>) · [七帧模拟回放](<D:/DevTools/visual-analysis-dev/portrait-exposure-latent-01/three-replays.png>)
+用新图分别替换七帧模拟曝光的两个端点。在主批次的 34/48，脸区线性光强回放误差下降。另 8 张则为 2/8，五张屏拍及三张用户图均未下降。三张用户图的脸区回放误差中位由 0.01351 到 0.01691。自动规则给用户第二、三张各追加末端候选。第二张眼睛仍在暗带内，第三张眼口仍有重影，端点之间的目视外观差别有限。该回放检查使用七帧等权近似，三张用户图均缺少清晰原片。[三张用户案例候选](<D:/Data/Build/visual-analysis-dev/portrait-exposure-latent-01/three-cases.png>) · [七帧模拟回放](<D:/Data/Build/visual-analysis-dev/portrait-exposure-latent-01/three-replays.png>)
 
-按端点编码差异在三个实拍子组各取最高两张和最低两张，再加入三张用户图作机制对照。保持每张图的编码，将 32、64 像素融合强度降为 0.15、0.25，另外两层仍为 0.50。30 张对照经同一 DirectML 解码。15 张输入中，固定融合有 5 张获准追加，减弱粗层后有 11 张获准追加。两种候选在这十二段实拍的 48 份参考上均未通过，运行入口采用已在整批数据补到参考的固定融合方案。[三张案例的融合强度对照](<D:/DevTools/visual-analysis-dev/portrait-exposure-latent-01/coarse-private.png>)
+按端点编码差异在三个实拍子组各取最高两张和最低两张，再加入三张用户图作机制对照。保持每张图的编码，将 32、64 像素融合强度降为 0.15、0.25，另外两层仍为 0.50。30 张对照经同一 DirectML 解码。15 张输入中，固定融合有 5 张获准追加，减弱粗层后有 11 张获准追加。两种候选在这十二段实拍的 48 份参考上均未通过，运行入口采用已在整批数据补到参考的固定融合方案。[三张案例的融合强度对照](<D:/Data/Build/visual-analysis-dev/portrait-exposure-latent-01/coarse-private.png>)
 
-仓库的单图入口以 `rb-00009-0673` 的糊图复跑，两张端点种子和两张成图均与批次结果逐像素一致。独立重建的 `PortraitCodes.exe` 对 `rb-00008-0494` 的原生编码与之前的对应设备逐字节一致，CPU 和 GPU 成图分别最多差 1 和 0 个灰阶。并发写同一个 Unicode 路径时只有一个进程成功，写出的编码与冻结清单一致。单图入口保留已有输出，会在载入模型前拒绝损坏的图片。仓库 33 项测试通过。逐图评分、回放、单图校验和设备日志保存在 `D:/DevTools/visual-analysis-dev/portrait-exposure-latent-01`，正式应用的生成流程仍待验收。
+仓库的单图入口以 `rb-00009-0673` 的糊图复跑，两张端点种子和两张成图均与批次结果逐像素一致。独立重建的 `PortraitCodes.exe` 对 `rb-00008-0494` 的原生编码与之前的对应设备逐字节一致，CPU 和 GPU 成图分别最多差 1 和 0 个灰阶。并发写同一个 Unicode 路径时只有一个进程成功，写出的编码与冻结清单一致。单图入口保留已有输出，会在载入模型前拒绝损坏的图片。仓库 33 项测试通过。逐图评分、回放、单图校验和设备日志保存在 `D:/Data/Build/visual-analysis-dev/portrait-exposure-latent-01`，正式应用的生成流程仍待验收。
 
 ### 同一长曝光的中间时刻与已观测外观覆盖
 
-保留上轮 75 张输入和已有的端点成图。把七帧模型输出的第 3、5 个位置分别送入同一 MaDENN 编码图，复用糊图编码，按原面区权重选择新增的 16×16 码本。解码仍以原糊图提供跳接。150 次编码与 150 次解码均有 DirectML 执行记录。两个中间位置的编码差异中位数为 33 个单元，范围为 8–55 个。三个用户样例分别有 12、33、40 个单元不同。根据原有差异和回放门槛，保留已有展示，最多追加一张中间图。成图及选择清单冻结后，才用清晰参考评分。[三个案例的端点和中间成图](<D:/DevTools/visual-analysis-dev/portrait-latent-intermediate-01/early-three-cases.png>)
+保留上轮 75 张输入和已有的端点成图。把七帧模型输出的第 3、5 个位置分别送入同一 MaDENN 编码图，复用糊图编码，按原面区权重选择新增的 16×16 码本。解码仍以原糊图提供跳接。150 次编码与 150 次解码均有 DirectML 执行记录。两个中间位置的编码差异中位数为 33 个单元，范围为 8–55 个。三个用户样例分别有 12、33、40 个单元不同。根据原有差异和回放门槛，保留已有展示，最多追加一张中间图。成图及选择清单冻结后，才用清晰参考评分。[三个案例的端点和中间成图](<D:/Data/Build/visual-analysis-dev/portrait-latent-intermediate-01/early-three-cases.png>)
 
 | 候选或展示 | 同批 48 张实拍，192 份参考 | 另 8 张实拍，32 份参考 | 5 张实拍屏摄 |
 | --- | ---: | ---: | ---: |
@@ -5268,7 +5268,7 @@ ONNX 编码和解码图共用同一个本地权重文件。每次传入原图最
 | 保留既有库并允许追加两张中间图后的候选池 | 95 | 21 | 3 |
 | 保留旧展示并允许追加一张中间图后的实际展示 | 53 | 9 | 2 |
 
-完整候选池和实际展示的配对覆盖与上一轮相同。主批次实际追加 7 张，另外 8 张中追加 2 张，三张用户样例的既有展示都未增加。11 个模拟曝光窗口仍是 10/22 份参考通过，能由不同候选覆盖两种参考的窗口为 2/11。首、末和两个中间位置共同替换到七帧模型中时，48 张实拍的脸区线性光强回放误差中位数从只替换端点的 0.00266 升到 0.00462，75 张均无下降。该检查采用七帧等权近似。用户第三张中间成图仍见眼口重影。[四个位置的模拟曝光对照](<D:/DevTools/visual-analysis-dev/portrait-latent-intermediate-01/four-position-replay.png>)
+完整候选池和实际展示的配对覆盖与上一轮相同。主批次实际追加 7 张，另外 8 张中追加 2 张，三张用户样例的既有展示都未增加。11 个模拟曝光窗口仍是 10/22 份参考通过，能由不同候选覆盖两种参考的窗口为 2/11。首、末和两个中间位置共同替换到七帧模型中时，48 张实拍的脸区线性光强回放误差中位数从只替换端点的 0.00266 升到 0.00462，75 张均无下降。该检查采用七帧等权近似。用户第三张中间成图仍见眼口重影。[四个位置的模拟曝光对照](<D:/Data/Build/visual-analysis-dev/portrait-latent-intermediate-01/four-position-replay.png>)
 
 用单图入口的实际精简候选池重做选择。以原图直接生成的 MaDENN 为首图，分别加入两个端点、全部四个位置，允许追加的数量随可用时刻数变化，沿用同一回放和差异门槛。主批次的实际输出从 76 张增到 83 张，匹配始终为 9/192。另 8 张曝光及 5 张屏摄各稳定在 1 份匹配。保留两时刻配置。
 
@@ -5276,11 +5276,11 @@ ONNX 编码和解码图共用同一个本地权重文件。每次传入原图最
 
 逐图复核了展示数量。32 张的完整候选池缺少至少一个参考组。剩余 16 张中，实际完成 1 张，另有 7 张的展示数量少于参考组数。还有 8 张在同样的输出张数下存在正确分配。用清晰参考事后计算，在固定每张的已展示数量下，最多可分配 75/180 组。这个上限未计只从糊图判断的选图误差及其他展示约束。
 
-另外在三个实拍子组各取 4 张两个中间位置间嘴部编码差异最大的输入，并加入三张用户图。在 16×16 码本网格中互换固定的嘴部区域、保留每格两项编码的多重集，再由原糊图和两份新码本解码。30 张图经 DirectML 生成。交换前后两张图的等权光强均值在 128×128 网格上的 RMS 差值中位数为 0.00043。12 张实拍的 48 份参考中，两张父图合计匹配 4 份，交换图匹配 3 份，合并仍为 4 份。[嘴部编码交换的样图](<D:/DevTools/visual-analysis-dev/portrait-latent-intermediate-01/coupled-cases.png>)
+另外在三个实拍子组各取 4 张两个中间位置间嘴部编码差异最大的输入，并加入三张用户图。在 16×16 码本网格中互换固定的嘴部区域、保留每格两项编码的多重集，再由原糊图和两份新码本解码。30 张图经 DirectML 生成。交换前后两张图的等权光强均值在 128×128 网格上的 RMS 差值中位数为 0.00043。12 张实拍的 48 份参考中，两张父图合计匹配 4 份，交换图匹配 3 份，合并仍为 4 份。[嘴部编码交换的样图](<D:/Data/Build/visual-analysis-dev/portrait-latent-intermediate-01/coupled-cases.png>)
 
-针对中间候选使整体回放偏离的现象，再试验保持两张原七帧中间图的共同亮度。在线性光强下先施加平滑色差校正，再对每个 4×4 区块的两幅候选施加有界校正，使各颜色通道的共同均值等于两个原中间位置。实际保存 PNG 后，在主批次的均值误差 RMS 中位数由 0.00814 降到 0.00015，在三个用户样例由 0.03723 降到 0.00032。这里保持的是七帧先验的两帧贡献。用户图重新出现较重的模糊、纹理和局部方块。`rb-00009-0673` 的投影图在固定配准下多匹配一份参考，只通过九个半像素配准位置中的三个，眼口仍明显发虚。加入此试验的完整池为 96/192 份、86/180 组，覆盖全部组的输入仍为 16/48。实际展示仍为 53/192 份及 31/180 组。该校正用于研究比较。[投影样图](<D:/DevTools/visual-analysis-dev/portrait-latent-intermediate-01/projected-cases.png>)
+针对中间候选使整体回放偏离的现象，再试验保持两张原七帧中间图的共同亮度。在线性光强下先施加平滑色差校正，再对每个 4×4 区块的两幅候选施加有界校正，使各颜色通道的共同均值等于两个原中间位置。实际保存 PNG 后，在主批次的均值误差 RMS 中位数由 0.00814 降到 0.00015，在三个用户样例由 0.03723 降到 0.00032。这里保持的是七帧先验的两帧贡献。用户图重新出现较重的模糊、纹理和局部方块。`rb-00009-0673` 的投影图在固定配准下多匹配一份参考，只通过九个半像素配准位置中的三个，眼口仍明显发虚。加入此试验的完整池为 96/192 份、86/180 组，覆盖全部组的输入仍为 16/48。实际展示仍为 53/192 份及 31/180 组。该校正用于研究比较。[投影样图](<D:/Data/Build/visual-analysis-dev/portrait-latent-intermediate-01/projected-cases.png>)
 
-本机目录 `D:/DevTools/visual-analysis-dev/portrait-latent-intermediate-01` 保存模型执行记录、`real.json`、`compact.json`、`reference-groups.json`、`budget-audit.json`、`projected-evaluation.json` 和 `projected-validation.json`。仓库 33 项测试通过。
+本机目录 `D:/Data/Build/visual-analysis-dev/portrait-latent-intermediate-01` 保存模型执行记录、`real.json`、`compact.json`、`reference-groups.json`、`budget-audit.json`、`projected-evaluation.json` 和 `projected-validation.json`。仓库 33 项测试通过。
 
 ### 固定输出张数时的候选组合复核
 
@@ -5303,13 +5303,13 @@ ONNX 编码和解码图共用同一个本地权重文件。每次传入原图最
 
 也用配对数据训练了六个观测特征的正则化排序器。特征为亮度回放误差、相对首图的回放误差、细频比、到首图的五官带通距离、候选密度、回放误差分位。按 3 个实拍视频源轮流留出整源。每折用其余两源的数据拟合候选匹配至少一份参考帧的分数，在留出源上保留首图且最多替换一张，冻结结果后评分。此试验只使用带通差异。三折共匹配 54/192 帧、34/180 组，原展示为 53/192 帧、31/180 组，两套各有 1 张覆盖全部组。覆盖增量来自同一个视频源。该模型分数是在配对数据上拟合的排序量。
 
-三张用户样图均可在当前差异与回放门槛下追加一张。第一张的眼口和面部轮廓更清楚，皮肤与五官细节来自生成模型。第二张仍有屏纹和暗部细节不足，第三张仍有较强的眼口重影。三张都缺少清晰原片，清晰度与可见外观差异只能通过现有图比较。[三张用户样图对照](<D:/DevTools/visual-analysis-dev/portrait-set-reselection-01/three-cases-extra.png>)
+三张用户样图均可在当前差异与回放门槛下追加一张。第一张的眼口和面部轮廓更清楚，皮肤与五官细节来自生成模型。第二张仍有屏纹和暗部细节不足，第三张仍有较强的眼口重影。三张都缺少清晰原片，清晰度与可见外观差异只能通过现有图比较。[三张用户样图对照](<D:/Data/Build/visual-analysis-dev/portrait-set-reselection-01/three-cases-extra.png>)
 
-第二张候选库有两张脸部轮廓更清楚的生成图。它们通过回放及细频要求，但到首图的带通距离 0.04548 和 0.02184 都低于 0.055，未作为新外观展示。第三张已经展示同类的 MaDENN 图，另一张更清楚的生成图到它的距离为 0.05163，同样未作为新外观展示。两张样图的现有同组替换规则均未选出替换项。第二张的眼部仍偏暗，第三张仍可见局部不自然的贴合。较清楚的同组代表和需要额外展示的新外观应分别测量。[第二张候选库对照](<D:/DevTools/visual-analysis-dev/portrait-set-reselection-01/coverage-clarity-02.png>) · [第三张候选库对照](<D:/DevTools/visual-analysis-dev/portrait-set-reselection-01/coverage-clarity-03.png>)
+第二张候选库有两张脸部轮廓更清楚的生成图。它们通过回放及细频要求，但到首图的带通距离 0.04548 和 0.02184 都低于 0.055，未作为新外观展示。第三张已经展示同类的 MaDENN 图，另一张更清楚的生成图到它的距离为 0.05163，同样未作为新外观展示。两张样图的现有同组替换规则均未选出替换项。第二张的眼部仍偏暗，第三张仍可见局部不自然的贴合。较清楚的同组代表和需要额外展示的新外观应分别测量。[第二张候选库对照](<D:/Data/Build/visual-analysis-dev/portrait-set-reselection-01/coverage-clarity-02.png>) · [第三张候选库对照](<D:/Data/Build/visual-analysis-dev/portrait-set-reselection-01/coverage-clarity-03.png>)
 
 在全部 48 张配对输入上用 Windows 原生 `--extend-shape-cover` 冻结实际输出。使用完整候选库、原回放及五官门槛并保留所有已有候选，每张最多追加一张。追加 38 张后，展示总数由 213 增至 251，命中参考帧从 53/192 增至 58/192，外观组从 31/180 增至 37/180。有 6 张的外观组覆盖增加，完整覆盖各自参考组的输入仍为 1 张。用逐像素比较确认保留项与追加项都来自冻结的候选图。复用原生测量后，4 张配对图和 3 张用户样图的原选择记录及输出像素与重构前完全一致。公开样本回归、诊断命令参数检查和 33 项仓库测试通过。
 
-本机目录 `D:/DevTools/visual-analysis-dev/portrait-set-reselection-01` 保存候选哈希、冻结的 `measurements-priority-assessment.json`、`measurements-distance-assessment.json`、`tight-oracle.json`、`cross-rank-assessment.json`、`expanded-assessment.json` 和 `clarity-gates.json`。追加试验使用了这套研究候选库，配对覆盖的增量按该候选库统计。
+本机目录 `D:/Data/Build/visual-analysis-dev/portrait-set-reselection-01` 保存候选哈希、冻结的 `measurements-priority-assessment.json`、`measurements-distance-assessment.json`、`tight-oracle.json`、`cross-rank-assessment.json`、`expanded-assessment.json` 和 `clarity-gates.json`。追加试验使用了这套研究候选库，配对覆盖的增量按该候选库统计。
 
 ### 屏拍候选的低频条件校正
 
@@ -5317,7 +5317,7 @@ ONNX 编码和解码图共用同一个本地权重文件。每次传入原图最
 
 用两种去纹观察分别回放。每折在三个空间块集合拟合平移、模糊、亮度增益和偏移，在剩下的块检验。筛选另外比较屏纹幅度、与大尺度方向一致的边缘锐度及组间五官差异。锐度测量在 256×256 对齐尺度用双眼、鼻和口区域的粗细两档同向梯度。
 
-第二张用户图中，校正后的候选在已测屏纹频带由旧首图的 0.05915 降到 0.00526。沿周期去纹的观察上，四折回放误差各下降 0.00713–0.00824。仅减相干载波的观察上，误差分别上升 0.00086–0.00199，低于预先固定的 0.003 容差。两眼的同向梯度锐度分别增加 2.34% 和 1.41%，鼻和口略降。候选与首图的带通距离为 0.02004，关键点判为存在局部差异。在同样去除实测载波之后，候选逐一与已有五张比较，交换输入顺序后仍有局部五官差异。固定数量的同组替换保留旧首图，该候选用于另一个外观的研究对照。候选图的眼周依然偏暗，用户图缺少清晰原片。[第二张的原生候选对照](<D:/DevTools/visual-analysis-dev/portrait-clarity-representative-01/case02-option/comparison.png>) · [第二、三张的色调试验](<D:/DevTools/visual-analysis-dev/portrait-clarity-representative-01/conditioned-review.png>)
+第二张用户图中，校正后的候选在已测屏纹频带由旧首图的 0.05915 降到 0.00526。沿周期去纹的观察上，四折回放误差各下降 0.00713–0.00824。仅减相干载波的观察上，误差分别上升 0.00086–0.00199，低于预先固定的 0.003 容差。两眼的同向梯度锐度分别增加 2.34% 和 1.41%，鼻和口略降。候选与首图的带通距离为 0.02004，关键点判为存在局部差异。在同样去除实测载波之后，候选逐一与已有五张比较，交换输入顺序后仍有局部五官差异。固定数量的同组替换保留旧首图，该候选用于另一个外观的研究对照。候选图的眼周依然偏暗，用户图缺少清晰原片。[第二张的原生候选对照](<D:/Data/Build/visual-analysis-dev/portrait-clarity-representative-01/case02-option/comparison.png>) · [第二、三张的色调试验](<D:/Data/Build/visual-analysis-dev/portrait-clarity-representative-01/conditioned-review.png>)
 
 5 张原评测屏拍和另 19 张有数字原帧的屏摄执行同一检测。24 张都未达到本试验的双向载波强度门槛。配对通过数分别为 2/5 和 14/19，等于各自既有展示。此项检查验证了未触发时的选图，强载波触发分支仍缺少相近屏纹强度的原片配对。
 
@@ -5327,4 +5327,12 @@ ONNX 编码和解码图共用同一个本地权重文件。每次传入原图最
 
 与上一轮已经追加的原生展示组合时，再逐一检查替代图与追加项的带通距离及关键点差异。7 次同组替换中保留 6 次，另 1 次保留旧组合。在相同的 251 张输出下，命中参考帧从 58/192 到 60/192，外观组从 37/180 到 38/180，原先的 58 份参考均仍有候选。新增匹配来自 `rb-00008-0895` 的第 3、5 短曝光参考。覆盖全部参考组的输入仍为 1/48。
 
-本机目录 `D:/DevTools/visual-analysis-dev/portrait-clarity-representative-01` 保存 PNG、运行回执及其哈希，包括 `quality-assessment.json`、`combined-assessment.json`、`screen-assessment.json`、`transfer-assessment.json` 和 `case02-option.json`。
+本机目录 `D:/Data/Build/visual-analysis-dev/portrait-clarity-representative-01` 保存 PNG、运行回执及其哈希，包括 `quality-assessment.json`、`combined-assessment.json`、`screen-assessment.json`、`transfer-assessment.json` 和 `case02-option.json`。
+
+### 同组替换的 Windows 原生复验
+
+将运动模糊的同组替换实现为 `PortraitCandidates.exe --refine-clear-representatives`。它读取同一张糊图与从该图生成的候选，从前缀中保留已追加候选并复核原有代表。四档模糊和横纵 ±2 像素配准分别用于各图的四折回放。每折允许的误差变化为原误差的 6%，限制在 0.0006 到 0.0013，候选间回放位移变化不得超过一像素。保留原有的带通及局部五官分离。
+
+从迁移后的 `D:/Data/Build/visual-analysis-dev` 运行 48 张原生批次并解码实际输出 PNG。251 张输出全部与研究方案所选图逐像素相同。保留全部原来命中的 58 份参考帧，最终命中 60/192 帧、38/180 外观组，完整覆盖各自参考组的输入为 1/48。原生公开回归、原有同组替换命令的回执及像素比对、非法参数和单图检查、33 项仓库测试均通过。本机 `portrait-native-clear-selection-01/combined-assessment.json` 保存逐图结果。历史清单保持原字节和哈希，读取时将归档路径解析到新目录。
+
+同一码本入口的 `-RefineClarity` 开关以 `rb-00008-0494` 完成从单张糊图到最终 PNG 的离线试跑。两个时刻在 OpenVINO `GPU.0` 执行，码本编码和解码的记录各有 3 个 DirectML 节点事件。移动发布目录后，最终回执仍可通过相对路径打开，实际 PNG 与其索引对应的候选逐像素一致。

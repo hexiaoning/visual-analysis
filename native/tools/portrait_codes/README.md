@@ -7,7 +7,7 @@
 使用 Windows SDK、MSVC x64、ONNX Runtime DirectML NuGet 包、DirectML NuGet 包和 OpenCV x64。构建脚本复制对应的运行库。
 
 ```powershell
-.\build.ps1 -OutputDirectory D:\DevTools\build-portrait-codes `
+.\build.ps1 -OutputDirectory D:\Data\Build\portrait-codes `
     -OnnxRuntimeDirectory $env:ONNXRUNTIME_DIR -DirectMlDirectory $env:DIRECTML_DIR `
     -OpenCvDirectory $env:OPENCV_BUILD -MsvcDirectory $env:MSVC_TOOLS `
     -WindowsSdkDirectory $env:WINDOWS_SDK
@@ -19,17 +19,19 @@
 
 ```powershell
 .\run.ps1 -InputPng .\blurred.png -OutputDirectory .\results -ModelDirectory .\models `
-    -MomentsExecutable D:\DevTools\build-portrait-moments\PortraitMoments.exe `
-    -CodesExecutable D:\DevTools\build-portrait-codes\PortraitCodes.exe `
-    -CandidatesExecutable D:\DevTools\build-portrait-candidates\PortraitCandidates.exe
+    -MomentsExecutable D:\Data\Build\portrait-moments\PortraitMoments.exe `
+    -CodesExecutable D:\Data\Build\portrait-codes\PortraitCodes.exe `
+    -CandidatesExecutable D:\Data\Build\portrait-candidates\PortraitCandidates.exe
 ```
 
 用 `-Device CPU` 可指定 CPU。也可以单独复核编码、混分和解码三个步骤。
 
+添加 `-RefineClarity` 可在初次选择后试验同组清晰候选替换。原展示的追加项保持各自位置。此时入口返回最终选择回执，`refinement-inputs.log` 按输入顺序记录回执中的候选索引所对应的文件。
+
 编码输入为 512×512 图像，经程序转换成 `[1,3,512,512]` 的 RGB FP32，值域为 `[-1,1]`。编码模型输出 `[1,256,1024]` 的未归一化码本评分，`encode` 依次写出评分的 FP32 原始字节。`blend` 从原图和端点评分逐格选择编码，写出 `[1,16,16]` 的小端 int64，取值范围为 0–1023。`decode` 接受原糊图和所选编码，输出一张 PNG。原图和端点均采用同一裁切坐标。编码器和解码器的 ONNX 与它们引用的外部权重文件需已在本机。
 
 ```powershell
-$exe = 'D:\DevTools\build-portrait-codes\PortraitCodes.exe'
+$exe = 'D:\Data\Build\portrait-codes\PortraitCodes.exe'
 & $exe encode dml .\encode.onnx .\blurred.png .\raw.f32 .\first-moment.png .\first.f32 .\last-moment.png .\last.f32
 & $exe blend .\raw.f32 .\first.f32 .\first.bin .\raw.f32 .\last.f32 .\last.bin
 & $exe decode dml .\decode.onnx .\blurred.png .\first.bin .\candidate-first.png .\blurred.png .\last.bin .\candidate-last.png
@@ -37,4 +39,4 @@ $exe = 'D:\DevTools\build-portrait-codes\PortraitCodes.exe'
 
 运行命令前准备独立输出路径。每张输出写完后单独发布，已有文件受到保护。将 `dml` 改为 `cpu` 可用 CPU 复验。两个推理命令输出 ONNX Runtime 的执行分析文件路径。后续可用 [`PortraitCandidates.exe`](../portrait_candidates/README.md#在原结果后追加有观测支持的候选) 比较回放、清晰度和五官差异。
 
-本轮验证模型位于 `D:/DevTools/visual-analysis-dev/portrait-exposure-latent-01`。模型与测试照片保存在试验目录。
+本轮验证模型位于 `D:/Data/Build/visual-analysis-dev/portrait-exposure-latent-01`。模型与测试照片保存在试验目录。

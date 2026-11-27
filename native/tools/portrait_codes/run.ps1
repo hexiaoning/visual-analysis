@@ -6,7 +6,8 @@ param(
     [Parameter(Mandatory)][string]$MomentsExecutable,
     [Parameter(Mandatory)][string]$CodesExecutable,
     [Parameter(Mandatory)][string]$CandidatesExecutable,
-    [ValidateSet("GPU", "CPU")][string]$Device = "GPU"
+    [ValidateSet("GPU", "CPU")][string]$Device = "GPU",
+    [switch]$RefineClarity
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,14 +47,32 @@ try {
         "raw.f32", "last.f32", "last.bin") "blend.log"
     Invoke-NativeStage $Codes @("decode", $Backend, $Models["decode.onnx"], $InputFile, "raw.bin", "direct.png",
         $InputFile, "first.bin", "first.png", $InputFile, "last.bin", "last.png") "decode.log"
-    Invoke-NativeStage $Candidates @("--extend-shape-cover", ".055", ".028", "1", "--max-additions", "2",
-        "--landmarks", $Models["hr-nosa-wflw-geometry.onnx"], $InputFile, "selected", "direct.png", "first.png", "last.png") "selection-path.log"
+    $Bank = @("direct.png", "first.png", "last.png")
+    $Arguments = @("--extend-shape-cover", ".055", ".028", "1", "--max-additions", "2",
+        "--landmarks", $Models["hr-nosa-wflw-geometry.onnx"], $InputFile, "selected") + $Bank
+    Invoke-NativeStage $Candidates $Arguments "selection-path.log"
 
     $Selection = (Get-Content -LiteralPath "selection-path.log" -Raw).Trim()
     $SelectionName = Split-Path -Leaf $Selection
     $Receipt = Join-Path "selected\$SelectionName" "selection.json"
     if (-not (Test-Path -LiteralPath $Receipt -PathType Leaf)) {
         throw "The native selector did not publish a result in $Pending."
+    }
+    if ($RefineClarity) {
+        $Initial = Get-Content -LiteralPath $Receipt -Raw | ConvertFrom-Json
+        $SelectedNames = @($Initial.outputs | ForEach-Object { $Bank[[int]$_.input_index] })
+        $AddedCount = $SelectedNames.Count - [int]$Initial.kept_count
+        $OrderedBank = $SelectedNames + @($Bank | Where-Object { $_ -notin $SelectedNames })
+        Set-Content -LiteralPath "refinement-inputs.log" -Value $OrderedBank -Encoding utf8
+        $Arguments = @("--refine-clear-representatives", "$($Initial.kept_count)", "$AddedCount",
+            $Models["hr-nosa-wflw-geometry.onnx"], $InputFile, "refined") + $OrderedBank
+        Invoke-NativeStage $Candidates $Arguments "refinement-path.log"
+        $Name = Split-Path -Leaf (Get-Content -LiteralPath "refinement-path.log" -Raw).Trim()
+        $Receipt = Join-Path "refined\$Name" "selection.json"
+        if (-not (Test-Path -LiteralPath $Receipt -PathType Leaf)) {
+            throw "The clarity refinement did not publish a result in $Pending."
+        }
+        Set-Content -LiteralPath "refinement-path.log" -Value $Receipt -Encoding utf8
     }
     Set-Content -LiteralPath "selection-path.log" -Value $Receipt -Encoding utf8
 } finally {
