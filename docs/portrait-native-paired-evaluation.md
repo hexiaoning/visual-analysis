@@ -5842,3 +5842,26 @@ Windows 原生诊断增加 `--swap-prefix`。候选若无法同时满足清晰�
 原生筛选共核对 51 份回执、保留项索引与新增 PNG 像素。三张用户图都没有新增展示。第二张的本轮字典尝试均未通过回放，第一、三张各自差别最大的同底图备选在面部中央的平均差约一个灰阶，第二、三张的暗带或反光仍在。三张均缺少清晰原片，无法评价真实外观。本轮保留研究评测。33 项仓库测试通过。[Windows 原生与配对回执](<D:/Data/Build/visual-analysis-dev/portrait-conditional-edge-atlas-01/full-report.json>) · [三张用户图的候选试验](<D:/Data/Build/visual-analysis-dev/portrait-conditional-edge-atlas-01/private-atlas-trials.png>)
 
 对参考带通救回的 34 份，按部位数量递增，穷举两张底图的全部部位组合。能同时通过配对和回放的最小替换范围分别为一个部位 7 份、两个部位 11 份、三个部位 10 份、四个部位 6 份。自由选择正确的两处能覆盖其中 18 份，按原规则预选的两处仅覆盖 10 份。剩余 16 份在固定底图、带通、强度和门槛下需要同时改变至少三处。该范围只描述有真实清晰参考时的控制试验。[部位组合穷举回执](<D:/Data/Build/visual-analysis-dev/portrait-conditional-edge-atlas-01/exact-region-support.json>)
+
+### 用实拍短曝光监督联合清晰边缘的随机生成
+
+取六个拟合视频的 98 张糊图与各自四张同步短曝光。统一在 96 像素网格提取连续三个模糊尺度之间的两组有符号亮度带。训练目标保留清晰参考的共同结构，每次更新取一次曝光中的一个短时刻。对单一预测模型拟合糊图频带到短曝光频带的差。随机模型学习条件流，将从同一糊图的频带附近出发的样本，经八步速度场积分移到候选频带。两组都对整脸频带及带符号梯度监督，网络的低分辨率分支可同时看到多个部位。另在随机模型中采用实际短曝光差异作为起始扰动的协方差，40 个主方向解释拟合期内变化的 61.75%。[流匹配方法](https://openreview.net/forum?id=PqvMRDCJT9t) · [数据和来源](<D:/Data/Build/visual-analysis-dev/portrait-coherent-band-flow-01/data.json>) · [实拍变化协方差](<D:/Data/Build/visual-analysis-dev/portrait-coherent-band-flow-01/temporal-covariance.json>)
+
+三套模型各训练 480 步，按另外两个拍摄视频的 10 张开发图选择模型。开发集同一次曝光的短曝光与四份预测做逐一分配，有符号带误差分别是 0.01827（单一预测重复）、0.02769（带限随机扰动）和 0.02710（按实拍变化随机扰动）。再以实际渲染的候选做清晰配对。三种模型的推荐融合强度依次为 0.42、0.68 和 0.42。两张底图独立覆盖 19/40 份参考，加入三种模型分别覆盖 20/40、21/40、20/40。每套随机模型用零扰动和两对正反扰动，种子取自糊图散列。生成和选图只读当前糊图、由它生成的底图及冻结的模型。[开发集成图筛选](<D:/Data/Build/visual-analysis-dev/portrait-coherent-band-flow-01/development-selection.json>) · [实拍变化采样的开发对照](<D:/Data/Build/visual-analysis-dev/portrait-coherent-band-flow-01/development-empirical-selection.json>)
+
+各样本的双带差在四部位软窗中一次写回，保留底图的其他空间频段。最终 8 位图仍通过各自以原糊图和底图拟合的两折回放门槛。核对 102 次零修正的逐像素一致性。1,122 张结果中有 426 个像素因通道量化出现一个灰阶的差值偏差，占检查像素约 0.00015%。同底图同训练方式的候选，在中央脸区两两灰阶差的中位数为带限随机扰动 2.05、实拍扰动 1.65。[生成清单](<D:/Data/Build/visual-analysis-dev/portrait-coherent-band-flow-01/joint-generated.json>) · [渲染数值核对](<D:/Data/Build/visual-analysis-dev/portrait-coherent-band-flow-01/rendering-controls.json>)
+
+三套训练图均导出 ONNX，用 Win11 CPU 与 Intel UHD 630 的 OpenVINO 执行。单一预测的中位耗时约 9.65 和 12.06 毫秒。两套随机模型的五候选八步批次对应 CPU 211.90、206.97 毫秒，GPU 168.13、165.92 毫秒。运行图确认卷积在 GPU.0 执行，CPU 与 GPU 的最大浮点差为 9.69×10⁻⁷。实际研究生成用本地 CPU 运行时，显示复核使用现有 Windows 原生选择器。[设备与执行节点回执](<D:/Data/Build/visual-analysis-dev/portrait-coherent-band-flow-01/devices.json>)
+
+在留出实拍的 1,056 张新候选中，单一预测匹配 5/192 份参考，带限随机模型匹配 4/192，实拍扰动模型匹配 5/192。两套随机模型加入其余四个样本后，各自的匹配集合与只用零扰动时相同。三路并集独立匹配 5/192，候选库并集仍为 104/192。只有 `rb-00009-0006` 的第 3 张短曝光有候选匹配而上轮展示遗漏。[留出实拍逐份核对](<D:/Data/Build/visual-analysis-dev/portrait-coherent-band-flow-01/paired-bank.json>)
+
+为区分采样模型和网格分辨率的限制，对原有候选库缺失的 88 份参考提供真实清晰边缘，保留共同的物理频带、底图、0.68 融合强度及回放门槛。按 96 网格得到的成图匹配 35 份，同时通过匹配与原糊图回放的有 23 份。换为 192 网格后分别为 42、29 份，联合通过集合包含 96 网格通过的 23 份。512 网格与 192 网格的联合通过集合相同。这些是用清晰参考控制后的结果，描述同一频带在输出时能保留的结构。[分辨率控制回执](<D:/Data/Build/visual-analysis-dev/portrait-coherent-band-flow-01/exact-band-grid.json>)
+
+| 48 张留出实拍 | 候选库匹配 | 实际展示匹配 | 外观组分配 | 展示图数 |
+| --- | ---: | ---: | ---: | ---: |
+| 既有原生展示 | 104/192 | 77/192 | 58/180 | 823 |
+| 加入三路 96 网格生成 | 104/192 | 77/192 | 58/180 | 839 |
+
+原生筛选核对 51 份回执、已有展示的前缀索引和实际追加 PNG。对第 3 张短曝光有数值匹配的两张候选，最接近旧展示的带通距离分别为 0.01832、0.01847，低于 0.025 的追加下限。用同一输入另跑原生固定数量替换，旧的 13 张保持原样。三张用户样图中仅第三张有一份试验候选通过追加，反光、眼口重影仍明显。三张均缺清晰原片，模型表现保留为研究评测。[完整原生展示回执](<D:/Data/Build/visual-analysis-dev/portrait-coherent-band-flow-01/final.json>) · [固定数量替换](<D:/Data/Build/visual-analysis-dev/portrait-coherent-band-flow-01/nearby-replacement.json>) · [原生实际展示对照](<D:/Data/Build/visual-analysis-dev/portrait-coherent-band-flow-01/private-native-decisions.png>) · [带清晰参考的分辨率图例](<D:/Data/Build/visual-analysis-dev/portrait-coherent-band-flow-01/reference-grid-comparison.png>)
+
+再训练 192 网格修复头。输入为 192 像素原糊图的亮度、两组有符号频带、坐标，以及单一预测模型的 96 像素输出。新模型对 192 像素目标做有符号细化，拟合样本和开发隔离沿用同一划分。训练 320 步后，开发组对正确频带的加权绝对误差从直接插值的 0.017889 降至 0.017778。实际开发图在 0.68 强度下与底图联合匹配 21/40 份。按此强度冻结并生成 96 张留出实拍候选与 6 张用户样图候选。96 张实拍候选匹配 5/192 份参考，完整库仍为 104/192。只有同一例第 3 帧能够补到上轮未展示的参考，新候选在原生筛选中的最近距离为 0.01669，仍未追加。192 像素头在 Win11 的 CPU 和 Intel GPU.0 上分别为 7.30 和 6.72 毫秒，浮点误差上限为 2.38×10⁻⁷。33 项仓库测试通过。[训练与开发分数](<D:/Data/Build/visual-analysis-dev/portrait-coherent-band-flow-01/precision-dev-score.json>) · [留出实拍](<D:/Data/Build/visual-analysis-dev/portrait-coherent-band-flow-01/precision-held-score.json>) · [原生追加诊断](<D:/Data/Build/visual-analysis-dev/portrait-coherent-band-flow-01/precision-nearby-display.json>) · [CPU 和 GPU 回执](<D:/Data/Build/visual-analysis-dev/portrait-coherent-band-flow-01/precision-devices.json>)
