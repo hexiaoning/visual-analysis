@@ -5819,3 +5819,26 @@ Windows 原生诊断增加 `--swap-prefix`。候选若无法同时满足清晰�
 | 按成对曝光贡献提名前二，再执行相同原生筛选 | 77/192 | 58/180 | 3/48 | 823 |
 
 前二提名保住全部新增实拍匹配，少展示 51 张。两轮各核对 61 份原生回执、旧展示的索引与新增 PNG 的像素。三张用户样图按前二提名时均没有新增结果，说明这次减少实拍冗余的规则也压掉了前两张的实验备选。候选生成仍为本地研究流程。33 项仓库测试通过。[前二提名的原生与配对回执](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shape-pairs-01/marginal-final.json>)
+
+### 独立实拍短曝光边缘字典与四部位诊断
+
+从六个拟合视频的 98 组长短曝光中整理 392 张对齐短曝光。每份短曝光保留 512 像素有符号亮度带，并索引同次糊图的面部与部位频带。供体来自拟合视频。两个开发视频和三个实拍评估视频与拟合视频分开。推理只读取单张糊图及同图生成的两张底图。[训练来源与散列](<D:/Data/Build/visual-analysis-dev/portrait-conditional-edge-atlas-01/atlas.json>)
+
+按观测和底图的局部带通强度之比寻找证据较弱的两个部位。按糊图描述选各部位的候选模板，限制同一视频和同一次曝光的占比。另一种检索同时比较不同短曝光时刻的投影与原糊图。为每个部位检查九种局部平移及受限对比度，用两个交错的空间折比较亮度、梯度回放，保留至多两个不同来源的边缘模板。颜色和宽尺度亮度由同图底图提供，局部清晰边缘由光滑窗中的字典模板替换。对最终 512 像素 PNG 重新读入，再核对回放及像素。[候选冻结清单](<D:/Data/Build/visual-analysis-dev/portrait-conditional-edge-atlas-01/held-generated.json>)
+
+在 10 张独立开发图上，两张底图合计匹配 19/40 份短曝光。两种检索方法在 0.58 强度各匹配 9/40，在 0.90 强度各匹配 6/40。各路线与底图取并集均为 19/40。按较高的联合门槛余量选用比较不同时刻的检索方案及 0.58 强度 进入留出实拍。51 张输入共生成 386 张，其中 48 张实拍生成 376 张。新结果独立匹配 5/192 份短曝光，这五份在已有原生展示中均已有匹配。[开发集强度对照](<D:/Data/Build/visual-analysis-dev/portrait-conditional-edge-atlas-01/calibration.json>) · [留出实拍逐帧评分](<D:/Data/Build/visual-analysis-dev/portrait-conditional-edge-atlas-01/paired.json>)
+
+单独构造有符号眼缘，输入已知横向 +1、纵向 −1 个 128 网格像素的偏移。三种模板中取到正确边缘及偏移，两个校验折的最大误差相对原底图下降 0.00916。用两张实拍和第三张用户图抽查 512 像素有符号带通。现有 Windows 11 CPU 与 Intel UHD 630 上启用 OpenCL UMat 的中位耗时为 6.11 和 5.32 毫秒，最大值差为 0。计时涵盖滤波及输出回读，整个实验使用 CPU 路线。[已知位移和设备复核](<D:/Data/Build/visual-analysis-dev/portrait-conditional-edge-atlas-01/controls.json>)
+
+对原全库没有匹配的 88 份短曝光，在生成锁定后用清晰参考做干预。仍采用同样的亮度窗、0.58 强度、色度保护和逐像素限幅。先在参考的各部位逐一检索当前字典，选择带通误差最小的模板及平移。只查原方案挑出的两个部位和查全部四个部位，两路均为 0/88。直接替换成清晰参考的带通，两个部位为 10/88，四个部位为 34/88。进一步用糊图与底图固定的参数回放，34 份在匹配通过的同一张试验图上均同时过原回放门槛。这些候选用到真实清晰参考，仅用于诊断当前字典与生成器的缺口。[两部位诊断](<D:/Data/Build/visual-analysis-dev/portrait-conditional-edge-atlas-01/reference-diagnostic.json>) · [四部位字典诊断](<D:/Data/Build/visual-analysis-dev/portrait-conditional-edge-atlas-01/oracle-all.json>) · [正确边缘的回放复核](<D:/Data/Build/visual-analysis-dev/portrait-conditional-edge-atlas-01/oracle-replay.json>)
+
+再按同样的 0.58 强度在开发集同时替换四部位，只读原糊图及两个底图，使用四种固定模板组合。实际生成 56 张，独立匹配 4/40 份短曝光，与底图取并集仍为 19/40。这组校准显示扩大替换区域后，单图字典检索没有再现已知正确边缘的收益。[四部位盲生成开发比较](<D:/Data/Build/visual-analysis-dev/portrait-conditional-edge-atlas-01/all-dev.json>)
+
+| 48 张留出实拍 | 候选库匹配 | 实际展示匹配 | 外观组分配 | 展示图数 |
+| --- | ---: | ---: | ---: | ---: |
+| 上轮前二提名 | 104/192 | 77/192 | 58/180 | 823 |
+| 加入本轮字典候选 | 104/192 | 77/192 | 58/180 | 835 |
+
+原生筛选共核对 51 份回执、保留项索引与新增 PNG 像素。三张用户图都没有新增展示。第二张的本轮字典尝试均未通过回放，第一、三张各自差别最大的同底图备选在面部中央的平均差约一个灰阶，第二、三张的暗带或反光仍在。三张均缺少清晰原片，无法评价真实外观。本轮保留研究评测。33 项仓库测试通过。[Windows 原生与配对回执](<D:/Data/Build/visual-analysis-dev/portrait-conditional-edge-atlas-01/full-report.json>) · [三张用户图的候选试验](<D:/Data/Build/visual-analysis-dev/portrait-conditional-edge-atlas-01/private-atlas-trials.png>)
+
+对参考带通救回的 34 份，按部位数量递增，穷举两张底图的全部部位组合。能同时通过配对和回放的最小替换范围分别为一个部位 7 份、两个部位 11 份、三个部位 10 份、四个部位 6 份。自由选择正确的两处能覆盖其中 18 份，按原规则预选的两处仅覆盖 10 份。剩余 16 份在固定底图、带通、强度和门槛下需要同时改变至少三处。该范围只描述有真实清晰参考时的控制试验。[部位组合穷举回执](<D:/Data/Build/visual-analysis-dev/portrait-conditional-edge-atlas-01/exact-region-support.json>)
