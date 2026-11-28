@@ -6158,3 +6158,18 @@ Windows C++、ONNX Runtime CPU 与 Intel UHD 630 的 DirectML 在同样三张输
 两份新增各用原片横纵偏移 −0.5、0、+0.5 像素的九种组合复核，分别有 5/9 保留数值配对，两份的高清联合均为 0/9。开发、留出及屏拍共独立解码和验证 765 份 PNG。其中重复的 12 份是每张屏拍跨两路复用的原图直出。OpenVINO FP16 权重为 2,426,684 字节。[位置微调复核](<D:/Data/Build/visual-analysis-dev/portrait-adcsr-trial-01/compact-offset-review.json>) · [成图及权重完整性](<D:/Data/Build/visual-analysis-dev/portrait-adcsr-trial-01/compact-integrity.json>)
 
 另用 CVPR 2025 的 AdcSR 和作者公开的网络、解码器权重做了一个离线 CPU 探针。第一张用户图的原糊图裁切直接生成 512 像素图，模型加载约 179 秒，单张推理及 PNG 写出约 420 秒。这是在构建机以 PyTorch 初次运行的墙钟时间，含内存映射的读取开销。图中鼻口轮廓更锐利，屏幕网格也变成清楚的交叉线。该探针仅覆盖一张用户图，未取得配对组成绩或原生 GPU 数据。[AdcSR 论文](https://openaccess.thecvf.com/content/CVPR2025/html/Chen_Adversarial_Diffusion_Compression_for_Real-World_Image_Super-Resolution_CVPR_2025_paper.html) · [首例并排](<D:/Data/Build/visual-analysis-dev/portrait-adcsr-trial-01/adcsr-probe-comparison.png>) · [本机探针回执](<D:/Data/Build/visual-analysis-dev/portrait-adcsr-trial-01/adcsr-probe-local.json>)
+
+
+### 双位置量化运动的精确回放与短时状态歧义
+
+用 12 张实拍短曝光清晰帧构造成像对照。每次将同一张清晰图按整数位移采样两次，取 8 位 RGB 的等权平均并执行半入量化。候选生成器仅收到观测。固定考察水平 12、垂直 12、右下 8×8、右上 8×8 四个位移。相邻采样点只需满足两个连续整数和，每个颜色通道可拆成独立的链。用从链末端递推的整数可行区间求解，在满足所有观测像素的同时最小化相对引导图的最大像素改动。引导图分别用观测插值和两档正则化频域反卷积。频域反卷积用观测本身约束成像频响接近零的频段。该对照用于检验离散成像下的候选覆盖。实拍运动和曝光时序的恢复可参考 Jin 等的单图视频展开研究。[Jin 等，CVPR 2018](https://arxiv.org/abs/1804.04065) · [受控输入与数据说明](<D:/Data/Build/visual-analysis-dev/portrait-two-tap-motion-01/reference.json>)
+
+纯 Windows C++ 求解器通过 80 组随机回放和正反遍历检查，以及 150 组三像素链的穷举最优值对照。首个已知矛盾的观测也正确拒绝。实际三个代表输入重复五次，单张 512 像素附近的求解与独立回放核对通常约 44 毫秒。12 张受控图各有四个候选位移，其中仅各自成像时使用的位移有精确解。以原插值为引导的精确投影、两档频域引导的精确投影，分别数值配对 3、12、12 份，同时过清晰度的是 0、2、4 份。插值直接输出为 0/12，较强频域引导比它的逐图平均绝对误差降低中位值为 0.859 个灰阶。四种成像假设在 48 张留出实拍和三张用户裁切中均无精确解。受控图中仍可看到少量条纹和重边。[受控逐份评分](<D:/Data/Build/visual-analysis-dev/portrait-two-tap-motion-01/controlled-scores.json>) · [验证回执](<D:/Data/Build/visual-analysis-dev/portrait-two-tap-motion-01/controls.json>) · [原生 CPU 计时](<D:/Data/Build/visual-analysis-dev/portrait-two-tap-motion-01/native-time.json>) · [清晰原片对照](<D:/Data/Build/visual-analysis-dev/portrait-two-tap-motion-01/controlled-comparison.png>)
+
+另用 12 张真实短曝光清晰帧构成不同的候选状态。固定一张观测，将其 RGB 压到 24–231，固定短状态和长状态的比重为 1/32 和 31/32。逐像素求一个合法 8 位长状态，使每个清晰短状态与各自长状态量化后都得到该观测。12 种组合回放逐像素一致，长状态距同一观测的最大偏差为 5 灰阶，逐图平均偏差为 0.45–1.10。清晰短状态的 66 个无序配对均在已有数值评分的两个方向未配对，图中可见不同的朝向和眼睑形状。这是带补偿构造的曝光对照，证明在该双状态模型下，仅靠回放误差无法区分这些短状态。这里的观察范围是固定量化成像模型，用户样图的快门状态未知。[完全相同输入的并排例](<D:/Data/Build/visual-analysis-dev/portrait-two-tap-motion-01/short-phase-comparison.png>) · [逐张精确回放和差异核对](<D:/Data/Build/visual-analysis-dev/portrait-two-tap-motion-01/short-phase-witnesses.json>)
+
+
+用同一频域引导增加一条动态规划对照。沿每个采样链在 256 个灰阶上精确最小化相对引导图的总平方误差。100 组三像素链穷举得到相同最优值。12 张输出逐像素回放一致，数值配对和高清联合仍分别为 12/12、4/12。对引导图的逐图均方根偏差中位从 2.387 降至 1.725 灰阶，距清晰原片的逐图平均绝对误差降低中位为 0.614 灰阶，部分条纹也减轻。本机含独立回放核对的单张中位耗时为 241.5 毫秒。[精确平方误差投影评分](<D:/Data/Build/visual-analysis-dev/portrait-two-tap-motion-01/squared-scores.json>) · [同输入的两种精确投影](<D:/Data/Build/visual-analysis-dev/portrait-two-tap-motion-01/squared-comparison.png>)
+
+
+将 RGB 回放放宽为每通道最多偏离观测若干灰阶，对每种位移用二分求最小可行容差。12 张受控样本的零容差结果逐像素复现，另用已知矛盾链验证了精确的容差下界。48 张实拍按每图最佳位移统计，最小、中位和最大容差为 1、8、33 灰阶。容差不超过 2、4、8 的依次有 3、7、26 张。将不超过 8 的候选冻结后，覆盖 104 份可评分短曝光参考。其中 2 份通过数值配对，均已在历史库覆盖，同时过清晰度为 0。三张用户图需要的最低容差分别为 54、50、4 灰阶。诊断图中第一张和第二张出现明显重复边缘，第三张的眼口仍偏软。本轮保留 Windows C++ 求解及实验记录，应用未接入。33 项仓库测试及 56 项子测试通过。[灰阶容差清单](<D:/Data/Build/visual-analysis-dev/portrait-two-tap-motion-01/minimum-tolerance.json>) · [逐份配对和清晰度评分](<D:/Data/Build/visual-analysis-dev/portrait-two-tap-motion-01/tolerance-scores.json>) · [用户三张诊断图](<D:/Data/Build/visual-analysis-dev/portrait-two-tap-motion-01/private-relaxation.png>) · [原生求解器源码](<D:/Data/Build/visual-analysis-dev/portrait-two-tap-motion-01/motion_pair.cpp>)
