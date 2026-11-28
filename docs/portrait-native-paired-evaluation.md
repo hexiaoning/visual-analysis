@@ -5907,3 +5907,31 @@ Windows 原生选择在 51 张输入上追加 18 张，48 张配对实拍实际�
 另外使用此前固定的 12 个不同来源的 CoC 屏拍，含六张强屏纹和六张斜拍。用本地 C++ GPU 生成原序列与两个模型的 144 张候选，按屏拍原有的配对规则和这轮同一个细节门槛评分。此前首图满足配对规则 12/12，达到细节门槛 0/12。原序列和两种新模型都只有斜拍 00250 同时过两项，在真实数字帧横纵各移半个像素的九种位置中均通过八次。该例要保留的相似边缘已经在序列底图中，目视仍有曝光、头发细纹和暗部的差异。[屏拍来源及盲生成](<D:/Data/Build/visual-analysis-dev/portrait-oriented-detail-01/screen-generated.json>) · [独立屏拍评分](<D:/Data/Build/visual-analysis-dev/portrait-oriented-detail-01/screen-scores.json>) · [斜拍例原帧对照](<D:/Data/Build/visual-analysis-dev/portrait-oriented-detail-01/screen-pass-comparison.png>) · [CoC 公开数据](https://zenodo.org/records/23150212)
 
 Windows 原生工具核对 51 份筛选回执及新增的 PNG 像素。留出实拍展示 841 张到 844 张，配对覆盖仍为 78/192，候选全集仍为 105/192，二者的同时达标覆盖均为 0/192。用户三张图均没有新增原生入选候选。实际拼图里第二张仍有眼区暗带和屏纹，第三张眼口仍偏软且有屏幕反光。三张没有清晰原片用于核验。此次训练和原生 GPU 推理保留在本地实验，未修改交付模型。33 项仓库测试通过。[原生合并回执](<D:/Data/Build/visual-analysis-dev/portrait-oriented-detail-01/comparison.json>) · [三张样图对比](<D:/Data/Build/visual-analysis-dev/portrait-oriented-detail-01/three-cases.png>)
+
+### 整脸候选的清晰照片训练与成图带宽
+
+从本地 DAEFR 的 CelebA-Test 高质量档案按固定散列建立 1,200 张拟合、64 张开发、48 张独立复验的清晰照片池。照片编号和解码像素散列互斥，人物身份未单独标注。模拟从九个时刻生成空间变化的曲线轨迹、头部转动及眼鼻口局部形变，在随机响应曲线的线性光域加权曝光，再模拟失焦、降采样、屏纹、噪声和 JPEG。保留其中四份单时刻图，固定种子抽查可逐像素重现。两套模型另共享 98 组实拍训练及另外两个视频的 10 组开发。混合路线在前 300 步抽样使用模拟图，共抽 460 次，涉及 377 张，最后 120 步只用实拍。另一条同架构路线在相同 420 步预算内只用实拍。[数据与复现清单](<D:/Data/Build/visual-analysis-dev/portrait-natural-face-flow-01/data.json>) · [DAEFR 发布档案](https://huggingface.co/datasets/LIAGM/DAEFR_test_datasets/blob/main/README.md)
+
+模型学习从随机状态到清晰亮度相对糊图的差，条件为糊图像素及两档带符号边缘。训练损失另约束眼鼻口的真实亮暗边缘及最难匹配部位。Windows C++ OpenVINO 从同一张糊图同时积分四张候选，八步。每幅输入比较一个无初始噪声的候选及两组固定随机初始状态。512 像素成图将 160 网格的亮度改动加回原彩色图，并将同一份宽尺度亮度差分配给整组，以约束平均曝光。两组交错的空间位置分别检查亮度和梯度回放。候选及 PNG 散列先冻结，清晰参考仅随后评分。[混合路线训练与导出](<D:/Data/Build/visual-analysis-dev/portrait-natural-face-flow-01/mixed-training.json>) · [实拍路线训练与导出](<D:/Data/Build/visual-analysis-dev/portrait-natural-face-flow-01/real-training.json>)
+
+两路实拍开发损失为混合 0.050215、只用实拍 0.049311。10 张开发图对应 40 份短曝光，全强度时两路各有 14 份通过旧配对规则，0 份同时通过细节门槛。无噪起步的单张覆盖了两路各自的全部 14 份，随机初始化在开发组没有补到额外配对。按开发设置冻结全强度。[开发逐候选结果](<D:/Data/Build/visual-analysis-dev/portrait-natural-face-flow-01/development-scores.json>)
+
+Windows 11 的 C++ 模型调用在两张实拍和第三张用户图上比较 CPU 和 Intel UHD 630 GPU。四张样本八步的中位耗时，混合版为 392.48 和 333.90 毫秒，纯实拍版为 382.64 和 334.97 毫秒。运行图确认 GPU.0 执行卷积，两路后续生成均使用 GPU。CPU、GPU 输出最大差为 2.99×10⁻⁷，独立 ONNX Runtime 逐步重放八步积分的最大差为 3.28×10⁻⁷。[原生设备和计时](<D:/Data/Build/visual-analysis-dev/portrait-natural-face-flow-01/devices.json>) · [八步独立重算](<D:/Data/Build/visual-analysis-dev/portrait-natural-face-flow-01/native-integration-control.json>)
+
+为分开预测与成图损失，直接用真实短曝光亮度走同一面区遮罩、成图和回放。在 192 份参考中，输入原清晰 RGB 时有 192 份通过外观和细节，164 份也过回放。512 像素的局部亮度替换为 150 份、其中 142 份也过回放。缩到 160 像素再渲染为 89 份、同时过回放为 81 份。加整组宽频曝光校正后为 64、61 份。这里直接借用了清晰原片，数值只用于定位成图与曝光约束的损失。回放还会拒绝一部分真实清晰帧，不能单独证明某种外观不可能。[清晰原片干预的逐图回执](<D:/Data/Build/visual-analysis-dev/portrait-natural-face-flow-01/known-reference-rendering.json>) · [相同原片在两种成图网格的对比](<D:/Data/Build/visual-analysis-dev/portrait-natural-face-flow-01/known-details-comparison.png>)
+
+进一步扫描 160、224、320、416、512 像素的亮度渲染。使用原片逐一对照时，较窄的原蒙版同时通过细节与曝光回放的分别为 82、121、136、137、142 份。使用眼鼻口内部保持全权重的较宽蒙版，160 网格为 157 份，224 及更高网格均为 164 份。224 像素较宽蒙版的 192 份参考全部过细节门槛，剩下 28 份由近似回放规则拒绝。较宽蒙版替换原亮度时，160 网格为 144 份，224 及更高同为 164 份。此处只检验有清晰参考时的带宽与回放，原片未参与盲生成。[带宽和蒙版扫描](<D:/Data/Build/visual-analysis-dev/portrait-natural-face-flow-01/bandwidth.json>)
+
+冻结同一批亮度预测，开发集再测试较宽蒙版、不加宽尺度曝光校正的成图。保留下 98 张可回放候选。两路分别独立匹配 16/40 和 9/40 份参考，两路的高清联合通过仍为 0/40。扩大蒙版能保住正确的清晰纹理，但这批模型的输出没有形成所需的新细节。[较宽蒙版的开发对照](<D:/Data/Build/visual-analysis-dev/portrait-natural-face-flow-01/development-broad-scores.json>)
+
+48 张未参加训练的自然照片，从同一组模拟运动中各保留四份清晰状态。用同一细节门槛和有符号结构频带相关 0.65 作复验。原糊图、两条无噪路线、每路九张候选中最相似者，结构项均为 86/192，细节与结构同时通过均为 0/192。逐参考取样本中最好的最弱部位细节幅度，原糊图均值约 0.101，混合和纯实拍分别约 0.118 和 0.117。此组模拟对照单独计数。[独立照片复验](<D:/Data/Build/visual-analysis-dev/portrait-natural-face-flow-01/photo-scores.json>)
+
+在 48 张留出实拍和三个用户输入上，Windows GPU 共生成 918 张冻结候选，两臂的九张均使用同一单张输入和固定噪声策略。混合、纯实拍在 192 份留出短曝光中分别达到旧配对规则 12、14 份，并集为 14 份，均已包含于历史候选全集。每路自身的通过项在无初始噪声的单张里均已存在。两路联合也没有任何输入覆盖它的四份短曝光状态。全部候选在旧配对和清晰度联合门槛下为 0/192。两组随机结果的四张图之间，整幅平均绝对差中位数约 1.36 和 1.29 个灰阶。[留出逐图评分](<D:/Data/Build/visual-analysis-dev/portrait-natural-face-flow-01/held-scores.json>) · [整组覆盖和多样性汇总](<D:/Data/Build/visual-analysis-dev/portrait-natural-face-flow-01/family-coverage.json>)
+
+对同一实拍的四张短曝光和两组四个生成状态，分别量度脸区带符号中频图的两两差异。真实曝光的成对 RMS 中位数 0.01607，两个模型分别为 0.00607、0.00598。逐个输入归一化后，混合和纯实拍两路中位数分别仅为真实变化的 38.0% 和 37.3%。此项用于衡量姿态和五官中频变化，不能单独判定某个候选的外观。[实拍组与采样组变化量](<D:/Data/Build/visual-analysis-dev/portrait-natural-face-flow-01/state-diversity.json>)
+
+保持原模型、噪声和亮度强度，关闭整组宽频曝光校正，另冻结 51 张图的 918 张候选。两路均保住完整的候选数量。混合模型的旧配对数从 12 变为 14，纯实拍模型仍为 14，关闭后的两路高清联合通过均为 0。放宽这一步不能弥补本轮实际五官细节的不足。[相同预测的曝光校正对照](<D:/Data/Build/visual-analysis-dev/portrait-natural-face-flow-01/projection-comparison.json>)
+
+逐像素核对 51 份 Windows 原生筛选回执。留出实拍展示增加 70 张，由 844 到 914，但旧配对和高清联合覆盖均无增加。候选库的旧配对覆盖仍为 105/192，实际展示仍为 78/192，二者的高清联合通过仍为 0/192。并排对照的通过旧配对者仍看得到镜框、下颌或眼口残留的模糊。[Windows 实际覆盖回执](<D:/Data/Build/visual-analysis-dev/portrait-natural-face-flow-01/windows-final.json>) · [实际生成候选与清晰原片](<D:/Data/Build/visual-analysis-dev/portrait-natural-face-flow-01/real-candidate-comparison.png>)
+
+三张用户输入的实验筛选分别追加 0、0、2 张。第三张的两张新增图，在中心脸区的每通道平均绝对差约 4.02 个灰阶。并排目视主要为细小的明暗和颗粒变化，眼口仍然模糊，五官没有明显的不同形状。前两张仍可见屏纹或眼区暗带。三张没有对应清晰原片，无法核验真人外观。实验未接入交付版。33 项仓库测试通过。[三张样图原图、试验与筛选对照](<D:/Data/Build/visual-analysis-dev/portrait-natural-face-flow-01/three-cases.png>)
