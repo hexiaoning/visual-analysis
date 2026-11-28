@@ -5959,3 +5959,21 @@ Windows 11 的 C++ 地标工具在相同九张输入上对比 CPU 和 Intel UHD 
 第一张样图的六张 MaDENN 形变试验，原生单图回放误差范围为 0.02303–0.02579，低于旧展示最好误差 0.01832 加 0.028 的容差。距旧图最近的五官带通距离为 0.04549–0.05345，高于 0.025 的小半径。原生未进入逐对关键点检查。按筛选实现，剩余筛选条件是候选细频不低于拍摄图。原图有密集屏纹，肉眼清晰度与未经去纹修正的细频下限出现了分歧。[细频门槛的筛选实现](../native/tools/portrait_candidates/appearance_cover.cpp)
 
 主试验的 51 张图全部完成 Windows 原生回执和新增 PNG 的逐像素核对。留出实拍展示增加 61 张，由 914 到 975。全部候选的旧配对覆盖由 105/192 到 107/192，实际展示仍为 78/192，两个口径的高清联合覆盖均为 0/192。主试验三张用户样图各追加 0、1、1 张。第一张最明显的一组试验端点嘴部开合差为 8.90 像素，仍带明显屏纹，原生未追加。实验未接入交付版。33 项仓库测试通过。[主试验原生覆盖](<D:/Data/Build/visual-analysis-dev/portrait-articulated-replay-01/actual-results.json>) · [主试验三张样图](<D:/Data/Build/visual-analysis-dev/portrait-articulated-replay-01/three-cases.png>)
+
+### 单张长曝光的稠密形变与屏纹筛选复核
+
+从 98 组实拍长短曝光配对建立双向稠密位移监督，另以两个不同视频的 10 组作开发。以单张糊图生成的 Jin 序列确定时间初值，再将四张真实短曝光按亮度结构最佳对应分配给四个时刻。可信度来自双向循环和亮度残差。相同网络分别以真实位移监督和仅用像素、边缘损失学习先验位移上的残差，另保留不学习的先验作为控制。测试只输入糊图。用原有 Jin 中间态与从同一糊图生成的 MaDENN 镜像图分别作起点，在全分辨率合并位移再重采样一次。曝光回放使用四张候选的线性光平均，沿用基线确定的相机参数，在两组交错像素上同时验证亮度和梯度。留出原片只在候选图和散列冻结后用于评分。[训练与划分](<D:/Data/Build/visual-analysis-dev/portrait-dense-phase-fields-01/data.json>) · [盲成图记录](<D:/Data/Build/visual-analysis-dev/portrait-dense-phase-fields-01/held-frozen.json>)
+
+开发组 40 份参考中，原序列满足旧配对规则 16 份，配对和细节同时达标 1 份。直接形变先验为 13、1 份，位移监督固定 0.70 幅度后为 14、1 份，只用像素监督固定 1.00 后为 15、0 份。两路开发亮度损失低于未学习的先验，固定幅度依据配对和细节联合表现选取。Windows 11 原生 C++ OpenVINO 在两张实拍与第三张用户样图上测得位移监督 CPU、Intel UHD 630 GPU 推理中位数分别为 9.52、8.35 毫秒，只用像素监督为 10.93、8.26 毫秒。两者均在 GPU.0 执行卷积，CPU 与 GPU 位移最大绝对差分别为 9.83×10⁻⁷ 和 9.09×10⁻⁷，计时只覆盖模型推理。留出和用户组共生成 1,416 张试验图，含 204 张原序列图。306 组新形变中 303 组通过曝光回放，逆映射最小雅可比值为 0.55007。[开发逐图评分](<D:/Data/Build/visual-analysis-dev/portrait-dense-phase-fields-01/development-scores.json>) · [实际原生设备和计时](<D:/Data/Build/visual-analysis-dev/portrait-dense-phase-fields-01/devices.json>)
+
+另外用 Windows 原生筛选器做屏纹控制。第一张用户图在面部外检测到两个近垂直的周期载波，留出区域的相位一致性为 0.987 至 0.995。仅用屏纹缓解图计算细频下限，从 0.03042 降至 0.02848。两次筛选的原始观测、回放误差、相对已展示图的距离和候选像素相同。五官差异检查由 0 次增加为 32 次，26 次通过，6 次未过。每张新候选至少和一张已有图未形成明显差异，最终无新增。另两张用户图、12 张实拍屏拍控制及 5 张数字原片均未触发该检测。这个样本范围只支持第一张屏纹确实影响细频检测，未建立通用的屏纹判定。[屏纹检查与实际回执](<D:/Data/Build/visual-analysis-dev/portrait-dense-phase-fields-01/screen-comparison.json>)
+
+三张用户图的对比保留原始输入、原有较清晰起点、根据输入盲选的两个流场试验和相应四时刻灰度回放。第一张有可见的屏纹，第二张眼部暗带仍明显，第三张眼部软边和屏幕反光仍在。用户图均没有配对原片，无法核验候选相貌。[三个样图与形变试验](<D:/Data/Build/visual-analysis-dev/portrait-dense-phase-fields-01/three-case-dense-comparison.png>)
+
+在此前固定的 12 张留出样本上，用同一个双向位移估计分别移动真实短曝光、Jin 和 MaDENN 三种起点。三路都能读取目标短曝光，候选的颜色与纹理只来自各自起点。排除起点时刻后，三路有 35、14、23 份通过旧配对，分别有 18、0、0 份同时通过配对、细节和曝光回放。即使目标原片已经用于求位移，两个由单张模糊图产生的起点仍达不到细节门槛。该对照只用于定位瓶颈。[同位移估计的三种起点对照](<D:/Data/Build/visual-analysis-dev/portrait-dense-phase-fields-01/target-informed-anchor-control.json>)
+
+独立留出组的 48 张糊图含 192 份真实短曝光。原序列独立通过旧配对 38 份。Jin 起点的不学习先验、位移监督和像素监督分别通过 33、48、52 份，MaDENN 起点三路为 34、45、43 份。六路合并旧库后，旧配对覆盖由 107/192 增至 111/192。四份新匹配的最弱部位细节响应为 0.135 至 0.515，低于既定的 0.9104。六路候选四个时刻的脸区中频差异，逐图相对真实时刻的差异比例中位数为 18.7% 至 25.0%，原序列为 79.4%。稠密流场得到了一些额外数值配对，变化范围仍明显偏窄，全部候选的高清联合覆盖仍为 0/192。[独立留出逐候选评分](<D:/Data/Build/visual-analysis-dev/portrait-dense-phase-fields-01/held-scores.json>)
+
+四份新增数值配对的最佳试验在九种原片半像素位置上分别通过 9、5、8、9 次，均无高清联合通过。配对图可直接见到眼睑、鼻口轮廓和皮肤细节的差距。部分对齐裁切边缘包含镜像填充。[半像素位置复核](<D:/Data/Build/visual-analysis-dev/portrait-dense-phase-fields-01/numeric-match-validation.json>) · [四份数值配对与原片比较](<D:/Data/Build/visual-analysis-dev/portrait-dense-phase-fields-01/newly-matched-references.png>)
+
+从曝光回放通过的形变中，每张糊图按回放相对误差与脸区中频差异盲选至多四张，实际共 204 张送入未改动的 Windows 原生筛选工具。51 张输入的回执和新增 PNG 均逐像素核对。48 张实拍的展示图由 975 张增至 995 张，旧配对展示覆盖由 78/192 增至 79/192，高清联合覆盖为 0/192。三个用户案例分别新增 0、1、0 张。第二张新增试验仍有眼部暗带和屏纹。稠密形变与屏纹控制未接入交付版。33 项仓库测试通过。[实际候选与回执](<D:/Data/Build/visual-analysis-dev/portrait-dense-phase-fields-01/fields-native-verified.json>) · [合并覆盖结果](<D:/Data/Build/visual-analysis-dev/portrait-dense-phase-fields-01/combined-evaluation.json>) · [第二张原生留选图](<D:/Data/Build/visual-analysis-dev/portrait-dense-phase-fields-01/case-02-native-addition.png>)
