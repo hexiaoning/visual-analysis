@@ -134,6 +134,39 @@ try {
     Test-Pixels (Join-Path $CoverFolder $Cover.outputs[0].png) 512 $CoverCase.input_hashes.codeformer
     Test-Pixels (Join-Path $CoverFolder $Cover.outputs[1].png) 512 $CoverCase.input_hashes.amd
     Write-Output "2762 mode=shape-cover selected=0,1"
+
+    $ExposureSource = Join-Path $OutputRoot "exposure-source.png"
+    $Pixel = New-Object System.Drawing.Bitmap(1, 1)
+    try {
+        $Pixel.SetPixel(0, 0, [Drawing.Color]::FromArgb(0, 0, 1))
+        $Pixel.Save($ExposureSource, [Drawing.Imaging.ImageFormat]::Png)
+        $Pixel.SetPixel(0, 0, [Drawing.Color]::Black)
+        $Black = Join-Path $OutputRoot "exposure-black.png"
+        $Pixel.Save($Black, [Drawing.Imaging.ImageFormat]::Png)
+    } finally {
+        $Pixel.Dispose()
+    }
+    $ExposureRoot = Join-Path $OutputRoot "short-exposure"
+    $ExposureArgs = @("--short-exposure-cover", $ExposureSource, $ExposureRoot, 1, 1, 0, 0, 1)
+    $FirstPage = & $App @ExposureArgs
+    if ($LASTEXITCODE -ne 0) { throw "Could not generate the first exposure page." }
+    $SecondPage = & $App @ExposureArgs $FirstPage
+    if ($LASTEXITCODE -ne 0) { throw "Could not resume the exposure page." }
+    $SourceReceipt = Get-PixelReceipt $ExposureSource
+    $CandidateFiles = @($Black, $ExposureSource)
+    $Pages = @($FirstPage, $SecondPage)
+    for ($i = 0; $i -lt $Pages.Count; $i++) {
+        $Page = $Pages[$i]
+        $Last = $i -eq 1
+        $Report = Get-Content -Raw -LiteralPath (Join-Path $Page "exposure-cover.json") | ConvertFrom-Json
+        $Output = @($Report.outputs)
+        if ($Report.continued -ne $Last -or $Report.exhausted -ne $Last -or $Output.Count -ne 1) {
+            throw "The quantized exposure has exactly two solutions on two pages."
+        }
+        Test-Pixels (Join-Path $Page $Output[0].candidate) 1 (Get-PixelReceipt $CandidateFiles[$i]).Hash
+        Test-Pixels (Join-Path $Page $Output[0].companion) 1 $SourceReceipt.Hash
+    }
+    Write-Output "short-exposure-cover pages=2 exhausted=true"
 } finally {
     [Console]::OutputEncoding = $OldEncoding
     # Delete only the unique temporary tree created by this invocation.

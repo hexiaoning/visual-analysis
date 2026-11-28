@@ -6,6 +6,7 @@
 #include "geometry_calibration.h"
 #include "guided_detail.h"
 #include "learned_exposure.h"
+#include "short_exposure.h"
 
 #include <algorithm>
 #include <array>
@@ -16,6 +17,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <numeric>
 #include <nlohmann/json.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -259,6 +261,127 @@ fs::path publish_run(const fs::path &directory, WriteRun write_run) {
         throw;
     }
     return complete;
+}
+
+int exposure_argument(std::wstring_view input, int maximum) {
+    int value = 0;
+    for (wchar_t digit : input) {
+        if (digit < L'0' || digit > L'9' || value > (maximum - (digit - L'0')) / 10)
+            throw std::invalid_argument("Invalid numeric exposure argument");
+        value = value * 10 + (digit - L'0');
+    }
+    if (input.empty() || value > maximum)
+        throw std::invalid_argument("Exposure argument is out of range");
+    return value;
+}
+
+void write_exposure_report(const fs::path &directory, const Json &report) {
+    std::ofstream stream(directory / "exposure-cover.json", std::ios::binary);
+    stream << report.dump(2) << '\n';
+    stream.close();
+    if (!stream)
+        throw std::runtime_error("Could not save exposure-cover.json");
+}
+
+bool next_exposure_cell(cv::Mat &cell, const cv::Mat &low, const cv::Mat &high) {
+    for (size_t i = cell.total() * cell.elemSize(); i > 0; --i) {
+        if (cell.data[i - 1] < high.data[i - 1]) {
+            ++cell.data[i - 1];
+            return true;
+        }
+        cell.data[i - 1] = low.data[i - 1];
+    }
+    return false;
+}
+
+fs::path short_exposure(wchar_t **argv, int argc, bool project) {
+    using Camera = portrait_selection::ShortExposureCamera;
+    const auto source = read_image(argv[2]);
+    const int short_weight = exposure_argument(argv[4], Camera::max_weight);
+    const int long_weight = exposure_argument(argv[5], Camera::max_weight);
+    const int tolerance = exposure_argument(argv[6], 255);
+    const Camera camera(short_weight, long_weight, tolerance);
+    const auto [low, high] = camera.bounds(source);
+    return publish_run(argv[3], [&](const fs::path &directory) {
+        Json configuration{{"short_weight", short_weight}, {"long_weight", long_weight},
+                           {"companion_tolerance_gray", tolerance}};
+        Json report{{"schema", "short-exposure-rgb8-v1"}, {"configuration", configuration},
+                    {"observed", "observed.png"}, {"lower", "lower.png"}, {"upper", "upper.png"},
+                    {"outputs", Json::array()}};
+        write_image(directory / "observed.png", source);
+        write_image(directory / "lower.png", low);
+        write_image(directory / "upper.png", high);
+        const auto emit = [&](const cv::Mat &short_frame) {
+            const auto long_frame = camera.companion(source, short_frame);
+            if (cv::norm(camera.replay(short_frame, long_frame), source, cv::NORM_INF) != 0)
+                throw std::runtime_error("Short and long exposure frames failed exact replay");
+            const auto label = std::to_string(report["outputs"].size() + 1);
+            const auto candidate = "short-" + label + ".png";
+            const auto witness = "long-" + label + ".png";
+            write_image(directory / candidate, short_frame);
+            write_image(directory / witness, long_frame);
+            report["outputs"].push_back({{"candidate", candidate}, {"companion", witness}});
+        };
+        if (project) {
+            for (int i = 7; i < argc; ++i) {
+                const auto donor = read_image(argv[i]);
+                if (donor.size() != source.size())
+                    throw std::invalid_argument("Projection inputs must have the observation's dimensions");
+                cv::Mat projected;
+                cv::max(donor, low, projected);
+                cv::min(projected, high, projected);
+                emit(projected);
+            }
+        } else {
+            const int bits = exposure_argument(argv[7], 8);
+            const int count = exposure_argument(argv[8], std::numeric_limits<int>::max());
+            if (!count)
+                throw std::invalid_argument("Choose a positive page size");
+            const int width = 1 << bits;
+            cv::Mat first(source.size(), source.type()), last(source.size(), source.type());
+            for (size_t i = 0; i < first.total() * first.elemSize(); ++i) {
+                first.data[i] = static_cast<unsigned char>(low.data[i] >> bits);
+                last.data[i] = static_cast<unsigned char>(high.data[i] >> bits);
+            }
+            cv::Mat cell = first.clone();
+            if (argc == 10) {
+                const fs::path prior = argv[9];
+                std::ifstream stream(prior / "exposure-cover.json", std::ios::binary);
+                const auto receipt = Json::parse(stream);
+                const auto prior_source = read_image(prior / "observed.png");
+                if (receipt.at("schema") != "short-exposure-rgb8-v1" ||
+                    receipt.at("configuration") != configuration || receipt.at("discard_bits") != bits ||
+                    receipt.at("exhausted") != false || prior_source.size() != source.size() ||
+                    cv::norm(prior_source, source, cv::NORM_INF) != 0)
+                    throw std::invalid_argument("Previous page has a different observation or exposure model");
+                cell = read_image(prior / "next-cell.png");
+                if (cell.size() != source.size())
+                    throw std::invalid_argument("Invalid exposure page cursor dimensions");
+                for (size_t i = 0; i < cell.total() * cell.elemSize(); ++i)
+                    if (cell.data[i] < first.data[i] || cell.data[i] > last.data[i])
+                        throw std::invalid_argument("Exposure page cursor falls outside the feasible cells");
+            }
+            bool more = true;
+            cv::Mat candidate(source.size(), source.type());
+            for (int page = 0; page < count && more; ++page) {
+                for (size_t i = 0; i < candidate.total() * candidate.elemSize(); ++i) {
+                    const int bin = cell.data[i] * width;
+                    const int lower = std::max(int(low.data[i]), bin);
+                    const int upper = std::min(int(high.data[i]), bin + width - 1);
+                    candidate.data[i] = static_cast<unsigned char>(std::clamp(int(source.data[i]), lower, upper));
+                }
+                emit(candidate);
+                more = next_exposure_cell(cell, first, last);
+            }
+            if (more)
+                write_image(directory / "next-cell.png", cell);
+            report["discard_bits"] = bits;
+            report["cover_radius_if_exhausted_gray"] = width - 1;
+            report["continued"] = argc == 10;
+            report["exhausted"] = !more;
+        }
+        write_exposure_report(directory, report);
+    });
 }
 
 fs::path publish(const fs::path &directory, const cv::Mat &cf, const cv::Mat &amd, const Result &r,
@@ -885,6 +1008,8 @@ int wmain(int argc, wchar_t **argv) {
             "PortraitCandidates.exe --inspect-appearance-bank radius [--directed [--swap-prefix count replay-tolerance]] landmarks.onnx|--distance-only source.png output-directory candidate.png [more.png ...]\n"
             "PortraitCandidates.exe --transfer-guided-detail donor.png guide.png output-directory [donor2.png guide2.png output2 ...]\n"
             "PortraitCandidates.exe --bounded-exposure-directions dictionary.bin input.png anchor1.png anchor2.png seed-directory output-directory\n"
+            "PortraitCandidates.exe --short-exposure-cover source.png output-directory short-weight long-weight companion-tolerance discard-bits count [previous-run-directory]\n"
+            "PortraitCandidates.exe --short-exposure-project source.png output-directory short-weight long-weight companion-tolerance proposal.png [more.png ...]\n"
             "PortraitCandidates.exe --cover-shapes radius output-directory primary.png [candidate.png ...]\n"
             "PortraitCandidates.exe --select-by-replay landmarks.onnx source.png primary.png output-directory "
             "alternate.png [alternate2.png ...]";
@@ -893,6 +1018,14 @@ int wmain(int argc, wchar_t **argv) {
             return 0;
         }
         const std::wstring_view option = argc > 1 ? argv[1] : L"";
+        if (option == L"--short-exposure-cover" || option == L"--short-exposure-project") {
+            const bool project = option == L"--short-exposure-project";
+            if (project ? argc < 8 : (argc != 9 && argc != 10))
+                throw std::invalid_argument(usage);
+            cv::setNumThreads(1);
+            print_output_path(short_exposure(argv, argc, project));
+            return 0;
+        }
         if (option == L"--extend-shape-cover") {
             if (argc < 8)
                 throw std::invalid_argument(usage);

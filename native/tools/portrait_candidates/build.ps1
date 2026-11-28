@@ -44,6 +44,7 @@ $Arguments = @(
     (Join-Path $PSScriptRoot "duplicate_consensus.cpp"), (Join-Path $PSScriptRoot "texture_guard.cpp"),
     (Join-Path $PSScriptRoot "guided_detail.cpp"), (Join-Path $PSScriptRoot "learned_exposure.cpp"),
     (Join-Path $PSScriptRoot "exposure_normalizer.cpp"), (Join-Path $PSScriptRoot "geometry_calibration.cpp"), (Join-Path $PSScriptRoot "fine_band_limit.cpp"),
+    (Join-Path $PSScriptRoot "short_exposure.cpp"),
     "/link", "/subsystem:console", "/incremental:no", "/libpath:$MsvcDirectory\lib\x64",
     "/libpath:$SdkLib\ucrt\x64", "/libpath:$SdkLib\um\x64",
     (Join-Path $OrtNative "onnxruntime.lib"), $World[0].FullName

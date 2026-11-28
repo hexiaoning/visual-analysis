@@ -56,3 +56,11 @@ python scripts/explore_portrait_preimage.py camera-set/set.json sample-faces fac
 运行需要已安装 CPU 版 PyTorch 及 NVIDIA 源码依赖的 Python 环境，可信的本地 NVlabs/stylegan3 源码，以及 NVIDIA 发布的 StyleGAN2 FFHQ 512×512 权重。已测源码提交为 `c233a919a6faee6e36a316ddd4eddababad1adf9`。程序在加载权重前校验 SHA-256。每张模糊图是唯一的个案输入，模型、相机参数和种子范围属于运行配置。延续取样可使用新的输出目录，并将 `--first-seed` 设为上一批的结束种子加一。[官方源码](https://github.com/NVlabs/stylegan3/tree/c233a919a6faee6e36a316ddd4eddababad1adf9) · [官方权重目录](https://catalog.ngc.nvidia.com/orgs/nvidia/research/models/stylegan2/1/file-browser)
 
 种子决定一开始生成哪一张脸。观测用于约束其重新成像的结果。每张候选都可能通过这个约束，而某一张真实原照的长相仍可能在整批中缺席。增加种子数量能扩充候选，程序尚无判定所有人像外观已覆盖的停止条件。
+
+## 两段曝光的精确短曝光范围
+
+如果每个像素为两幅对齐的 8 位画面按已知整数权重混合再取整，长曝光画面允许在观测的逐通道容差内自由变化，Windows 原生命令可以从一张观测确定所有短曝光光栅的可行范围。短曝光的量化单元可按页遍历。每个输出包含能使观测逐像素复现的长曝光画面。用于指导生成的提案如已相容，投影会原样保留。
+
+设短、长画面权重为 `p` 和 `q`，观测通道允许的整数混合总和为 `[L, U]`，长曝光通道取值在 `[a, b]`。短曝光取值范围是 `[ceil((L−q·b)/p), floor((U−q·a)/p)]` 与 `[0,255]` 的交集。中间量化箱至少包含 `q` 个连续整数，因而相邻长曝光取值产生的可行区间之间没有缺口。对纯黑和纯白，短曝光与长曝光的物理范围已满足外侧边界。所有像素在这个模型里独立，因此两幅边界图定义的逐通道区间乘积就是完整相容集合。
+
+这一保证覆盖上述成像模型的相容光栅。实际照片还可能有空间位移、非线性传感器响应、压缩或屏纹。用真实图验证时仍须检查已知清晰原像是否落在该模型内，并另行判断最终输出的人像外观。[原生命令与续跑方法](../native/tools/portrait_candidates/README.md#枚举两段曝光相容的短曝光画面)
