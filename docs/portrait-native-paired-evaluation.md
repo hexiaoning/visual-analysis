@@ -6200,3 +6200,21 @@ Windows C++ 共轭梯度求解通过卷积伴随内积及零修正检查。人�
 全体留出清晰度评分中，两份可能由本轮追加获得的高清联合均集中在 `rb-00009-0382`，分别为时刻 5 和 7，端点路线没有额外高清联合。该输入的原生追加回执无新增，最强新候选到既有展示最近的五官带通距离为 0.00950，低于追加要求的 0.025。保留既有展示的基线为 0/192 高清联合，因此当前追加路线的高清联合展示仍为 0/192。这一结论逐一核对了所有可能改变该项计数的输入。三张用户图真正新增的五张均为端点方案，已逐像素核对输出文件，眼区暗带、反光及模糊仍在。[实拍可能命中与实际展示](<D:/Data/Build/visual-analysis-dev/portrait-local-fold-motion-01/native-joint-bound.json>) · [原生重点输入回执](<D:/Data/Build/visual-analysis-dev/portrait-local-fold-motion-01/native-priority-results.json>) · [三张实际追加图](<D:/Data/Build/visual-analysis-dev/portrait-local-fold-motion-01/actual-user-display.png>)
 
 另外用 12 张有数字原帧的实拍屏摄，分别在保留频带和联合曝光两种底图上重复分区反卷积。四种方法各有 24/24 组通过回放，没有新候选通过配对或高清联合，原候选库仍覆盖 1/12。[真实屏摄评分](<D:/Data/Build/visual-analysis-dev/portrait-local-fold-motion-01/screen-scores.json>) · [Windows 求解器源码](<D:/Data/Build/visual-analysis-dev/portrait-local-fold-motion-01/local_solver.cpp>)
+
+
+### 用细部比较复核粗轮廓判为接近的候选
+
+在保留既有展示的前提下，复测局部运动实验中带通距离不超过 0.025 的候选。先用五官之外的交错区域估计轻微平移，在 256 像素亮度图上比较眼、鼻、口两档带通的同向差异。每个部位用一组像素拟合对比度和锐度造成的差别，在另一组核对剩余成分，再交换两组。两张图交换顺序均过线才认作有细部差异。配准和细部比较的背景参考 Ding 等的结构与纹理相似度及 Ghildyal、Liu 的小位移容忍评测。[结构与纹理相似度](https://arxiv.org/abs/2004.07728) · [小位移容忍评测](https://arxiv.org/abs/2207.13686)
+
+开发组用 40 份短曝光各施加九类干扰和两档局部形变，按干扰分数的 98.5% 分位分别固定比较门槛。另取 12 张实拍清晰帧复测，同源帧不进入开发组。未补偿旋转时，细部路线将 108 份干扰中的 5 份判为形变，五份均是轻微整脸旋转。随后用脸外围补偿不超过 0.60° 的共同转角，误报降到 4，局部 4、8 像素形变分别检出 10/12、12/12。再允许在同一转角范围内尝试七个对齐角度，以最接近结果作排除条件。误报仍为 4，两档形变降至 7/12、11/12。同组回顾对照中的粗带通代理误报为 2/108，两档检出 9/12、12/12。按已知形变控制，旋转修订后仍没有稳定超过粗带通对照。人工扰动用于比较规则，未有人眼标注。[初始标定](<D:/Data/Build/visual-analysis-dev/portrait-fine-appearance-audit-01/calibration.json>) · [旋转补偿复测](<D:/Data/Build/visual-analysis-dev/portrait-fine-appearance-audit-01/calibration-rotation.json>) · [角度范围排除对照](<D:/Data/Build/visual-analysis-dev/portrait-fine-appearance-audit-01/calibration-bounded.json>)
+
+48 张留出输入的 288 对真实短曝光中，原生粗距离判为接近的有 17 对。其中两对超过第一版细部阈值，来自同一个输入，可见小幅唇线和眼周变化。上一轮新增高清数值命中的输入，其两份短曝光时刻 5 和 7 在这两种比较中都接近。该输入最强新候选对已展示近邻的局部比较为 0.167，低于第一版的 0.310 和补偿旋转后的 0.271。并排看最强新候选的边缘稍锐，唇形仍有不同于清晰原片的细节。这里的指标是对同图候选的差异审计。[实拍短曝光的逐对评分](<D:/Data/Build/visual-analysis-dev/portrait-fine-appearance-audit-01/natural-pair-scores.json>) · [一对粗距离接近的真实短曝光](<D:/Data/Build/visual-analysis-dev/portrait-fine-appearance-audit-01/natural-near-examples.png>) · [四个重点输入的近邻对比](<D:/Data/Build/visual-analysis-dev/portrait-fine-appearance-audit-01/nearest-candidate-comparison.png>)
+
+第一版细部规则在重点组只给第二张用户图提名一张。对照依然存在眼区暗带和明显屏纹。用已有 Windows C++ 屏纹检测器，仅从模糊输入取两支重复频率，在两张候选上同条件扣除相干分量。第二张分数从 0.373 变到 0.370。候选扣除的逐通道 RMS 为 1.77 灰阶，旧显示为 1.11。12 个实拍屏拍中检测到重复频率的有 9 个，数字原帧中也有 3 个。相干分量扣除没有消除这个误判风险，频率检测结果也不足以单独充当外观差异的证据。[屏纹诊断](<D:/Data/Build/visual-analysis-dev/portrait-fine-appearance-audit-01/screen-frequency-audit.json>) · [扣除相干屏纹前后](<D:/Data/Build/visual-analysis-dev/portrait-fine-appearance-audit-01/carrier-pair-review.png>)
+
+
+上一轮追加批次现已收齐。48 张留出图共保留 1,040 张原生展示并新增 64 张，所有输出均与回执指向的输入图逐像素一致。数值配对覆盖从 81/192 到 87/192，高清联合仍为 0/192。[全量 Windows 输出评分](<D:/Data/Build/visual-analysis-dev/portrait-local-fold-motion-01/native-display-scores.json>)
+
+在上一轮的实际输出上补测细部候选。51 张输入中有 188 个备选落在粗距离 0.025 以内，其中 2 个未过来源回放或细频要求。余下 186 个用细部规则检查，17 个通过，按每图至多两张和两两差异约束实际导出 10 张。最后用七档试验角度逐档重新拟合平移。复用开发组冻结的 0.271 门槛，原先在留出对照中误报的 4 个轻微整脸旋转均被排除，两档局部形变的检出仍为 7/12、11/12。该转角复核应用于已导出的十张，剔除其中两张，原候选保持不变。[重新平移配准后的控制结果](<D:/Data/Build/visual-analysis-dev/portrait-fine-appearance-audit-01/calibration-joint-alignment.json>) · [细部提名回执](<D:/Data/Build/visual-analysis-dev/portrait-fine-appearance-audit-01/bounded-full-selection.json>) · [最终实验子集](<D:/Data/Build/visual-analysis-dev/portrait-fine-appearance-audit-01/joint-full-selection.json>)
+
+剩余八张包含六张留出实拍和第一、二张用户样例各一张。实际文件复核补到五份数值配对，与原生展示合计 92/192。高清联合仍为 0/192。三张用户图均无清晰原片，新增两张仍缺少足够的清晰五官。以上变化是在既有评估队列上的回顾性试验。33 项仓库测试及 56 项子测试通过，本轮评测未接入应用。[细部候选最终评分](<D:/Data/Build/visual-analysis-dev/portrait-fine-appearance-audit-01/joint-full-scores.json>) · [实际参考图与补充候选并排](<D:/Data/Build/visual-analysis-dev/portrait-fine-appearance-audit-01/retained-supplemental-comparison.png>)
