@@ -5789,3 +5789,33 @@ Windows 原生诊断增加 `--swap-prefix`。候选若无法同时满足清晰�
 两套模型在 61 张输入上共取得 122 份 Windows 原生选图回执，追加输出逐像素核对通过。每种训练规模在留出实拍上各追加 3 张，覆盖未增加。旧展示遗漏的参考是 `rb-00009-0006` 的第 3 张短曝光。扩充版的匹配候选回放误差为 0.00657，最接近的既有展示候选五官带通距离为 0.02391，低于 0.025 的追加下限。[原生回执与逐图配对](<D:/Data/Build/visual-analysis-dev/portrait-expanded-short-state-01/signed-validation.json>)
 
 在三张用户图上，扩充版均未获准追加。原规模模型有一张候选通过了第二张图的追加门槛。并排检查扩充版同一底图上相差最大的两张，变化主要集中在眼口的明暗和边缘，原图缺失的五官结构仍不明确。三张均缺少清晰原片，无法核验生成的外观。本轮结果保留为研究评测。33 项仓库测试通过。[三张用户图与试验候选的对照](<D:/Data/Build/visual-analysis-dev/portrait-expanded-short-state-01/user-comparison.png>)
+
+### 以成对五官位移生成能共同回放的清晰状态
+
+从两次训练合计 98 张实拍长曝光读取各自的四份同步短曝光。按最外和最内两对分别计算双向局部光流。利用脸外围可靠像素去除共同的相似变换，要求正反方向均通过闭合检验，然后取同一坐标下的反对称位移。六个拟合视频中有 90 次曝光的 130 条位移通过，其中 92 条来自上轮新加入的拍摄。开发、评估仍按视频隔离，运行时只读原糊图以及由它生成的两张清晰底图。[光流及来源回执](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shape-pairs-01/field-fit.json>)
+
+按糊图的五官带通从不同拟合视频挑选两个方向，约束它们的加权余弦绝对值不大于 0.66。对每张底图分别向正向、反向重采样，取两种独立整脸结果。三个候选位移幅度从强到弱验证，按眼鼻口软窗及局部雅可比矩阵控制形变。对两张图加同一份平滑的线性亮度校正。该校正只补偿重采样使混合曝光产生的低频变化，各自的边缘来自清晰底图的空间重采样。两张图同权混合，使用仅在原图和底图的五官窗外拟合的共同模糊、平移和亮度设置。在脸内两组交错图块分别核对回放的亮度和梯度，保存量化后重新读入的 PNG，并逐像素核对。[生成与回放记录](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shape-pairs-01/generation.json>)
+
+61 张输入产生 241 对、482 张，其中留出实拍 378 张。160 网格实际位移的最小局部雅可比行列式为 0.552。等效到 512 裁切，强窗内位移均方根中位为 4.48 像素。两状态的脸部逐通道绝对差均值的中位为 7.20 灰阶。现有 2.2 次幂回放中，相对仅用变形后的两张图混合，引入共同亮度校正后 482 个验证折中 367 个亮度误差下降，平均改善 0.050 灰阶。与原底图的回放相比，新组全批脸内亮度误差平均增加 0.168 灰阶。已知边缘控制中，校正将两张混合相对底图的线性亮度误差从 0.000850 降为 0.000515，零位移的像素误差为 0。[已知控制](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shape-pairs-01/controls.json>)
+
+另统一底图和成对图的低分辨率处理顺序。两者均先转到线性亮度再缩小，然后用同一场景参数回放。指数 1.8、2.2、2.6 下分别有 241、241、238 对仍满足原有相对误差门槛，238 对同时通过三种设定。此项控制量化回放对假定响应曲线的敏感性。[独立回放复核](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shape-pairs-01/aligned-camera-audit.json>)
+
+两张代表性实拍和第三张用户图在 Windows 11、Intel UHD 630 上测试 512 像素双向重采样。含输入传输、双向重采样和结果回读的首轮中位时间为 CPU 10.17 毫秒、OpenCL UMat 9.91 毫秒。并行负载下复测为 19.04 和 19.73 毫秒，浮点辐射值最大差 1.19×10⁻⁷，生产效率优势未得到证实。整批候选使用 CPU 重采样。[设备与数值核对](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shape-pairs-01/remap-devices.json>)
+
+用同一训练字段在实际 512 像素网格复算两种方向的局部雅可比，241 对中最小值为 0.488。候选清单、清晰底图来源清单和选图源清单中的 61 份原糊图 SHA-256 均一致。[全分辨率几何复核](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shape-pairs-01/geometry-audit.json>)
+
+在留出的 48 张实拍上，新候选独立匹配 18/192 份短曝光，其中 7 份在旧全库有匹配、在旧展示缺失。所有 192 份参考的候选库并集仍匹配 104 份。对这 7 份查看清晰参考后做名额容量诊断，在对应五张实拍取同一候选库并放宽追加数量，原生筛选共追加 13 张并匹配其中 3 份。半像素偏移后，用于这 7 份的候选在九个位置中分别有 5 至 9 个通过既有配对门槛。此检查用于定位展示差异与名额约束。[配对回执](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shape-pairs-01/paired-bank.json>) · [原生名额诊断](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shape-pairs-01/capacity.json>) · [参考位置复核](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shape-pairs-01/reference-offsets.json>)
+
+另以两幅合成回放相对只保留另一幅的误差改变量，估计每个候选对曝光的贡献。分别比较两个脸区折，排序取较小的改善量。只按单张回放误差排序作为对照。候选位置在打开开发短曝光前冻结，10 张独立开发图的全部候选匹配 17/40 份短曝光。两条排序各取前四均为 11/40。各取前二时，按曝光贡献为 9/40，按单张回放为 6/40。以开发对照较优的曝光贡献排序提名前二，再运行原生选图，仍保留旧展示。[提名清单](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shape-pairs-01/nominations.json>) · [开发集对照](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shape-pairs-01/ranking-development.json>)
+
+用全部成对候选执行原生筛选，在 48 张实拍上实际增加 91 张展示。新增匹配来自 `rb-00009-0006` 的第 7 帧和 `rb-00008-0260` 的第 1、3 帧，九次半像素位置复查分别通过 6、9、8 次。后一例用同一张候选匹配两份参考。三份均来自三种响应曲线复核都通过的成对候选。对照中可见视线、眼睑、嘴角和发际与短曝光仍有差异，联合图像门槛的通过不能证实人眼看到完全相同的外观。[实拍新增匹配对照](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shape-pairs-01/verified-display-gains.png>) · [完整原生与配对回执](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shape-pairs-01/final.json>)
+
+使用全部候选筛选时，三张用户样图分别增加 1、1、0 张。前两张的眼口形状有位移，第二张眼周暗带和面部纹理失真依然明显，第三张反光和眼口模糊仍未解决。缺少三张对应的清晰原片，实际外观未核验。[Windows 筛选后的三张样图](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shape-pairs-01/private-displayed.png>) · [各自的两个形状试验及合成回放](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shape-pairs-01/private-pairs.png>)
+
+| 48 张留出实拍 | 短曝光匹配 | 外观组分配 | 覆盖全部观测外观组的输入 | 展示图数 |
+| --- | ---: | ---: | ---: | ---: |
+| 固定展示 | 74/192 | 56/180 | 3/48 | 783 |
+| 追加全部成对生成中的合格候选 | 77/192 | 58/180 | 3/48 | 874 |
+| 按成对曝光贡献提名前二，再执行相同原生筛选 | 77/192 | 58/180 | 3/48 | 823 |
+
+前二提名保住全部新增实拍匹配，少展示 51 张。两轮各核对 61 份原生回执、旧展示的索引与新增 PNG 的像素。三张用户样图按前二提名时均没有新增结果，说明这次减少实拍冗余的规则也压掉了前两张的实验备选。候选生成仍为本地研究流程。33 项仓库测试通过。[前二提名的原生与配对回执](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shape-pairs-01/marginal-final.json>)
