@@ -6173,3 +6173,25 @@ Windows C++、ONNX Runtime CPU 与 Intel UHD 630 的 DirectML 在同样三张输
 
 
 将 RGB 回放放宽为每通道最多偏离观测若干灰阶，对每种位移用二分求最小可行容差。12 张受控样本的零容差结果逐像素复现，另用已知矛盾链验证了精确的容差下界。48 张实拍按每图最佳位移统计，最小、中位和最大容差为 1、8、33 灰阶。容差不超过 2、4、8 的依次有 3、7、26 张。将不超过 8 的候选冻结后，覆盖 104 份可评分短曝光参考。其中 2 份通过数值配对，均已在历史库覆盖，同时过清晰度为 0。三张用户图需要的最低容差分别为 54、50、4 灰阶。诊断图中第一张和第二张出现明显重复边缘，第三张的眼口仍偏软。本轮保留 Windows C++ 求解及实验记录，应用未接入。33 项仓库测试及 56 项子测试通过。[灰阶容差清单](<D:/Data/Build/visual-analysis-dev/portrait-two-tap-motion-01/minimum-tolerance.json>) · [逐份配对和清晰度评分](<D:/Data/Build/visual-analysis-dev/portrait-two-tap-motion-01/tolerance-scores.json>) · [用户三张诊断图](<D:/Data/Build/visual-analysis-dev/portrait-two-tap-motion-01/private-relaxation.png>) · [原生求解器源码](<D:/Data/Build/visual-analysis-dev/portrait-two-tap-motion-01/motion_pair.cpp>)
+
+
+### 分区估计运动与交叉留点反卷积
+
+使用由同一张糊图得到的四时刻候选，保留首尾两帧，分别修整中间两帧。在 256 像素线性亮度图上划定双眼、鼻和口四个局部窗。每窗比较单独失焦及六种带方向的三点曝光核。将窗内按 6×6 方块交错分成两组，先在一组拟合亮度系数、偏移和正则化的亮度修正，再在另一组验证，交换两组后取两次修正平均。比较固定失焦、四窗使用同一运动核、各窗独立选择，以及由跨折结果接近的不同核组合出的备选。选核和成图只读取糊图与由该图生成的底图。四时刻曝光回放对量化后实际 PNG 检查。分区成像背景参考 Sun 等的非均匀运动去模糊研究。[Sun 等，CVPR 2015](https://openaccess.thecvf.com/content_cvpr_2015/html/Sun_Learning_a_Convolutional_2015_CVPR_paper.html) · [留出生成与局部回放清单](<D:/Data/Build/visual-analysis-dev/portrait-local-fold-motion-01/held-generated.json>)
+
+Windows C++ 共轭梯度求解通过卷积伴随内积及零修正检查。人工已知方向控制的亮度残差从 RMS 0.02528 降至 0.00581，若干错误核也能得到接近的误差。另用 12 张短曝光清晰帧的四处窗、六种指定方向做 288 组控制。底图以原片轻度平滑构造，留点比较选对全部 288 个施加的核。只从糊图算傅里叶相位自相关选中 201/288，前两名包含正确核 252/288。两项结果适用于该人工成像和底图条件。留点复原的亮度 RMS 中位从 0.00602 降至 0.00488。原生 CPU 和 Intel UHD 630 GPU 在三处实拍窗口跑同一两次加权卷积，输入缓冲已就绪时，中位用时分别约 1.18、2.38 毫秒，最大逐值差为 1.20×10⁻⁷。该计时仅含加权卷积，不含完整迭代。[局部已知方向控制](<D:/Data/Build/visual-analysis-dev/portrait-local-fold-motion-01/direction-controls.json>) · [原生 CPU 和 GPU 加权卷积](<D:/Data/Build/visual-analysis-dev/portrait-local-fold-motion-01/patch-performance.txt>) · [Pan 等，CVPR 2019](https://openaccess.thecvf.com/content_CVPR_2019/html/Pan_Phase-Only_Image_Based_Kernel_Estimation_for_Single_Image_Blind_Deblurring_CVPR_2019_paper.html)
+
+| 生成方式 | 开发配对 / 高清联合（40 份） | 留出配对 / 高清联合（192 份） |
+| --- | ---: | ---: |
+| 两张原底图 | 11 / 0 | 43 / 0 |
+| 只估计失焦 | 11 / 1 | 52 / 2 |
+| 四窗共用运动核 | 10 / 1 | 54 / 2 |
+| 各窗独立选择 | 11 / 1 | 55 / 2 |
+| 混用接近的备选核 | 10 / 1 | 57 / 2 |
+
+48 张留出实拍和三张用户图生成 408 份 PNG，同一观测内去重后 324 份。四路回放均通过 51/51 组。合并历史库后的数值配对由 130/192 到 133/192，高清联合由 1/192 到 2/192。新增高清通过项为 `rb-00009-0382` 时刻 5，同一输入此前已匹配时刻 7。它的最弱区域响应为 0.936，九种半像素参考位置中 5 种同时过线。另两个只过配对的新增项在九种位置中分别保留 6、9 种。新高清项实际图中有两张侧脸，候选与清晰原片的唇形仍有可见差异。该数值结果仍需按人眼外观验收。留出集复用了此前样本。第二路局部核组合相对首路的逐图平均 RGB 绝对差中位仅 0.127 灰阶。[开发评分](<D:/Data/Build/visual-analysis-dev/portrait-local-fold-motion-01/development-scores.json>) · [逐份留出评分](<D:/Data/Build/visual-analysis-dev/portrait-local-fold-motion-01/held-scores.json>) · [参考错位复核](<D:/Data/Build/visual-analysis-dev/portrait-local-fold-motion-01/alignment-audit.json>) · [新增成图及原片](<D:/Data/Build/visual-analysis-dev/portrait-local-fold-motion-01/held-new-reference-comparison.png>)
+
+再把局部运动核及源图相位线索用于生成相反方向的两个清晰时刻。对通过两种证据的局部位移用软窗混合，限制位移幅度和逆映射雅可比，按完整曝光回放筛选。51 张中有 44 张生成两组方案，合计 176 张。实拍覆盖 164 份可评参考，数值配对 49 份，高清联合为 0，也没有历史库之外的新配对。开发组数值配对 5/40，高清联合为 0。用户图可见第二张的眼鼻位置发生变化，眼区暗带与屏纹仍在。第三张的反光和眼口软边仍在。[端点留出评分](<D:/Data/Build/visual-analysis-dev/portrait-local-fold-motion-01/held-endpoint-scores.json>) · [三张用户图局部反卷积](<D:/Data/Build/visual-analysis-dev/portrait-local-fold-motion-01/three-cases.png>) · [三张用户图两方向端点](<D:/Data/Build/visual-analysis-dev/portrait-local-fold-motion-01/endpoint-private-preview.png>)
+
+
+先在新增高清数值配对的实拍输入和三张用户图上复核原生输出。用四时刻曝光验证的同外观替换均无改变。按外观分离与回放门槛追加时，三张用户图分别增加 1、2、2 张实验成图，新增高清数值配对对应实拍仍无追加。用户图缺少清晰原片，现阶段无法确认真人外观。33 项仓库测试及 56 项子测试通过，应用未接入。[四张原生替换回执](<D:/Data/Build/visual-analysis-dev/portrait-local-fold-motion-01/strict-native-refinement.json>)
