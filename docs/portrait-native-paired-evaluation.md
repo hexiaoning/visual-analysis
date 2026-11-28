@@ -6294,3 +6294,12 @@ Windows 原生增加 `--capture-error`，同时约束灰阶误差和可超出精
 联合方案的极暗区域出现新的通道截断和色斑。在第二、三张用户图另生成 4 张对照。分配曝光校正时，对同一帧每像素的三个线性通道加相同偏移，并保留部分上下限余量。12 步中通道差最大变化为 5.96×10⁻⁸。第二张脸部有通道达到 0 或 255 的像素比例平均由 19.74% 降至 7.13%，第三张由 0.51% 降至 0.006%。第二张依然有暗带、屏纹及色差。现有 Windows 筛选器在三张图上分别追加两张，通过的第二张候选仍包括一张有明显截断的图。这次显示复核只能说明通过已有数值筛选，用户三张图均缺少清晰原片。所有选择保持既有 8、18、35 张输出原像素，新增输出也与试验 PNG 一致。[限制通道偏移的对比](<D:/Data/Build/visual-analysis-dev/portrait-joint-ddim-01/neutral-comparison.png>) · [原生筛选回执](<D:/Data/Build/visual-analysis-dev/portrait-joint-ddim-01/native-paired-selection.json>)
 
 对三张用户图的 512 像素线性像素分配，用 Windows C++ CPU 与 Intel UHD 630 OpenCL 实测。31 次暖态运行的逐图中位耗时，CPU 为 2.92–4.55 毫秒，GPU 已驻留为 1.67–2.08 毫秒，计入复制和回读为 6.53–10.70 毫秒。三组 CPU 和 GPU 输出逐值相同，线性均值最大误差为 2.98×10⁻⁸。这只核对像素分配，扩散推理仍在本机 CPU 上。33 项仓库测试及 56 项子测试通过。[原生投影设备记录](<D:/Data/Build/visual-analysis-dev/portrait-joint-ddim-01/user--case-03-projection-device.txt>)
+
+
+### 独立端点生成及逐张曝光回放
+
+从同一糊图的四个既有时间提案中取首尾两张作为独立底图。以相反噪声分别进行五步 DifFace 512 扩散。每一步单独使用该底图拟合的模糊参数，按糊图与相应预测的有符号带通一致性约束中频结构。亮度只用三个通道共享的有界偏移，90 步的最大通道差变化为 5.96×10⁻⁸。三张用户图和六张留出实拍共生成 18 张。相较前次联合方案，按同一椭圆脸区计算，第二张两张候选的截断比例平均从 19.77% 降至 0.015%。暗带和肤色差仍可见。固定上一轮独立路线的源图回放拟合后，对三张用户图两候选的 12 个空间折，只有一个误差比前次独立路线下降，逐折误差相对增加的中位值为 53.98%。[单张候选的固定回放对照](<D:/Data/Build/visual-analysis-dev/portrait-individual-ddim-01/individual-forward-errors.json>) · [三张用户图对比](<D:/Data/Build/visual-analysis-dev/portrait-individual-ddim-01/private-review.png>)
+
+对每张生成图分别运行 Windows 原生两段曝光投影。短长比设为 1:31，长曝光与观测各通道的差至多 5 灰阶。严格模式下 7/18 张原样保留，改动通道数中位为 7.5。允许 2 灰阶及最多 256 个回放通道误差时 14/18 张原样保留。独立解码短、长画面，并用整数公式验算了全部 36 组回放。第三张的两种生成图原像素不变，分别配合各自求出的长曝光画面时都精确合成同一张糊图。参数来自已声明的模型，实际曝光比例未知。[投影及回放凭据](<D:/Data/Build/visual-analysis-dev/portrait-individual-ddim-01/projected.json>) · [第三张的两份精确回放对照](<D:/Data/Build/visual-analysis-dev/portrait-individual-ddim-01/third-exact-preview.png>)
+
+冻结生图和投影后评分。原始生成、严格投影和容差投影在 24 份短曝光参考中均为 0 份配对、0 份高清联合，历史库仍为 20/24、2/24。用同一 Windows 原生筛选器和已冻结的历史输出，对三张用户图分别追加 0、0、2 张严格投影图。第三张的两张在眼口细部上可见区别，且两张逐像素等于各自原生成图。核对了旧输出的索引和像素、追加输出及展示用回放文件。三张用户图缺少清晰原片，这次只验证了特定成像假设下的相容性，未核验与真人外观的覆盖。33 项仓库测试和 56 项子测试通过。[实拍覆盖评分](<D:/Data/Build/visual-analysis-dev/portrait-individual-ddim-01/coverage-experiment.json>) · [原生筛选回执](<D:/Data/Build/visual-analysis-dev/portrait-individual-ddim-01/native-individual-selection.json>)
