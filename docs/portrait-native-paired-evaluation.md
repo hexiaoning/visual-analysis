@@ -6350,3 +6350,22 @@ Windows 原生枚举新增固定偏移 `--short-offset`。候选保留原坐标�
 在 512×512 实拍数据上单独比较固定偏移的精确区间投影。21 次暖态中位值为 Windows CPU 0.0915 毫秒、Intel UHD 630 OpenCL 约 2.0 毫秒，CPU 与实跑 GPU 输出逐像素相同。此计时只覆盖区间投影，原生命令继续使用 CPU。[设备记录](<D:/Data/Build/visual-analysis-dev/portrait-short-motion-cover-01/device-projection.txt>)
 
 Windows 原生程序实际投影了全部 192 份。逐张解码复算表明，输出达到所有 25 个偏移下的独立最小平方改动，且保存的短、长画面均逐像素回放为原糊图。其中保留原片像素 96 份，45 份选用非零偏移。另把同一批从三张用户糊图生成的 24 个已有提案送入原生命令。固定与待选位移在零误差以及 2 灰阶、128 个通道两种限制下，均保持第三张的全部 8 个提案不变，第一、二张均需修改。这里验证已知提案的相容性，尚未由三张用户糊图生成新的高清外观。原生公开回归、33 项仓库测试及 56 项子测试通过。[原生留出验算](<D:/Data/Build/visual-analysis-dev/portrait-short-motion-cover-01/native-motion-holdout.json>) · [三组实拍原片及精确回放](<D:/Data/Build/visual-analysis-dev/portrait-short-motion-cover-01/real-motion-witnesses.png>) · [用户图提案逐份核对](<D:/Data/Build/visual-analysis-dev/portrait-short-motion-cover-01/private-motion-check.json>)
+
+### 同一外观内选择较清晰的代表
+
+用 10 张开发实拍上的 80 组成对候选训练同外观重排。每个样本比较较细频带的有符号原图相关、局部带通幅度及在交错空间折上估计虚拟模糊的残差。评分目标结合清晰参考上最弱部位细节的增量与配对边距的增量。按两个拍摄组轮流留出，数值改进方向的准确率为 72.5%、60.0%。两组的平均绝对误差为 0.0541、0.0446，始终预测无改进时为 0.0570、0.0315。该校准还不能稳定预测实际改善。另比较无需训练的有符号细节增量。[逐组校准](<D:/Data/Build/visual-analysis-dev/portrait-clear-representative-rank-01/calibration.json>)
+
+对 48 张留出和三张用户图，只在已有展示代表的五官带通距离 0.025 内考虑替换，沿用近似回放要求。如果某个原本分开的代表会和替换候选变近到同一门槛内，则保留原代表。每张糊图至多替换一个位置，其他展示保持原样。比较两种排序及是否要求整数位移回放不退步。另用清晰参考辅助计算在相同入围集合上能找回的外观上限。[由糊图和冻结候选决定的替换名单](<D:/Data/Build/visual-analysis-dev/portrait-clear-representative-rank-01/observed-ablation.json>)
+
+| 展示规则 | 数值配对（192 份） | 同时过清晰度（192 份） |
+| --- | ---: | ---: |
+| 已核对的既有展示 | 92 | 0 |
+| 学习排序，整数回放不退步 | 88 | 0 |
+| 有符号细节排序，整数回放不退步 | 85 | 0 |
+| 学习排序，沿用近似回放 | 90 | 2 |
+| 有符号细节排序，沿用近似回放 | 87 | 2 |
+| 两种排序一致且在 2 灰阶、128 通道内 | 89 | 2 |
+
+最后一行是在看到留出对照结果后作的回顾性比较，所用误差额度来自此前的实拍核验。四条事先冻结的替换路线分别核对了 29、30、34、36 个输出，计数含用户图。Windows 原生短曝光命令实际验算 129 个输出，其中 125 个逐像素保持提案，其余结果也在 2 灰阶、256 通道误差内。[逐份实拍增减](<D:/Data/Build/visual-analysis-dev/portrait-clear-representative-rank-01/selection-results.json>) · [一致排序与误差额度](<D:/Data/Build/visual-analysis-dev/portrait-clear-representative-rank-01/agreement-budget.json>) · [Windows 原生验算](<D:/Data/Build/visual-analysis-dev/portrait-clear-representative-rank-01/native-witnesses.json>)
+
+两份高清数值命中来自同一条糊图 `rb-00009-0382` 的时刻 5 和 7，对应同一张替换候选。原代表和新候选在固定裁边上的最低最大回放误差为 1、2 灰阶，受影响通道为 1、13 个，因此“不退步”条件挡住了新候选。全传感器原生验算原样保留新候选，最大误差 2 灰阶，影响 14 个通道。局部轮廓较清楚，唇形仍有目视差异。对三张用户图，沿用近似回放的两种路线均只替换第一、三张的各一个旧代表。第二张没有合适替换，第三张的眼口仍模糊。用户图没有清晰原片可核实外观。由于所有替换路线均牺牲一部分既有覆盖，新规则保留为实验。33 项仓库测试与 56 项子测试通过。[一个候选与两个清晰时刻](<D:/Data/Build/visual-analysis-dev/portrait-clear-representative-rank-01/two-reference-comparison.png>) · [三张用户图对比](<D:/Data/Build/visual-analysis-dev/portrait-clear-representative-rank-01/three-case-preview.png>)
