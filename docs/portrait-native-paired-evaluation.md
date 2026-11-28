@@ -6283,3 +6283,14 @@ Windows 原生增加 `--capture-error`，同时约束灰阶误差和可超出精
 在六个合成模糊宽度上恢复了相应档位，常量图无偏移。由原糊图和已有底图固定同一个回放模型，九张图的引导结果在两个空间折上都较同种子对照降低亮度回放误差。18 个折的降幅中位为 43.68%。在 6 张留出实拍和 3 张用户糊图上共生成 29 张，冻结并逐张核对像素及散列后再读清晰参考。留出组的 24 份短曝光中，较轻的无引导和引导扩散分别达到 0、7 份既有配对门槛。较强路线在参与的 8 份参考中通过 1 份。这些通过项都在历史候选库内。三种路线均未新增配对与清晰度联合通过项，测试子集的既有库仍为 20/24 配对、2/24 高清联合。[数值控制](<D:/Data/Build/visual-analysis-dev/portrait-dynfacerestore-01/guide-controls.json>) · [原图空间折](<D:/Data/Build/visual-analysis-dev/portrait-dynfacerestore-01/source-alignment.json>) · [实拍原片逐份评分](<D:/Data/Build/visual-analysis-dev/portrait-dynfacerestore-01/paired-evaluation.json>)
 
 更高噪声的两份输出在三张用户图上都有可见差异，第二张眼区暗带和屏纹仍明显。将新图放入已有 Windows 原生候选筛选器，第一、二张没有增添，第三张追加一张较轻的 DDIM 结果和一张高噪声结果。核对了三份输出回执、所有保留项索引以及每张候选 PNG 的像素。第三张可见更清楚的眼睛和嘴形，两个追加结果的眼睑及唇部也有区别。三张用户图仍缺少清晰原片，无法核对推断出来的五官是否与真人一致。本轮是离线研发评测，33 项仓库测试及 56 项子测试通过。[三张用户图生成对比](<D:/Data/Build/visual-analysis-dev/portrait-dynfacerestore-01/high-noise-review.png>) · [第三张原生筛选实测图](<D:/Data/Build/visual-analysis-dev/portrait-dynfacerestore-01/third-native-preview.png>) · [原生输出回执](<D:/Data/Build/visual-analysis-dev/portrait-dynfacerestore-01/native-comparison.json>)
+
+
+### 以两个候选的共同曝光引导扩散
+
+复用同一 DifFace 权重、初始底图、600 起点和固定六步。在每步分别预测两张清晰图，在线性光照域求平均，用从同一糊图拟合的观测模型校正共同均值。然后把均值改变量分给两个候选，使两个合法像素值尽可能接近改动前的值。在上下限允许时，两候选原有的通道差值保持不变。5,760 组数值对照通过了目标均值、交换顺序及内部差值检查。九组实际推理共核对 54 步，分配后线性均值的最大 RMS 残差小于 10⁻¹⁶。Windows 11 CPU 每组平均约 44.1 秒。两状态共同成像的假设源于时间曝光积分，实际拍摄的状态数和时序未知。[HyperCUT 的单图运动分解研究](https://arxiv.org/abs/2304.01686) · [线性均值控制](<D:/Data/Build/visual-analysis-dev/portrait-joint-ddim-01/linear-controls.json>)
+
+三张用户图可和等种子独立高噪声候选做一一对照。用固定的成像拟合回放两份图的共同曝光，6 个空间折中有 4 个的误差下降，降幅中位为 0.96%。六张留出实拍各生成两个候选，与三张用户图合计 18 张。冻结后读取 24 份对应清晰参考，没有新增数值配对或高清联合匹配，历史库仍为 20/24 配对、2/24 高清联合。两张候选即使能共同接近观测，其各自五官仍可能偏离清晰原片。[冻结生成及逐图得分](<D:/Data/Build/visual-analysis-dev/portrait-joint-ddim-01/paired-scores.json>) · [独立生成、联合生成及曝光均值](<D:/Data/Build/visual-analysis-dev/portrait-joint-ddim-01/private-comparison.png>)
+
+联合方案的极暗区域出现新的通道截断和色斑。在第二、三张用户图另生成 4 张对照。分配曝光校正时，对同一帧每像素的三个线性通道加相同偏移，并保留部分上下限余量。12 步中通道差最大变化为 5.96×10⁻⁸。第二张脸部有通道达到 0 或 255 的像素比例平均由 19.74% 降至 7.13%，第三张由 0.51% 降至 0.006%。第二张依然有暗带、屏纹及色差。现有 Windows 筛选器在三张图上分别追加两张，通过的第二张候选仍包括一张有明显截断的图。这次显示复核只能说明通过已有数值筛选，用户三张图均缺少清晰原片。所有选择保持既有 8、18、35 张输出原像素，新增输出也与试验 PNG 一致。[限制通道偏移的对比](<D:/Data/Build/visual-analysis-dev/portrait-joint-ddim-01/neutral-comparison.png>) · [原生筛选回执](<D:/Data/Build/visual-analysis-dev/portrait-joint-ddim-01/native-paired-selection.json>)
+
+对三张用户图的 512 像素线性像素分配，用 Windows C++ CPU 与 Intel UHD 630 OpenCL 实测。31 次暖态运行的逐图中位耗时，CPU 为 2.92–4.55 毫秒，GPU 已驻留为 1.67–2.08 毫秒，计入复制和回读为 6.53–10.70 毫秒。三组 CPU 和 GPU 输出逐值相同，线性均值最大误差为 2.98×10⁻⁸。这只核对像素分配，扩散推理仍在本机 CPU 上。33 项仓库测试及 56 项子测试通过。[原生投影设备记录](<D:/Data/Build/visual-analysis-dev/portrait-joint-ddim-01/user--case-03-projection-device.txt>)
