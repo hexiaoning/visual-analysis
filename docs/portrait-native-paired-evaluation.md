@@ -6005,3 +6005,29 @@ Windows 11 的 C++ 地标工具在相同九张输入上对比 CPU 和 Intel UHD 
 实拍采样新增的开发匹配另做九种半像素参考位置复核。对留出筛选时冻结的 1.35 倍设置，最稳的候选通过 5/9 个位置。这个复核仍属于开发组。[开发匹配位置复核](<D:/Data/Build/visual-analysis-dev/portrait-conditional-detail-flow-01/empirical-development-verification.json>)
 
 较宽频带和两档叠加在 51 张输入上冻结 3,264 张，含起始图与等幅锐化对照。714 组回放均通过。48 张留出实拍的 192 份参考中，原分辨率、较宽频带及叠加、实拍潜变量三路分别独立覆盖 55、55、33 份旧配对。较宽频带和实拍潜变量分别补到历史库之外的 1、4 份，两路新增有一份重叠，合并库为 115/192。三路各自及合并均为 0/192 高清联合达标。较宽频带的两份采样脸区中频差异中位为 0.000420，原分辨率为 0.000170，数值变化未转化为清晰外观覆盖。当前模型保留在本机实验，交付版未采用。33 项仓库测试通过。[较宽频带留出评分](<D:/Data/Build/visual-analysis-dev/portrait-conditional-detail-flow-01/wide-held-scores.json>) · [三路合并的逐份覆盖](<D:/Data/Build/visual-analysis-dev/portrait-conditional-detail-flow-01/three-arm-results.json>)
+
+### 用同一次曝光联合拟合五官位置和细节
+
+每张单一长曝光沿用由该输入产生的四个起始时刻。将两眼、鼻、口的局部位移和带符号亮度系数加入同一个求解，四个时刻共享相机参数，曝光权重受界限约束。亮度模板来自同一糊图的较清晰图、模型输出和起始图的频带。细节先合成，再用同一逆映射移动位置。相机失焦、平移和明暗由脸外数据确定。先在一组交错块拟合，再到另一组核对。两次拟合取均值，最终对实际 512 像素 PNG 的线性光曝光回放重新验证。逐图保留未改动的底图。原片仅用于后续评分。[测量约束的参考研究](https://openreview.net/pdf/dd7f2e1f5581d91eb4c1ff34fec78b93d3dfa599.pdf)
+
+用三个开发来源制作已知局部位移、亮度系数和时间权重的模拟曝光。相对已知的四个清晰状态，起始、仅位移、仅亮度、联合方案在四个五官区域的有符号亮度带误差中位数分别为 0.03394、0.01494、0.03178、0.01083。三组联合都优于两个单独对照，模型假定事先知道模拟的光学失焦。这仅说明在设定的成像模型和候选空间内，联合求解可同时改善位置与细节。[已知形变与亮度控制](<D:/Data/Build/visual-analysis-dev/portrait-coupled-replay-opt-01/synthetic-calibrated-controls.json>)
+
+10 张真实开发图的 40 份参考中，原序列有 16 份满足旧配对规则，1 份同时达清晰度门槛。只调位置、只调细节和联合路线分别有 14、19、12 份旧配对，高清联合分别为 0、2、2 份。另一条以不同面部状态起步的联合路线为 11、2 份。阶段结束后固定这四条路线。四路均在实验的两个空间折及实际量化图上通过回放检查。[开发逐图评分](<D:/Data/Build/visual-analysis-dev/portrait-coupled-replay-opt-01/development-scores.json>)
+
+另估计各个参数对曝光的局部响应，先在回放难以区分的方向产生不同的几何和亮度采样，再要求整组 8 位结果通过实际曝光回放。开发组共得到 15 组、60 张，时刻间相对于原联合解的脸区中频变化中位为 0.00121，最大半折回放误差增量的中位为 0.000060。它们单独匹配 12/40，其中 2/40 同时满足清晰度，均已被原有候选覆盖。[弱观测方向开发结果](<D:/Data/Build/visual-analysis-dev/portrait-coupled-replay-opt-01/weak-development-scores.json>)
+
+严格开发通过项都来自 `rb-00007-0089` 的两个短曝光时刻。复核上一轮分频及实拍潜变量的候选，两个时刻此前均已有匹配。因此开发中联合求解达到两份高清联合通过，未增加历史可覆盖的外观。[开发命中前后核对](<D:/Data/Build/visual-analysis-dev/portrait-coupled-replay-opt-01/development-new-references.json>)
+
+三张用户图先独立跑联合路线的真实 Windows 筛选。第一、二张未新增，第三张追加两张。原图反光还在，毛发与眼口仍软，两张看起来相近。再以四类微小平移、照明、锐化和噪声对照校准外观距离，160 个干扰对照仅三次过线，40 个已知局部形变全过线。在用户第三张上，按该距离补验仍会放行两张。开发中的几何与亮度扰动对照不足以证明该距离能处理真实反光。[三张用户图原生预览](<D:/Data/Build/visual-analysis-dev/portrait-coupled-replay-opt-01/three-case-joint-preview.png>) · [实际筛选回执](<D:/Data/Build/visual-analysis-dev/portrait-coupled-replay-opt-01/private-windows-selected.json>) · [近似候选距离复核](<D:/Data/Build/visual-analysis-dev/portrait-coupled-replay-opt-01/perceptual-duplicate-audit.json>)
+
+另以固定的 12 张真实屏拍及各自数字原帧复核。只调细节和联合求解各生成 48 张，96 张都通过整组曝光回放。只调细节在斜拍 00250 有一张同时过外观和清晰度门槛，联合方案为 0/12。合并历史候选后仍为 1/12，未增加可覆盖的清晰参考。[真实屏拍配对逐图评分](<D:/Data/Build/visual-analysis-dev/portrait-coupled-replay-opt-01/screen-scores.json>)
+
+将变形采样、四时刻线性光混合和固定 0.80 像素失焦的回放计算导出，使用 Windows C++ OpenVINO 测试两张留出实拍和第三张用户图。CPU 与 Intel UHD 630 GPU 的中位回放耗时为 3.65、3.37 毫秒，记录确认 GPU.0 执行卷积。相对研究版的最大浮点差分别为 7.45×10⁻⁷、3.58×10⁻⁷。该测试只含回放前向计算，实验中的完整反向求解仍在 CPU 运行。[原生回放性能与一致性](<D:/Data/Build/visual-analysis-dev/portrait-coupled-replay-opt-01/native-forward-test.json>)
+
+48 张留出实拍与三张用户图共冻结 2,040 张，包含 408 张起始图。408 组新候选全部通过回放检查。逐张读取并核验散列，共有四张与同输入下其他候选像素完全相同。拟合后的时刻权重在 0.1483 至 0.4728，逆映射最小雅可比值 0.8401。[留出文件和物理参数复核](<D:/Data/Build/visual-analysis-dev/portrait-coupled-replay-opt-01/held-integrity.json>)
+
+两个起始图家族下，只调位移、只调细节、中心联合和变换初始状态后的联合方案各自覆盖 80、62、88、85 份旧配对。其中分别有 2、2、5、6 份在历史候选库未匹配，各路之间有重叠。合并库由 115/192 增至 122/192，所有路线和合并库的高清联合仍为 0/192。以 Jin 序列起步，中心联合在未参与拟合的像素上的低分辨率回放误差，中位降低 0.00203，量化 PNG 的回放误差中位降低 0.00218。曝光误差下降并未补到清晰细节。[留出逐份评分](<D:/Data/Build/visual-analysis-dev/portrait-coupled-replay-opt-01/held-scores.json>)
+
+七份新增数值匹配的最弱五官区域响应在 0.178 至 0.857，均低于 0.9104。将其清晰参考作九种横纵半像素位置复核，逐份有 5、9、4、6、6、5、9 次满足旧配对，高清联合均为零。并排可见部分眼睑、唇形和眼镜仍偏软，少数裁切的边缘含镜像填充。[新增数值匹配的位置复核](<D:/Data/Build/visual-analysis-dev/portrait-coupled-replay-opt-01/novel-match-audit.json>) · [七份候选与真实短曝光的对照](<D:/Data/Build/visual-analysis-dev/portrait-coupled-replay-opt-01/new-reference-comparison.png>)
+
+Windows 原生筛选以 51 张输入实际核对 204 张提报图和所有入选 PNG。48 张留出实拍的展示数量由 999 到 1,040 张，旧配对展示覆盖由 79/192 到 81/192。新展示命中的两份参考此前已在历史候选库中得到匹配，展示高清联合覆盖仍是 0/192。用户三张分别增加 0、0、2 张，与早期预览一致，第三张两份仍有反光和相近的眼口轮廓。实验未达到交付清晰度。33 项仓库测试通过。[Windows 原生覆盖与回执](<D:/Data/Build/visual-analysis-dev/portrait-coupled-replay-opt-01/windows-summary.json>) · [用户三张图的实际对比](<D:/Data/Build/visual-analysis-dev/portrait-coupled-replay-opt-01/three-case-joint-analysis.png>)
