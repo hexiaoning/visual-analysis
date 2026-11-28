@@ -6274,3 +6274,12 @@ Windows C++ 共轭梯度求解通过卷积伴随内积及零修正检查。人�
 Windows 原生增加 `--capture-error`，同时约束灰阶误差和可超出精确回放的通道数。按通道取两层可行区间，用可行后缀遍历全部有解的分箱，续跑校验误差参数及游标。用 13 种配置核对全部 65,536 对短长通道值。对四种通道预算及四种分箱宽度，实际 51 页输出与穷举结果顺序、内容一致。500 个同一微型观测上的提案投影均达到穷举最小平方误差。原生输出的长曝光回放均达到给定短曝光图能实现的最小误差。[穷举和投影核对](<D:/Data/Build/visual-analysis-dev/portrait-short-exposure-cover-01/sparse-exhaustive-checks.json>)
 
 以 2 灰阶、至多 256 个通道运行 48 张实拍的原生投影。192 张参考全部按原像素输出，独立解码并复算的回放最大误差为 2，最多 163 个通道受影响。清晰参考只在投影验证时作为提案读取。另用三张用户图已有的 18 个单图候选作投影，其中 8 张保持原像素。此轮没有补出新的清晰五官。即使只计每通道分箱宽度为 8 且能精确回放的分箱，三张用户图的分箱数的十进制对数仍约为 115.6 万、109.9 万、116.5 万。该数量包含不具备人像外观的光栅，不能换算为用户要看的候选张数。现有模型因此可以用于保留可能性，仍需另外生成和验证清晰外观。[原生逐份图像验算](<D:/Data/Build/visual-analysis-dev/portrait-short-exposure-cover-01/native-sparse-holdout.json>) · [三张用户图的分箱统计](<D:/Data/Build/visual-analysis-dev/portrait-short-exposure-cover-01/private-cover-size.json>)
+
+
+### 随局部回放证据调整人脸扩散
+
+使用既有 DifFace 的 FFHQ 512 扩散权重，校验 SHA-256 为 `e16446b14cff4fedf1102ba67945fcced2074500a3fe8fd2bfad5d818928d1d0`。从同一糊图已有的一个底图出发，拟合六档等效高斯模糊和局部亮度。然后按照已获原图支持的有符号边缘，在扩散的每步通过正则化频域校正重放观测。起始时间由糊图与底图的局部拟合决定。采用四步 DDIM 作同种子、有无局部引导的对照，另试更高噪声起点 600 的六步路线。用图像散列定种子，三张用户图各加相反噪声样本以比较细部。此处是借鉴区域引导思路的独立实验，运行时使用 Windows 11 CPU PyTorch，测试代码阻断联网。[DynFaceRestore 论文](https://arxiv.org/abs/2507.13797) · [DifFace 权重与原实现](https://github.com/zsyOAOA/DifFace)
+
+在六个合成模糊宽度上恢复了相应档位，常量图无偏移。由原糊图和已有底图固定同一个回放模型，九张图的引导结果在两个空间折上都较同种子对照降低亮度回放误差。18 个折的降幅中位为 43.68%。在 6 张留出实拍和 3 张用户糊图上共生成 29 张，冻结并逐张核对像素及散列后再读清晰参考。留出组的 24 份短曝光中，较轻的无引导和引导扩散分别达到 0、7 份既有配对门槛。较强路线在参与的 8 份参考中通过 1 份。这些通过项都在历史候选库内。三种路线均未新增配对与清晰度联合通过项，测试子集的既有库仍为 20/24 配对、2/24 高清联合。[数值控制](<D:/Data/Build/visual-analysis-dev/portrait-dynfacerestore-01/guide-controls.json>) · [原图空间折](<D:/Data/Build/visual-analysis-dev/portrait-dynfacerestore-01/source-alignment.json>) · [实拍原片逐份评分](<D:/Data/Build/visual-analysis-dev/portrait-dynfacerestore-01/paired-evaluation.json>)
+
+更高噪声的两份输出在三张用户图上都有可见差异，第二张眼区暗带和屏纹仍明显。将新图放入已有 Windows 原生候选筛选器，第一、二张没有增添，第三张追加一张较轻的 DDIM 结果和一张高噪声结果。核对了三份输出回执、所有保留项索引以及每张候选 PNG 的像素。第三张可见更清楚的眼睛和嘴形，两个追加结果的眼睑及唇部也有区别。三张用户图仍缺少清晰原片，无法核对推断出来的五官是否与真人一致。本轮是离线研发评测，33 项仓库测试及 56 项子测试通过。[三张用户图生成对比](<D:/Data/Build/visual-analysis-dev/portrait-dynfacerestore-01/high-noise-review.png>) · [第三张原生筛选实测图](<D:/Data/Build/visual-analysis-dev/portrait-dynfacerestore-01/third-native-preview.png>) · [原生输出回执](<D:/Data/Build/visual-analysis-dev/portrait-dynfacerestore-01/native-comparison.json>)
