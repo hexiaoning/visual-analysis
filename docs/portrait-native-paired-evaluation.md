@@ -6078,3 +6078,20 @@ Windows C++、ONNX Runtime CPU 与 Intel UHD 630 的 DirectML 在同样三张输
 两个新增配对的最弱区域响应为 0.165 和 0.670。将清晰参考在横纵方向各偏移半个像素进行复核，九种位置中两份分别有 8、4 种保留配对，高清联合均为零。分别在原候选与新候选都通过配对的 53 份参考中比较各自最好的最弱区域，两个中位数分别为 0.609 和 0.658，逐份增量的中位数为 0.025。并排原片仍可看到镜框、嘴唇的偏软，以及第一份新增里的眼鼻位置差异。[原片及新旧候选并排](<D:/Data/Build/visual-analysis-dev/portrait-phase-complement-01/held-phase-comparison.png>) · [参考稳定性复核](<D:/Data/Build/visual-analysis-dev/portrait-phase-complement-01/reference-audit.json>)
 
 逐文件解码复核共 1,262 个候选 PNG，其中 1,114 个的像素在同一输入内唯一，148 个逐像素重复。通过曝光回放的新文件共 932 个，含重复文件。所有源图与冻结清单一致。模型生成使用 Windows 原生程序，合成实验仍在本机研究脚本运行。33 项仓库测试通过，本轮成果保留为实验记录，交付版仍待清晰度验收。[候选文件完整性和重复项](<D:/Data/Build/visual-analysis-dev/portrait-phase-complement-01/held-integrity.json>)
+
+
+### 将四时刻形变纳入曝光反投影
+
+四个起始时刻和曝光权重沿用此前只从同一糊图推定的结果。以第二个时刻的 256 像素对齐图为坐标，使用双向 DIS 光流估计四个时刻的采样位移，以往返误差降权并限制最大位移。从脸外的交错像素估计失焦、整图位移、增益和偏移。对线性光亮度残差求解带梯度正则的方程。双线性采样的前向与反向使用同一套索引和权重。每组只在一半观测像素上拟合并用另一半核验，两次解平均后以三次插值加回 512 像素彩色底图，再用原曝光门槛检查实际量化成图。比较两档正则强度及同强度的无形变对照。[DIS 光流论文](https://arxiv.org/abs/1603.03590)
+
+两组已知位移控制的前向与伴随内积相对误差最大为 1.04×10⁻⁶。相对于已知的有符号双边缘，未反演的 RMS 为 0.00564。按真实位移反演分别到 0.00407、0.00398，按固定位置反演分别为 0.00541、0.00582。零修正通过全部 256 档灰阶的线性光转回检查。Windows C++ 用同一份稀疏索引核对两张实拍和第三张用户图，前向加伴随的推理中位耗时 CPU 为 5.59 毫秒，Intel UHD 630 OpenCL 为 2.95 毫秒。CPU 和 GPU 的最大浮点差为 1.79×10⁻⁷，和研究实现的最大差为 4.18×10⁻⁷。计时包含前向、失焦与伴随，不含完整反向求解或图像传入传出。稀疏算子明确在 GPU 上执行。[已知位移对照](<D:/Data/Build/visual-analysis-dev/portrait-warp-inverse-01/known-motion-controls.json>) · [Windows 原生核对](<D:/Data/Build/visual-analysis-dev/portrait-warp-inverse-01/native-benchmark.json>)
+
+开发组 10 张实拍的 40 份参考中，旧四时刻和上一轮合成底图各通过 12、21 份原配对门槛。反投影的两档形变约束和无形变对照分别为 18、15、17 份，三路同时过清晰度的均为零。较强形变反演的留出像素亮度误差下降中位为 0.00021。另用真实短曝光估计位移作诊断。用真值估计位移和用输入推定位移的反演都配对 15 份。用真值估计位移时只补出一个本已被旧库覆盖的严格通过项，清晰度为 0.91093。这组真值评估只用于定位误差。即使知道清晰帧之间的位移，当前反演仍没有补到新的清晰外观。[开发组评分](<D:/Data/Build/visual-analysis-dev/portrait-warp-inverse-01/development-scores.json>) · [已知清晰时刻的位移诊断](<D:/Data/Build/visual-analysis-dev/portrait-warp-inverse-01/motion-field-oracle.json>)
+
+用户三张样图的 Windows 原生筛选分别追加 0、0、1 张。已逐像素核对实际输出与提报名单。第三张入选的原生回放残差为 0.01450，成图仍有反光和眼口软边。第一、二张能看到屏纹重新进入成图。三张都没有清晰原片供外观确认。[原图、底图及实际入选](<D:/Data/Build/visual-analysis-dev/portrait-warp-inverse-01/three-cases-inverse.png>) · [原生筛选回执](<D:/Data/Build/visual-analysis-dev/portrait-warp-inverse-01/windows-private-results.json>)
+
+48 张留出实拍加三张用户图共得到 612 张新候选，三路的 153 组全通过冻结的曝光回放。192 份原片参考中，原四时刻、上一轮合成底图、较弱形变反演、较强形变反演及无形变对照，分别通过 63、66、60、54、65 份配对。形变反演两路各补到一份历史未匹配参考，合并库配对由 125/192 到 127/192。清晰度与配对同时达标仍为 0/192。两份新增为 `rb-00008-0156` 与 `rb-00008-0187` 的时刻标签 5，最弱部位的有符号细节响应分别为 0.275 和 0.733，均低于 0.9104。横纵移动参考半个像素的九种组合中，两份均有六种保持数值配对，清晰联合仍为零。并排可见眼皮、唇线偏软，第一份的鼻口拖影尤为明显。[独立留出评分](<D:/Data/Build/visual-analysis-dev/portrait-warp-inverse-01/held-scores.json>) · [位置复核](<D:/Data/Build/visual-analysis-dev/portrait-warp-inverse-01/held-offset-audit.json>) · [真实短曝光并排图](<D:/Data/Build/visual-analysis-dev/portrait-warp-inverse-01/held-inverse-comparison.png>)
+
+为减少屏纹返写，另在脸外小块检测重复窄频峰，只从反投影残差里抑制这些频率。已知周期对照的幅度由 0.0400 降至 0.00560，另一低频结构保留 0.07995。固定的 12 张有数字原帧的实拍屏摄中，11 张触发残差抑制。以此前联合求解成图为底，原底图、普通反投影和抑制屏纹后三路均为 0/12 清晰联合。以只调细节的冻结底图复验，三路均保留原有的斜拍 00250，仍为 1/12。第一张用户图的残差中被抑制部分的相对 RMS 为 57.6%，并排可见格纹减弱。第二张未检出稳定周期，第三张反光仍在。三张用户图的实际参考图缺失，格纹变化无法用于确认面部外观。[固定屏摄配对](<D:/Data/Build/visual-analysis-dev/portrait-warp-inverse-01/carrier-screen-scores.json>) · [第二种底图的复验](<D:/Data/Build/visual-analysis-dev/portrait-warp-inverse-01/carrier-alternate-scores.json>) · [用户图的残差抑制对照](<D:/Data/Build/visual-analysis-dev/portrait-warp-inverse-01/three-cases-carrier.png>)
+
+本轮调查把曝光回放改善和清晰覆盖分别验收。33 项仓库测试通过。完整求解仍为本机实验，交付版继续等待清晰度验收。
