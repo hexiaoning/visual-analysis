@@ -81,4 +81,18 @@ std::optional<ClearRepresentativeReplacement> refine_clear_representative(
     std::size_t kept_count, std::size_t added_count,
     const std::function<bool(std::size_t, std::size_t)>& visibly_different);
 
+struct ExposureRepresentativeReplacement {
+    ClearRepresentativeReplacement choice;
+    std::size_t family;
+    std::array<double, 4> baseline_replay;
+};
+
+// Evaluate each complete revision against the same four baseline instants.
+// Every revision member indexes a candidate outside the displayed prefix.
+std::optional<ExposureRepresentativeReplacement> refine_exposure_representative(
+    const cv::Mat& source, const std::vector<cv::Mat>& candidates, std::size_t displayed_count,
+    const std::array<cv::Mat, 4>& baseline, const std::array<double, 4>& shutter,
+    const std::vector<std::array<std::size_t, 4>>& families,
+    const std::function<bool(std::size_t, std::size_t)>& visibly_different);
+
 }

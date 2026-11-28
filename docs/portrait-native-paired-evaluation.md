@@ -6123,3 +6123,16 @@ Windows C++、ONNX Runtime CPU 与 Intel UHD 630 的 DirectML 在同样三张输
 现有 Windows 选图在 48 张留出图上分别复跑追加和同外观替换。原展示共 1,040 张。追加法实际输出 41 张新图，其中一份参考有数值配对。替换法更换两张，两张均未形成通过配对的参考。两种方式的新增展示均为 0 份清晰联合匹配。新文件和候选逐像素一致。一组追加批次超时后只重跑了未完成的一张，其余按已有实际回执合并。[完整 Windows 筛选复核](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shock-limited-01/windows-held-verification.json>)
 
 对清晰联合新增例，三个候选相对现有首图的五官距离为 0.01079、0.01161、0.01103，均在追加半径以内。三个候选都通过同外观替换的局部细节提升判断，但会使原先分开的另一张图跨过粗轮廓分离半径，并且单帧四折回放至少一折超过 0.0006 的增量容差。将拍摄参数锁定到旧候选时，三者的单帧回放增量仍更高。相同输入的 8×8 四时刻曝光回放，两折的误差增量分别为 0.000508、0.000408，并继续通过整组回放。当前证据表明，单张候选的回放条件和同组时刻的曝光检验会给出不同筛选结果。33 项仓库测试通过，交付版仍待清晰度验收。[单帧替换条件核对](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shock-limited-01/strict-match-replay-probe.json>) · [四时刻曝光复核](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shock-limited-01/exposure-family-audit.json>)
+
+
+### 用整组曝光决定同外观替换
+
+新增 Windows 原生离线评测命令 `--refine-exposure-representatives`。每个输入为一张糊图、已展示代表、同一糊图生成的四张基线时刻、曝光权重和四时刻候选修订。将组内图像转为线性光，在 128 像素网格加权积分后转回亮度。四折分别对基线曝光拟合失焦、平移和亮度参数，再锁定这些参数核对修订组。通过整组回放的成员仍需满足局部清晰提升、与原代表接近以及保留双向可见的旧外观差异。每次最多替换一张，逐像素核对实际 PNG 与清单索引。实际交付仍待清晰度验收。[命令和清单](../native/tools/portrait_candidates/README.md#用四时刻共同曝光复核替换)
+
+在 48 张已冻结的留出实拍上，沿用 1,040 张 Windows 展示作为基线。整组曝光替换实际换了六张，新增两份数值配对并丢失五份，展示配对总数由 81/192 降到 78/192。展示的高清联合通过仍为 0/192。上一轮对一份清晰原片同时过线的三张候选，仍因丢失与另一已有代表的双向五官差异而未保留。失去四份配对的样片是 `rb-00010-0117`，替换图距旧代表的带通距离约 0.00882。这个结果表明距离接近、整组曝光和双向差异不足以保证每个原有外观仍收到覆盖。[六次替换与覆盖变化](<D:/Data/Build/visual-analysis-dev/portrait-exposure-selector-01/presentation-results.json>)
+
+另从显示中最接近的原代表增强局部轮廓，再用同一条源序列的另外三个时刻补偿曝光。仅对带通距离不超过 0.025 的对应时刻尝试，对 8×8 采样单元重新约束四时刻加权亮度。冻住 272 张成图后再读原片，单独数值配对为 52/192，有 1/192 同时过清晰度，仍是此前已覆盖的 `rb-00009-0382` 时刻 7。合并候选库为 128/192 数值配对及 1/192 清晰联合。Windows 实际换了五张，增加两份、丢失三份，展示配对由 81/192 到 80/192，展示的清晰联合仍为 0/192。这个试验复用了已经过分析的留出队列，成绩用于比较替换机制。[逐张成图评分](<D:/Data/Build/visual-analysis-dev/portrait-exposure-selector-01/anchored-bank-scores.json>) · [旧代表、成图和清晰参考](<D:/Data/Build/visual-analysis-dev/portrait-exposure-selector-01/anchored-reference-comparison.png>) · [实际展示的增减](<D:/Data/Build/visual-analysis-dev/portrait-exposure-selector-01/anchored-presentation-results.json>)
+
+三张用户样图中，整组曝光路线只在第三张替换了一张，保持 31 张的实验展示数量，四折的最大误差增量为 0.00000603。旧代表锚定路线三张均无替换。保留第三张的实际入选 PNG，独立将同组的另一时刻替换为错误的伴随画面，原候选因此未进入输出。三张均缺少对应清晰原片。第三张仍有屏幕反光和眼口软边。[第三张实际替换前后](<D:/Data/Build/visual-analysis-dev/portrait-exposure-selector-01/case-03-replaced.png>) · [三张原生回执](<D:/Data/Build/visual-analysis-dev/portrait-exposure-selector-01/private-selection.json>) · [更换同组时刻的对照](<D:/Data/Build/visual-analysis-dev/portrait-exposure-selector-01/phase-companion-control.json>)
+
+33 项仓库测试通过。公开五例的既有普通、拟合去重、纹理保护及覆盖回归通过。新入口核对了错误权重、重复索引、空修订组、非法尺寸和相对路径。最终原生构建在第三张样图和一张留出图上逐像素复现了实际选图。全部素材与研究产物保存在 D 盘 Data 目录。[原生输入检查](<D:/Data/Build/visual-analysis-dev/portrait-exposure-selector-01/native-input-checks.json>) · [最终构建复核](<D:/Data/Build/visual-analysis-dev/portrait-exposure-selector-01/final-native-checks.json>)

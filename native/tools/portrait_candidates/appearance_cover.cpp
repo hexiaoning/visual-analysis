@@ -317,6 +317,24 @@ ReplayFits fit_clear_replays(const cv::Mat& portrait, const cv::Mat& observed, c
     return fits;
 }
 
+std::array<cv::Mat, 4> exposure_replay_images(
+    const std::array<cv::Mat, 4>& phases, const std::array<double, 4>& shutter) {
+    cv::Mat average = cv::Mat::zeros(128, 128, CV_32FC3);
+    cv::Mat conversion(1, 256, CV_32F);
+    for (int i = 0; i < 256; ++i)
+        conversion.at<float>(0, i) = static_cast<float>(std::pow(i / 255., 2.2));
+    for (std::size_t i = 0; i < phases.size(); ++i) {
+        cv::Mat linear, reduced;
+        cv::LUT(phases[i], conversion, linear);
+        cv::resize(linear, reduced, average.size(), 0, 0, cv::INTER_AREA);
+        average += shutter[i] * reduced;
+    }
+    cv::pow(average, 1. / 2.2, average);
+    cv::Mat gray;
+    cv::cvtColor(average, gray, cv::COLOR_BGR2GRAY);
+    return {gray, smooth(gray, .65), smooth(gray, 1.25), smooth(gray, 2.1)};
+}
+
 }
 
 AppearanceCover cover_appearances(const std::vector<cv::Mat>& candidates, double radius) {
@@ -589,6 +607,114 @@ std::optional<ClearRepresentativeReplacement> refine_clear_representative(
                 return std::nullopt;
         }
         return proposal;
+    }
+    return std::nullopt;
+}
+
+std::optional<ExposureRepresentativeReplacement> refine_exposure_representative(
+    const cv::Mat& source, const std::vector<cv::Mat>& candidates, std::size_t displayed_count,
+    const std::array<cv::Mat, 4>& baseline, const std::array<double, 4>& shutter,
+    const std::vector<std::array<std::size_t, 4>>& families,
+    const std::function<bool(std::size_t, std::size_t)>& visibly_different) {
+    double total = 0.;
+    for (double weight : shutter) {
+        if (!std::isfinite(weight) || weight <= 0. || weight >= 1.)
+            throw std::invalid_argument("Exposure weights must be positive and finite");
+        total += weight;
+    }
+    if (std::abs(total - 1.) > 1.e-6 || displayed_count == 0 || displayed_count > candidates.size() || !visibly_different)
+        throw std::invalid_argument("Invalid exposure weights or displayed prefix");
+    const auto aligned = [](const cv::Mat& picture) {
+        return picture.type() == CV_8UC3 && picture.size() == cv::Size(512, 512);
+    };
+    if (!aligned(source) || !std::ranges::all_of(baseline, aligned) || !std::ranges::all_of(candidates, aligned))
+        throw std::invalid_argument("Expected aligned 512x512 BGR exposure images");
+
+    std::vector<bool> used(candidates.size(), false);
+    for (const auto& family : families)
+        for (std::size_t member : family) {
+            if (member < displayed_count || member >= candidates.size() || used[member])
+                throw std::invalid_argument("Each exposure member must be a unique revised candidate index");
+            used[member] = true;
+        }
+    if (families.empty())
+        return std::nullopt;
+
+    const auto observed = thumbnail(source);
+    const auto folds = replay_folds(observed);
+    if (std::any_of(folds.begin(), folds.end(), [](const auto& fold) { return fold.checking.size() < 80; }))
+        return std::nullopt;
+
+    const auto baseline_images = exposure_replay_images(baseline, shutter);
+    ReplayFits baseline_fits;
+    for (std::size_t f = 0; f < folds.size(); ++f)
+        baseline_fits[f] = fit_replay(baseline_images, observed, folds[f], 2, 1.e-6);
+    constexpr double close_radius = .025;
+    constexpr double standard_radius = .055;
+    const auto bank = analyse_appearance_bank(source, candidates);
+    std::vector<std::optional<RegionalClarity>> current(displayed_count);
+    std::vector<ExposureRepresentativeReplacement> proposals;
+    for (std::size_t i = 0; i < families.size(); ++i) {
+        std::array<cv::Mat, 4> phases;
+        for (std::size_t phase = 0; phase < phases.size(); ++phase)
+            phases[phase] = candidates[families[i][phase]];
+
+        const auto revised_images = exposure_replay_images(phases, shutter);
+        ExposureRepresentativeReplacement replay{};
+        replay.family = i;
+        bool consistent = true;
+        for (std::size_t f = 0; f < folds.size(); ++f) {
+            const auto& fit = baseline_fits[f];
+            replay.baseline_replay[f] = fit.error;
+            replay.choice.replay_deltas[f] = replay_error(revised_images[fit.blur], observed, folds[f].checking, fit) - fit.error;
+            replay.choice.replay_limits[f] = std::clamp(.06 * fit.error, .0006, .0013);
+            consistent = consistent && replay.choice.replay_deltas[f] <= replay.choice.replay_limits[f];
+        }
+        if (!consistent)
+            continue;
+
+        for (std::size_t member : families[i]) {
+            const auto& distances = bank.distances[member];
+            const auto nearest = std::min_element(distances.begin(), distances.begin() + displayed_count);
+            const auto old = static_cast<std::size_t>(nearest - distances.begin());
+            if (*nearest > close_radius || bank.candidate_detail[member] < .98 * bank.observed_detail ||
+                bank.replay_errors[member] > bank.replay_errors[old] + .004)
+                continue;
+            if (!current[old])
+                current[old] = oriented_clarity(candidates[old]);
+            auto proposal = replay;
+            proposal.choice.previous = old;
+            proposal.choice.proposed = member;
+            proposal.choice.distance = *nearest;
+            if (clarity_improvement(*current[old], oriented_clarity(candidates[member]), proposal.choice))
+                proposals.push_back(proposal);
+        }
+    }
+
+    std::stable_sort(proposals.begin(), proposals.end(), [](const auto& a, const auto& b) {
+        return a.choice.clarity_gain > b.choice.clarity_gain;
+    });
+    const auto distinct = [&](std::size_t first, std::size_t second) {
+        return visibly_different(first, second) && visibly_different(second, first);
+    };
+    for (const auto& proposal : proposals) {
+        const auto old = proposal.choice.previous;
+        const auto revised = proposal.choice.proposed;
+        if (visibly_different(old, revised) || visibly_different(revised, old))
+            continue;
+        bool preserves = true;
+        for (std::size_t j = 0; j < displayed_count && preserves; ++j) {
+            if (j == old)
+                continue;
+            const auto before = bank.distances[old][j];
+            const auto after = bank.distances[revised][j];
+            if (before > standard_radius && after <= close_radius)
+                preserves = false;
+            else if (before > close_radius && distinct(old, j))
+                preserves = after > close_radius && distinct(revised, j);
+        }
+        if (preserves)
+            return proposal;
     }
     return std::nullopt;
 }

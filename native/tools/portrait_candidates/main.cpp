@@ -21,6 +21,7 @@
 #include <opencv2/imgcodecs.hpp>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <windows.h>
@@ -659,6 +660,74 @@ fs::path refine_clear_representatives(wchar_t **argv, int argc) {
     });
 }
 
+fs::path refine_exposure_representatives(const fs::path& manifest, const fs::path& output) {
+    cv::setNumThreads(1);
+    std::ifstream input(manifest, std::ios::binary);
+    if (!input)
+        throw std::runtime_error("Could not read exposure manifest");
+    const auto job = Json::parse(input);
+    const auto directory = manifest.parent_path();
+    const auto path = [&directory](const Json& name) {
+        const auto utf8 = name.get<std::string>();
+        const fs::path picture(std::u8string(utf8.begin(), utf8.end()));
+        return directory / picture;
+    };
+    const auto& baseline_paths = job.at("baseline");
+    const auto& weights = job.at("shutter");
+    const auto& count = job.at("displayed");
+    if (!baseline_paths.is_array() || baseline_paths.size() != 4 || !weights.is_array() || weights.size() != 4 ||
+        !count.is_number_unsigned() || !job.at("candidates").is_array() || !job.at("families").is_array())
+        throw std::invalid_argument("Expected four baseline phases and weights, a displayed count, and arrays of candidates and families");
+
+    std::array<cv::Mat, 4> baseline;
+    for (std::size_t i = 0; i < baseline.size(); ++i) {
+        if (!weights.at(i).is_number())
+            throw std::invalid_argument("Exposure weights must be numeric");
+        baseline[i] = read_image(path(baseline_paths.at(i)));
+    }
+    const auto displayed = count.get<std::size_t>();
+    std::vector<cv::Mat> portraits;
+    for (const auto& name : job.at("candidates"))
+        portraits.push_back(read_image(path(name)));
+    std::vector<std::array<std::size_t, 4>> families;
+    for (const auto& family : job.at("families")) {
+        if (!family.is_array() || family.size() != 4 ||
+            !std::ranges::all_of(family, [](const auto& member) { return member.is_number_unsigned(); }))
+            throw std::invalid_argument("Expected four candidate indices in each exposure family");
+        families.push_back(family.get<std::array<std::size_t, 4>>());
+    }
+    const auto source = read_image(path(job.at("source")));
+    ShapeComparisons comparisons(path(job.at("landmarks")), portraits);
+    const auto replacement = portrait_selection::refine_exposure_representative(
+        source, portraits, displayed, baseline, weights.get<std::array<double, 4>>(), families,
+        [&](auto old, auto revised) { return comparisons.different(old, revised); });
+
+    std::vector<std::size_t> selected(displayed);
+    std::iota(selected.begin(), selected.end(), 0);
+    Json outcome = nullptr;
+    if (replacement) {
+        const auto& choice = replacement->choice;
+        selected[choice.previous] = choice.proposed;
+        Json regional = Json::array();
+        for (const auto gain : choice.regional_gain)
+            regional.push_back(gain ? Json(*gain) : Json(nullptr));
+        outcome = {{"previous", choice.previous}, {"proposed", choice.proposed}, {"family", replacement->family},
+                   {"distance", choice.distance}, {"clarity_gain", choice.clarity_gain}, {"regional_gain", regional},
+                   {"baseline_replay", replacement->baseline_replay},
+                   {"replay_deltas", choice.replay_deltas}, {"replay_limits", choice.replay_limits}};
+    }
+    return publish_run(output, [&](const fs::path& pending) {
+        const Json report = {{"mode", "exposure-refinement"}, {"displayed_count", displayed},
+                             {"replacement", outcome}, {"pair_checks", comparisons.checks},
+                             {"outputs", write_indexed_candidates(pending, portraits, selected)}};
+        std::ofstream receipt(pending / "selection.json", std::ios::binary);
+        receipt << report.dump(2) << '\n';
+        receipt.close();
+        if (!receipt)
+            throw std::runtime_error("Could not write exposure refinement receipt");
+    });
+}
+
 fs::path cover_shapes(wchar_t **argv, int argc) {
     cv::setNumThreads(1);
     const std::wstring value(argv[2]);
@@ -812,6 +881,7 @@ int wmain(int argc, wchar_t **argv) {
             "PortraitCandidates.exe --extend-shape-cover radius replay-tolerance kept-count [--max-additions count [--close-separation radius]] [--landmarks model.onnx] source.png output-directory candidate.png [more.png ...]\n"
             "PortraitCandidates.exe --refine-representatives kept-count landmarks.onnx source.png output-directory shown.png [more.png ...]\n"
             "PortraitCandidates.exe --refine-clear-representatives kept-count added-count landmarks.onnx source.png output-directory shown.png [more.png ...]\n"
+            "PortraitCandidates.exe --refine-exposure-representatives manifest.json output-directory\n"
             "PortraitCandidates.exe --inspect-appearance-bank radius [--directed [--swap-prefix count replay-tolerance]] landmarks.onnx|--distance-only source.png output-directory candidate.png [more.png ...]\n"
             "PortraitCandidates.exe --transfer-guided-detail donor.png guide.png output-directory [donor2.png guide2.png output2 ...]\n"
             "PortraitCandidates.exe --bounded-exposure-directions dictionary.bin input.png anchor1.png anchor2.png seed-directory output-directory\n"
@@ -839,6 +909,12 @@ int wmain(int argc, wchar_t **argv) {
             if (argc < 8)
                 throw std::invalid_argument(usage);
             print_output_path(refine_clear_representatives(argv, argc));
+            return 0;
+        }
+        if (option == L"--refine-exposure-representatives") {
+            if (argc != 4)
+                throw std::invalid_argument(usage);
+            print_output_path(refine_exposure_representatives(argv[2], argv[3]));
             return 0;
         }
         if (option == L"--inspect-appearance-bank") {
