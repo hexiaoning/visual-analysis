@@ -25,6 +25,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <windows.h>
 
@@ -275,6 +276,25 @@ int exposure_argument(std::wstring_view input, int maximum) {
     return value;
 }
 
+int exposure_offset(std::wstring_view input) {
+    const bool negative = input.starts_with(L'-');
+    const int magnitude = exposure_argument(negative ? input.substr(1) : input,
+                                            std::numeric_limits<int>::max());
+    return negative ? -magnitude : magnitude;
+}
+
+std::vector<cv::Point> exposure_offsets(int radius, cv::Size size) {
+    std::vector<cv::Point> offsets;
+    const auto horizontal = std::min(radius, size.width - 1);
+    const auto vertical = std::min(radius, size.height - 1);
+    for (int y = -vertical; y <= vertical; ++y)
+        for (int x = -horizontal; x <= horizontal; ++x)
+            offsets.emplace_back(x, y);
+    const auto order = [](cv::Point point) { return std::tuple{point.dot(point), point.y, point.x}; };
+    std::sort(offsets.begin(), offsets.end(), [&](cv::Point a, cv::Point b) { return order(a) < order(b); });
+    return offsets;
+}
+
 void write_exposure_report(const fs::path &directory, const Json &report) {
     std::ofstream stream(directory / "exposure-cover.json", std::ios::binary);
     stream << report.dump(2) << '\n';
@@ -285,27 +305,50 @@ void write_exposure_report(const fs::path &directory, const Json &report) {
 
 fs::path short_exposure(wchar_t **argv, int argc, bool project) {
     using Camera = portrait_selection::ShortExposureCamera;
+    using Cover = portrait_selection::ShortExposureCover;
     int next_arg = project ? 7 : 9;
-    const bool limited_error = next_arg < argc && std::wstring_view(argv[next_arg]) == L"--capture-error";
+    bool limited_error = false;
     int capture_tolerance = 0;
     int channel_budget = 0;
-    if (limited_error) {
-        if (argc - next_arg < 3)
-            throw std::invalid_argument("Capture error requires both a maximum gray difference and a channel count");
-        capture_tolerance = exposure_argument(argv[next_arg + 1], 255);
-        channel_budget = exposure_argument(argv[next_arg + 2], std::numeric_limits<int>::max());
-        next_arg += 3;
+    std::optional<cv::Point> fixed_offset;
+    std::optional<int> radius;
+    while (next_arg < argc) {
+        const std::wstring_view flag(argv[next_arg]);
+        if (flag == L"--capture-error") {
+            if (limited_error || argc - next_arg < 3)
+                throw std::invalid_argument("Specify capture error once with a gray difference and a channel count");
+            limited_error = true;
+            capture_tolerance = exposure_argument(argv[next_arg + 1], 255);
+            channel_budget = exposure_argument(argv[next_arg + 2], std::numeric_limits<int>::max());
+            next_arg += 3;
+        } else if (flag == L"--short-offset") {
+            if (fixed_offset || radius || argc - next_arg < 3)
+                throw std::invalid_argument("Specify one translation using horizontal and vertical offsets");
+            fixed_offset = cv::Point{exposure_offset(argv[next_arg + 1]), exposure_offset(argv[next_arg + 2])};
+            next_arg += 3;
+        } else if (flag == L"--translation-radius") {
+            if (!project || radius || fixed_offset || argc - next_arg < 2)
+                throw std::invalid_argument("Translation search is only for projection and requires a single radius");
+            radius = exposure_argument(argv[next_arg + 1], 8);
+            next_arg += 2;
+        } else {
+            break;
+        }
     }
     if (project ? next_arg >= argc : argc - next_arg > 1)
         throw std::invalid_argument("Expected projection inputs or one previous exposure page");
     const bool continued = !project && next_arg < argc;
-    const char* schema = limited_error ? "short-exposure-rgb8-v2" : "short-exposure-rgb8-v1";
+    const bool moving = fixed_offset.has_value() || radius.has_value();
+    const char* schema = moving ? "short-exposure-rgb8-v3" :
+        (limited_error ? "short-exposure-rgb8-v2" : "short-exposure-rgb8-v1");
     const auto source = read_image(argv[2]);
     const int short_weight = exposure_argument(argv[4], Camera::max_weight);
     const int long_weight = exposure_argument(argv[5], Camera::max_weight);
     const int tolerance = exposure_argument(argv[6], 255);
     const Camera camera(short_weight, long_weight, tolerance);
-    const portrait_selection::ShortExposureCover cover(source, camera, capture_tolerance, channel_budget);
+    const cv::Point offset = fixed_offset.value_or(cv::Point{});
+    const Cover cover(source, camera, capture_tolerance, channel_budget, offset);
+    const auto offsets = radius ? exposure_offsets(*radius, source.size()) : std::vector<cv::Point>{};
     return publish_run(argv[3], [&](const fs::path &directory) {
         Json configuration{{"short_weight", short_weight}, {"long_weight", long_weight},
                            {"companion_tolerance_gray", tolerance}};
@@ -313,22 +356,32 @@ fs::path short_exposure(wchar_t **argv, int argc, bool project) {
             configuration["capture_tolerance_gray"] = capture_tolerance;
             configuration["maximum_changed_channels"] = channel_budget;
         }
-        Json report{{"schema", schema}, {"configuration", configuration},
-                    {"observed", "observed.png"}, {"lower", "lower.png"}, {"upper", "upper.png"},
-                    {"outputs", Json::array()}};
-        write_image(directory / "observed.png", source);
-        write_image(directory / "lower.png", cover.allowed_bounds().lower);
-        write_image(directory / "upper.png", cover.allowed_bounds().upper);
-        if (limited_error) {
-            report["exact_lower"] = "exact-lower.png";
-            report["exact_upper"] = "exact-upper.png";
-            write_image(directory / "exact-lower.png", cover.exact_bounds().lower);
-            write_image(directory / "exact-upper.png", cover.exact_bounds().upper);
+        if (fixed_offset)
+            configuration["short_offset_xy"] = {offset.x, offset.y};
+        if (radius) {
+            configuration["translation_radius"] = *radius;
+            configuration["search_offset_count"] = offsets.size();
         }
-        const auto emit = [&](const cv::Mat &short_frame) {
-            const auto long_frame = camera.companion(source, short_frame);
+        Json report{{"schema", schema}, {"configuration", configuration},
+                    {"observed", "observed.png"}, {"outputs", Json::array()}};
+        write_image(directory / "observed.png", source);
+        if (!radius) {
+            report["lower"] = "lower.png";
+            report["upper"] = "upper.png";
+            write_image(directory / "lower.png", cover.allowed_bounds().lower);
+            write_image(directory / "upper.png", cover.allowed_bounds().upper);
+            if (limited_error) {
+                report["exact_lower"] = "exact-lower.png";
+                report["exact_upper"] = "exact-upper.png";
+                write_image(directory / "exact-lower.png", cover.exact_bounds().lower);
+                write_image(directory / "exact-upper.png", cover.exact_bounds().upper);
+            }
+        }
+        const auto emit = [&](const cv::Mat &short_frame, const cv::Mat &on_sensor, cv::Point shift,
+                              std::optional<std::int64_t> distance = std::nullopt) {
+            const auto long_frame = camera.companion(source, on_sensor);
             cv::Mat difference;
-            cv::absdiff(camera.replay(short_frame, long_frame), source, difference);
+            cv::absdiff(camera.replay(on_sensor, long_frame), source, difference);
             const auto error = cv::norm(difference, cv::NORM_INF);
             const int changed = limited_error ? cv::countNonZero(difference.reshape(1)) : 0;
             if (error > capture_tolerance || changed > channel_budget)
@@ -339,6 +392,16 @@ fs::path short_exposure(wchar_t **argv, int argc, bool project) {
             write_image(directory / candidate, short_frame);
             write_image(directory / witness, long_frame);
             Json entry{{"candidate", candidate}, {"companion", witness}};
+            if (moving) {
+                const auto aligned = "sensor-short-" + label + ".png";
+                write_image(directory / aligned, on_sensor);
+                entry["sensor_short"] = aligned;
+                entry["short_offset_xy"] = {shift.x, shift.y};
+                entry["overlap_pixels"] = static_cast<std::int64_t>(source.cols - std::abs(shift.x)) *
+                    (source.rows - std::abs(shift.y));
+            }
+            if (distance)
+                entry["squared_candidate_change"] = *distance;
             if (limited_error) {
                 entry["capture_error_gray"] = static_cast<int>(error);
                 entry["changed_channels"] = changed;
@@ -346,8 +409,31 @@ fs::path short_exposure(wchar_t **argv, int argc, bool project) {
             report["outputs"].push_back(std::move(entry));
         };
         if (project) {
-            for (int i = next_arg; i < argc; ++i)
-                emit(cover.project(read_image(argv[i])));
+            for (int i = next_arg; i < argc; ++i) {
+                const auto proposal = read_image(argv[i]);
+                if (!radius) {
+                    const auto frame = cover.project(proposal);
+                    emit(frame, cover.short_frame_on_sensor(frame), offset);
+                    continue;
+                }
+                cv::Mat closest, on_sensor;
+                cv::Point nearest;
+                auto best = std::numeric_limits<std::int64_t>::max();
+                for (const auto shift : offsets) {
+                    const Cover translated(source, camera, capture_tolerance, channel_budget, shift);
+                    auto frame = translated.project(proposal);
+                    const auto distance = std::llround(cv::norm(frame, proposal, cv::NORM_L2SQR));
+                    if (distance < best) {
+                        best = distance;
+                        nearest = shift;
+                        on_sensor = translated.short_frame_on_sensor(frame);
+                        closest = std::move(frame);
+                    }
+                    if (best == 0)
+                        break;
+                }
+                emit(closest, on_sensor, nearest, best);
+            }
         } else {
             const int bits = exposure_argument(argv[7], 8);
             const int count = exposure_argument(argv[8], std::numeric_limits<int>::max());
@@ -370,7 +456,8 @@ fs::path short_exposure(wchar_t **argv, int argc, bool project) {
             }
             bool more = true;
             for (int page = 0; page < count && more; ++page) {
-                emit(cover.representative(cell, width));
+                const auto frame = cover.representative(cell, width);
+                emit(frame, cover.short_frame_on_sensor(frame), offset);
                 more = cover.advance_cell(cell, width);
             }
             if (more)
@@ -1008,8 +1095,8 @@ int wmain(int argc, wchar_t **argv) {
             "PortraitCandidates.exe --inspect-appearance-bank radius [--directed [--swap-prefix count replay-tolerance]] landmarks.onnx|--distance-only source.png output-directory candidate.png [more.png ...]\n"
             "PortraitCandidates.exe --transfer-guided-detail donor.png guide.png output-directory [donor2.png guide2.png output2 ...]\n"
             "PortraitCandidates.exe --bounded-exposure-directions dictionary.bin input.png anchor1.png anchor2.png seed-directory output-directory\n"
-            "PortraitCandidates.exe --short-exposure-cover source.png output-directory short-weight long-weight companion-tolerance discard-bits count [--capture-error gray max-channels] [previous-run-directory]\n"
-            "PortraitCandidates.exe --short-exposure-project source.png output-directory short-weight long-weight companion-tolerance [--capture-error gray max-channels] proposal.png [more.png ...]\n"
+            "PortraitCandidates.exe --short-exposure-cover source.png output-directory short-weight long-weight companion-tolerance discard-bits count [--capture-error gray max-channels] [--short-offset dx dy] [previous-run-directory]\n"
+            "PortraitCandidates.exe --short-exposure-project source.png output-directory short-weight long-weight companion-tolerance [--capture-error gray max-channels] [--short-offset dx dy | --translation-radius pixels] proposal.png [more.png ...]\n"
             "PortraitCandidates.exe --cover-shapes radius output-directory primary.png [candidate.png ...]\n"
             "PortraitCandidates.exe --select-by-replay landmarks.onnx source.png primary.png output-directory "
             "alternate.png [alternate2.png ...]";

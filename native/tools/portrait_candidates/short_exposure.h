@@ -37,11 +37,13 @@ private:
 class ShortExposureCover {
 public:
     ShortExposureCover(const cv::Mat& observed, const ShortExposureCamera& camera,
-                       int capture_tolerance, std::size_t channel_budget);
+                       int capture_tolerance, std::size_t channel_budget,
+                       cv::Point short_offset = {});
 
     const ShortExposureBounds& exact_bounds() const { return exact_; }
     const ShortExposureBounds& allowed_bounds() const { return allowed_; }
     cv::Mat project(const cv::Mat& proposal) const;
+    cv::Mat short_frame_on_sensor(const cv::Mat& short_frame) const;
 
     cv::Mat first_cell(int width) const;
     void validate_cell(const cv::Mat& cursor, int width) const;
@@ -57,6 +59,8 @@ private:
 
     cv::Mat observed_;
     const std::size_t channel_budget_;
+    cv::Rect sensor_overlap_;
+    cv::Rect short_overlap_;
     ShortExposureBounds exact_;
     ShortExposureBounds allowed_;
 };

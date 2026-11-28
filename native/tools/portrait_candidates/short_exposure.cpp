@@ -1,6 +1,7 @@
 #include "short_exposure.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <stdexcept>
 #include <utility>
 
@@ -118,9 +119,40 @@ cv::Mat ShortExposureCamera::replay(const cv::Mat& short_frame, const cv::Mat& l
 }
 
 ShortExposureCover::ShortExposureCover(const cv::Mat& observed, const ShortExposureCamera& camera,
-                                       int capture_tolerance, std::size_t channel_budget)
-    : observed_(observed.clone()), channel_budget_(channel_budget), exact_(camera.bounds(observed_)),
-      allowed_(channel_budget ? camera.bounds(observed_, capture_tolerance) : exact_) {}
+                                       int capture_tolerance, std::size_t channel_budget,
+                                       cv::Point short_offset)
+    : observed_(observed.clone()), channel_budget_(channel_budget) {
+    check_image(observed_);
+    if (short_offset.x <= -observed.cols || short_offset.x >= observed.cols ||
+        short_offset.y <= -observed.rows || short_offset.y >= observed.rows)
+        throw std::invalid_argument("Short exposure translation must overlap the observation");
+    sensor_overlap_ = {std::max(0, short_offset.x), std::max(0, short_offset.y),
+                       observed.cols - std::abs(short_offset.x), observed.rows - std::abs(short_offset.y)};
+    short_overlap_ = sensor_overlap_ - short_offset;
+    const auto bounds_in_short_frame = [&](int tolerance) {
+        auto overlap_bounds = camera.bounds(observed_(sensor_overlap_), tolerance);
+        if (short_offset == cv::Point{})
+            return overlap_bounds;
+        // The observation places no constraint on short-frame pixels outside the sensor crop.
+        ShortExposureBounds limits{cv::Mat(observed_.size(), CV_8UC3, cv::Scalar::all(0)),
+                                   cv::Mat(observed_.size(), CV_8UC3, cv::Scalar::all(255))};
+        overlap_bounds.lower.copyTo(limits.lower(short_overlap_));
+        overlap_bounds.upper.copyTo(limits.upper(short_overlap_));
+        return limits;
+    };
+    exact_ = bounds_in_short_frame(0);
+    allowed_ = channel_budget_ ? bounds_in_short_frame(capture_tolerance) : exact_;
+}
+
+cv::Mat ShortExposureCover::short_frame_on_sensor(const cv::Mat& short_frame) const {
+    check_pair(observed_, short_frame);
+    if (sensor_overlap_ == short_overlap_)
+        return short_frame;
+    // Choose one feasible outside-crop short exposure for the replay witness.
+    cv::Mat on_sensor = observed_.clone();
+    short_frame(short_overlap_).copyTo(on_sensor(sensor_overlap_));
+    return on_sensor;
+}
 
 cv::Mat ShortExposureCover::project(const cv::Mat& proposal) const {
     check_pair(observed_, proposal);

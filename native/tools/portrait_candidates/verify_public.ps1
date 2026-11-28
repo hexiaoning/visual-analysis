@@ -199,6 +199,66 @@ try {
     }
     if ($Distinct.Count -ne 7) { throw "The budget allows seven colors across both pages." }
     Write-Output "short-exposure-cover with capture error pages=2 solutions=7"
+
+    $MotionSource = Join-Path $OutputRoot "motion-source.png"
+    $MotionProposal = Join-Path $OutputRoot "motion-proposal.png"
+    $Strip = [Drawing.Bitmap]::new(2, 1)
+    try {
+        $Strip.SetPixel(0, 0, [Drawing.Color]::Black)
+        $Strip.SetPixel(1, 0, [Drawing.Color]::Black)
+        $Strip.Save($MotionSource, [Drawing.Imaging.ImageFormat]::Png)
+        $Strip.SetPixel(0, 0, [Drawing.Color]::White)
+        $Strip.Save($MotionProposal, [Drawing.Imaging.ImageFormat]::Png)
+    } finally {
+        $Strip.Dispose()
+    }
+    $MotionArgs = @("--short-exposure-cover", $MotionSource, $ExposureRoot, 1, 1, 0, 7, 4, "--short-offset", -1, 0)
+    $FirstPage = & $App @MotionArgs
+    if ($LASTEXITCODE -ne 0) { throw "Could not generate the first translated exposure page." }
+    $LastPage = & $App @MotionArgs $FirstPage
+    if ($LASTEXITCODE -ne 0) { throw "Could not resume the translated exposure page." }
+    $Distinct.Clear()
+    $MotionHash = (Get-PixelReceipt $MotionSource).Hash
+    foreach ($Page in @($FirstPage, $LastPage)) {
+        $Report = Get-Content -Raw -LiteralPath (Join-Path $Page "exposure-cover.json") | ConvertFrom-Json
+        if ($Report.exhausted -ne ($Page -ceq $LastPage) -or $Report.outputs.Count -ne 4) {
+            throw "The eight off-sensor color bins must occupy exactly two pages."
+        }
+        foreach ($Output in $Report.outputs) {
+            $Raster = [Drawing.Bitmap]::new((Join-Path $Page $Output.candidate))
+            try {
+                $Outside = $Raster.GetPixel(0, 0)
+                $Inside = $Raster.GetPixel(1, 0)
+                $Channels = @($Outside.R, $Outside.G, $Outside.B)
+                if ($Inside.ToArgb() -ne [Drawing.Color]::Black.ToArgb() -or
+                    @($Channels | Where-Object { $_ -notin 0, 128 }).Count -ne 0 -or
+                    -not $Distinct.Add($Channels -join ",") -or
+                    ($Output.short_offset_xy -join ",") -cne "-1,0" -or $Output.overlap_pixels -ne 1 -or
+                    (Get-PixelReceipt (Join-Path $Page $Output.sensor_short)).Hash -cne $MotionHash) {
+                    throw "Expected all free bins in short-frame coordinates and an unchanged sensor replay."
+                }
+            } finally {
+                $Raster.Dispose()
+            }
+        }
+    }
+    if ($Distinct.Count -ne 8) { throw "Translated cover lost an off-sensor color bin." }
+    $WrongOffset = & $App --short-exposure-cover $MotionSource $ExposureRoot 1 1 0 7 4 --short-offset 1 0 $FirstPage 2>$null
+    if ($LASTEXITCODE -eq 0 -or $WrongOffset) { throw "Resume must reject a different offset." }
+
+    $Aligned = & $App --short-exposure-project $MotionSource $ExposureRoot 1 1 0 --translation-radius 1 $MotionProposal $MotionSource
+    if ($LASTEXITCODE -ne 0) { throw "Could not project over the translation set." }
+    $Report = Get-Content -Raw -LiteralPath (Join-Path $Aligned "exposure-cover.json") | ConvertFrom-Json
+    $Projected = $Report.outputs[0]
+    if ($Report.configuration.search_offset_count -ne 3 -or ($Projected.short_offset_xy -join ",") -cne "-1,0" -or
+        $Projected.squared_candidate_change -ne 0 -or
+        ($Report.outputs[1].short_offset_xy -join ",") -cne "0,0" -or
+        (Get-PixelReceipt (Join-Path $Aligned $Projected.candidate)).Hash -cne (Get-PixelReceipt $MotionProposal).Hash -or
+        (Get-PixelReceipt (Join-Path $Aligned $Projected.sensor_short)).Hash -cne $MotionHash -or
+        (Get-PixelReceipt (Join-Path $Aligned $Projected.companion)).Hash -cne $MotionHash) {
+        throw "Moving projection should preserve the proposal by selecting the smallest compatible translation."
+    }
+    Write-Output "short-exposure with translation pages=2 solutions=8 projection=unchanged"
 } finally {
     [Console]::OutputEncoding = $OldEncoding
     # Delete only the unique temporary tree created by this invocation.

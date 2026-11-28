@@ -6340,3 +6340,13 @@ Windows 原生选择器对三张用户图核对并保留了既有的 10、22、4
 留出组 192 份参考中，底图、固定增益、条件增益分别配对 38、39、37 份，三路高清联合均为 0。各自与历史库合并仍为 133/192 数值配对、2/192 高清联合。虽然模型更准确地估计了开发集的平均幅度，实际成图未得到历史库缺失的清晰五官。三张用户图的条件版在相同脸区相对底图平均只改 0.61、2.16、0.11 RGB 灰阶，第二张的暗带和屏纹、第三张的眼口模糊仍清楚可见。三张缺少原片，无法用原片验证外观。[实拍逐份评分](<D:/Data/Build/visual-analysis-dev/portrait-detail-amplitude-set-01/held-scores.json>) · [三张用户图并排](<D:/Data/Build/visual-analysis-dev/portrait-detail-amplitude-set-01/private-preview.png>)
 
 Windows 原生选择器保留三张用户图既有的 10、22、41 张输出，本轮无追加。逐张核对了回执索引与输出像素。此方案保留为实验，33 项仓库测试及 56 项子测试通过。[原生筛选回执](<D:/Data/Build/visual-analysis-dev/portrait-detail-amplitude-set-01/native-display.json>)
+
+### 整数位移下的精确短曝光候选
+
+Windows 原生枚举新增固定偏移 `--short-offset`。候选保留原坐标，区间与通道误差预算只约束其在观测传感器内的重叠部分。枚举仍按固定偏移的全部相容量化分箱分页，并校验偏移与上一页一致。投影可用 `--translation-radius` 搜索范围内全部合法整数偏移，选择平方像素改动最小的候选，输出相应传感器短曝光和长曝光画面供回放。独立小图对照逐一穷举 32 份提案的 15 个平移及全部允许放宽的通道组合，原生结果均达到最优并满足捕获误差上限。[成像模型与覆盖边界](portrait-candidate-set.md#短曝光画面存在整数位移时) · [小图独立穷举](<D:/Data/Build/visual-analysis-dev/portrait-short-motion-cover-01/translated-small-exhaustive.json>)
+
+在 48 张冻结的实拍糊图及 192 份真实短曝光参考上，短长权重仍为 1:31，长曝光与观测的逐通道最大差异为 5 灰阶。按横纵各允许位移 0、1、2 像素分别测得 51、79、96 份零误差回放。最多容许 1 灰阶时为 175、189、191 份。固定使用同一块中央 508×508 传感器区域再比较，无位移和最多 2 像素仍分别为 51、96 份零误差及 175、191 份最多 1 灰阶。原片只作为验证提案，位移参数是成像假设。[192 份独立比较](<D:/Data/Build/visual-analysis-dev/portrait-short-motion-cover-01/motion-membership.json>) · [固定裁边对照](<D:/Data/Build/visual-analysis-dev/portrait-short-motion-cover-01/translation-common-crop.json>)
+
+在 512×512 实拍数据上单独比较固定偏移的精确区间投影。21 次暖态中位值为 Windows CPU 0.0915 毫秒、Intel UHD 630 OpenCL 约 2.0 毫秒，CPU 与实跑 GPU 输出逐像素相同。此计时只覆盖区间投影，原生命令继续使用 CPU。[设备记录](<D:/Data/Build/visual-analysis-dev/portrait-short-motion-cover-01/device-projection.txt>)
+
+Windows 原生程序实际投影了全部 192 份。逐张解码复算表明，输出达到所有 25 个偏移下的独立最小平方改动，且保存的短、长画面均逐像素回放为原糊图。其中保留原片像素 96 份，45 份选用非零偏移。另把同一批从三张用户糊图生成的 24 个已有提案送入原生命令。固定与待选位移在零误差以及 2 灰阶、128 个通道两种限制下，均保持第三张的全部 8 个提案不变，第一、二张均需修改。这里验证已知提案的相容性，尚未由三张用户糊图生成新的高清外观。原生公开回归、33 项仓库测试及 56 项子测试通过。[原生留出验算](<D:/Data/Build/visual-analysis-dev/portrait-short-motion-cover-01/native-motion-holdout.json>) · [三组实拍原片及精确回放](<D:/Data/Build/visual-analysis-dev/portrait-short-motion-cover-01/real-motion-witnesses.png>) · [用户图提案逐份核对](<D:/Data/Build/visual-analysis-dev/portrait-short-motion-cover-01/private-motion-check.json>)

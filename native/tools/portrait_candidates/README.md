@@ -63,6 +63,16 @@ $first = & $exe --short-exposure-cover .\source.png .\outputs 1 31 5 3 12 --capt
 & $exe --short-exposure-project .\source.png .\outputs 1 31 5 --capture-error 2 256 .\candidate-a.png
 ```
 
+可加 `--short-offset dx dy` 指定整数位移。短曝光候选中 `(x,y)` 对应传感器中的 `(x+dx,y+dy)`。候选保持原坐标，传感器之外的候选像素可取任意值。重叠区域必须非空。枚举生成的边界图采用候选坐标，续跑须沿用同一偏移。输出的 `sensor_short` 是包含边界补值的短曝光传感器画面，将它和 `companion` 混合即可验算原观测。
+
+```powershell
+$first = & $exe --short-exposure-cover .\source.png .\outputs 1 31 5 3 12 --short-offset -2 1
+& $exe --short-exposure-cover .\source.png .\outputs 1 31 5 3 12 --short-offset -2 1 $first
+& $exe --short-exposure-project .\source.png .\outputs 1 31 5 --translation-radius 2 .\candidate-a.png
+```
+
+`--translation-radius` 只适用于投影，取值为 0 到 8。程序遍历横纵各在给定范围内且有重叠的整数偏移，为每张提案选择像素平方改动最小的结果。改动相同时依次按偏移长度、纵向偏移、横向偏移排序。它可以和 `--capture-error` 同时使用。清单为每张输出记录所选偏移、重叠像素数、平方改动量和回放画面。范围含多个偏移时，各偏移的可行集合需要取并集。需要完整枚举时，对每个固定偏移分别运行分页命令。
+
 ## 对多张候选做严格回放筛选
 
 `--select-by-replay` 对同一张糊图的首选和一个或多个原始备选进行比较。输入都在同一 512×512 对齐坐标下。近似备选的拟合权重须大于 0.50，回放误差须不高于首选，测得的脸部带通强度须至少为糊图的 1.20 倍、至多为首选的 1.40 倍，才可替换为单张。上限用于减少屏摄细纹重新进入单张结果的情况。没有合格替换时，沿用已有的五官差异和回放条件挑选第二张，同时要求它达到糊图的 1.20 倍带通强度。同一类备选中优先选回放误差最低的，误差相同时沿用参数顺序。没有合格备选时输出首选。
