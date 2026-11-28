@@ -6303,3 +6303,14 @@ Windows 原生增加 `--capture-error`，同时约束灰阶误差和可超出精
 对每张生成图分别运行 Windows 原生两段曝光投影。短长比设为 1:31，长曝光与观测各通道的差至多 5 灰阶。严格模式下 7/18 张原样保留，改动通道数中位为 7.5。允许 2 灰阶及最多 256 个回放通道误差时 14/18 张原样保留。独立解码短、长画面，并用整数公式验算了全部 36 组回放。第三张的两种生成图原像素不变，分别配合各自求出的长曝光画面时都精确合成同一张糊图。参数来自已声明的模型，实际曝光比例未知。[投影及回放凭据](<D:/Data/Build/visual-analysis-dev/portrait-individual-ddim-01/projected.json>) · [第三张的两份精确回放对照](<D:/Data/Build/visual-analysis-dev/portrait-individual-ddim-01/third-exact-preview.png>)
 
 冻结生图和投影后评分。原始生成、严格投影和容差投影在 24 份短曝光参考中均为 0 份配对、0 份高清联合，历史库仍为 20/24、2/24。用同一 Windows 原生筛选器和已冻结的历史输出，对三张用户图分别追加 0、0、2 张严格投影图。第三张的两张在眼口细部上可见区别，且两张逐像素等于各自原生成图。核对了旧输出的索引和像素、追加输出及展示用回放文件。三张用户图缺少清晰原片，这次只验证了特定成像假设下的相容性，未核验与真人外观的覆盖。33 项仓库测试和 56 项子测试通过。[实拍覆盖评分](<D:/Data/Build/visual-analysis-dev/portrait-individual-ddim-01/coverage-experiment.json>) · [原生筛选回执](<D:/Data/Build/visual-analysis-dev/portrait-individual-ddim-01/native-individual-selection.json>)
+
+
+### 局部候选库的覆盖上限与整块脸部对照
+
+在同样六张实拍和三张用户糊图上，收集近几轮由同一输入派生的时间提案、独立与联合扩散结果。固定首尾两个底图、画面两眼鼻口四个软窗和九种局部平移。分别按糊图两个交错空间折中的最差回放改进、以及通过近似回放约束后的带通能量选择局部图。先冻结只转移亮度的 36 张候选，再另存固定局部选法、分别转移 40% 和 100% 颜色细节的 36 张对照。六张实拍的 24 份清晰参考上，亮度版匹配 4 份，两档颜色版各 2 份，均已被历史库覆盖，三路高清联合均为零。原生筛选对三张用户图分别追加 0、2、2 张，保留原有 10、20、39 张输出的索引及像素。第二张的眼部暗带和第三张的反光依然可见。用户图没有清晰原片。[候选库及逐图得分](<D:/Data/Build/visual-analysis-dev/portrait-region-bank-01/region-capacity.json>) · [三张试验图](<D:/Data/Build/visual-analysis-dev/portrait-region-bank-01/rgb-private-review.png>) · [原生筛选](<D:/Data/Build/visual-analysis-dev/portrait-region-bank-01/native-region-blind.json>)
+
+为定位内容缺失，再允许用清晰原片挑选现有片段。单个最佳片段和两个片段的凸组合分别匹配 7 和 6 份，均在历史覆盖内，高清联合为零。双眼、鼻、口混合后仍未解释的加权平方残差中位分别为初始误差的 70.35%、69.24%、55.72%、72.67%。可用片段对鼻部影响相对较大，双眼和嘴部留有更多细节差。将清晰参考中的真实亮度带填入四处软窗，联合历史库可从 20 增至 24 份配对，从 2 增至 3 份高清联合。对新增高清联合的 `rb-00009-0382` 第 3 时刻，两个底图各穷举 16 个部位组合，只有尾底图同时填四处时过配对、清晰度和回放三项。以上是清晰原片辅助诊断。[局部与组合上限](<D:/Data/Build/visual-analysis-dev/portrait-region-bank-01/region-capacity.json>) · [16 组部位及颜色对照](<D:/Data/Build/visual-analysis-dev/portrait-region-bank-01/rgb-control-results.json>)
+
+再用清晰原片比较修改范围。回贴四小窗 RGB 频带、四小窗完整 RGB 和较大的中央脸区，实际分别有 1、3、24 份高清联合通过，而且这些通过项都满足既有曝光回放检查。扩大范围的控制利用了原片真实的周围结构、明暗及颜色，当前实验无法从这组干预单独归因到某种细节。[真实局部和中央区域对照](<D:/Data/Build/visual-analysis-dev/portrait-region-bank-01/rgb-paired-controls.png>)
+
+据此另跑一次单图中央脸区组合。使用相同中央软窗，在每张同源候选及五档平移间，按糊图回放或回放约束内的细节响应排序。对窗边做有限颜色对齐，确认软窗之外与底图逐像素相同。冻结 36 张成图后评测，三份配对通过全部在历史覆盖内，高清联合仍为零。三张用户图的中央复合图依然可见原有模糊或反光。本轮三个盲生成系列共输出 108 张，整块复合扩大了可替换区域，现有同源候选仍缺少恢复原片所需的细节。33 项仓库测试和 56 项子测试通过。[单图中央区域评分](<D:/Data/Build/visual-analysis-dev/portrait-region-bank-01/center-results.json>) · [三张用户图的中央区域组合](<D:/Data/Build/visual-analysis-dev/portrait-region-bank-01/center-private-review.png>)
