@@ -6247,3 +6247,12 @@ Windows C++ 共轭梯度求解通过卷积伴随内积及零修正检查。人�
 | 引入原糊图并平衡曝光 | 17 / 0 | 56 / 0 |
 
 六路在 48 张留出实拍和三张用户图上共生成 1,224 张，分别按两组清单核对解码像素及散列。六路各有 51/51 组通过四时刻回放。复数频带路线的绝对 RGB 灰阶改变量中位为 0.060，直接纳入原图路线为 0.074。合并历史库后，数值配对和高清联合仍为 133/192、2/192。六路均没有可为原生展示新增高清联合匹配的候选。开发组上的两份高清联合未在留出组复现。33 项仓库测试及 56 项子测试通过，成图保留为离线实验。[开发组基础路线](<D:/Data/Build/visual-analysis-dev/portrait-window-frequency-fit-01/development-scores.json>) · [开发组原糊图路线](<D:/Data/Build/visual-analysis-dev/portrait-window-frequency-fit-01/development-observed-scores.json>) · [留出组基础路线](<D:/Data/Build/visual-analysis-dev/portrait-window-frequency-fit-01/held-scores.json>) · [留出组原糊图路线](<D:/Data/Build/visual-analysis-dev/portrait-window-frequency-fit-01/held-observed-scores.json>) · [留出并集](<D:/Data/Build/visual-analysis-dev/portrait-window-frequency-fit-01/combined-holdout.json>)
+
+
+### 独立测试 HiFaceGAN 的运动及混合退化权重
+
+从作者发布的 ZIP 中按字节区间分别读取 `deblur`、`face_renov`，验证成员 CRC 后在 Windows 11 上离线运行。作者代码版本为 `d7996608de9da325039ad71d6c73962941715d22`，两个权重的 SHA-256 分别为 `bae71ed7b1d4bf524edfb78cf2235008b4b693bb204b38354079823b45d74b83` 和 `c079d7dff960999b672153958723d1c6a9628e3b3c675200387d86df33a6d4f9`。跟随作者的测试路径使用 RGB [0,1] 输入和输出，并在每张图开始前恢复归一化状态。较早一次误用 [-1,1] 的调试结果未计入评分。此处使用实验用的 CPU PyTorch，网络请求由测试脚本阻断，应用运行时未改动。[作者实现及权重](https://github.com/Lotayou/Face-Renovation)
+
+从既有 48 张留出输入按冻结清单每隔八张取一张，共六张实拍和 24 份对应短曝光参考。另加三张用户图。两套权重各生成九张 512×512 PNG，核对了输入散列、输出散列和解码像素。去模糊和混合退化权重的单张中位时间分别为 5.57 和 5.35 秒，计时包含读取和写回。两者各有 0/24 达到既有配对门槛，各有 0/24 达到配对与清晰度联合门槛。即使允许事后在两种结果里任选，原候选库在这 24 份参考上的覆盖仍为 20 份配对、2 份高清联合。实拍对照中，侧脸的眼和唇线仍模糊，头发和背景局部被增强。[逐图留出评分与回放](<D:/Data/Build/visual-analysis-dev/portrait-hifacegan-01/evaluation.json>) · [实拍与清晰参考并排](<D:/Data/Build/visual-analysis-dev/portrait-hifacegan-01/public-preview.png>)
+
+三张用户图各自的两张结果都能替入四个时刻的任一位置并通过现有回放门槛。补偿平移和转角后，两套权重在三张图上的细部差异量为 0.288、0.458、0.280，均高于既有差异阈值 0.271。看成图，第二张的差异包含明显的屏纹及亮暗边缘，第三张的眼口依然模糊，第一张也未出现另一种清晰五官。三张均缺少清晰原片。这组样本说明回放过关、差异量越过阈值时，仍可能看不到两种清晰外观。因此保留为离线实验，没有进入应用候选名单。仓库 33 项测试和 56 项子测试通过。[三张用户图并排](<D:/Data/Build/visual-analysis-dev/portrait-hifacegan-01/private-preview.png>)
