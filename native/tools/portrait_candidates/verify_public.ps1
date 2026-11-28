@@ -167,6 +167,38 @@ try {
         Test-Pixels (Join-Path $Page $Output[0].companion) 1 $SourceReceipt.Hash
     }
     Write-Output "short-exposure-cover pages=2 exhausted=true"
+
+    $SparseArgs = @("--short-exposure-cover", $Black, $ExposureRoot, 1, 1, 0, 0, 4, "--capture-error", 1, 1)
+    $FirstPage = & $App @SparseArgs
+    if ($LASTEXITCODE -ne 0) { throw "Could not generate the first page with capture error." }
+    $LastPage = & $App @SparseArgs $FirstPage
+    if ($LASTEXITCODE -ne 0) { throw "Could not resume the page with capture error." }
+    $Distinct = [Collections.Generic.HashSet[string]]::new()
+    $BlackReceipt = Get-PixelReceipt $Black
+    foreach ($Page in @($FirstPage, $LastPage)) {
+        $Report = Get-Content -Raw -LiteralPath (Join-Path $Page "exposure-cover.json") | ConvertFrom-Json
+        if ($Report.exhausted -ne ($Page -ceq $LastPage)) {
+            throw "Unexpected end of the cover with capture error."
+        }
+        foreach ($Output in $Report.outputs) {
+            $Raster = New-Object System.Drawing.Bitmap((Join-Path $Page $Output.candidate))
+            try {
+                $Value = $Raster.GetPixel(0, 0)
+                $Channels = @($Value.R, $Value.G, $Value.B)
+                $Nonzero = @($Channels | Where-Object { $_ -gt 0 }).Count
+                if ($Nonzero -gt 1 -or ($Channels | Measure-Object -Maximum).Maximum -gt 2 -or
+                    $Output.changed_channels -ne $Nonzero -or $Output.capture_error_gray -ne $Nonzero -or
+                    -not $Distinct.Add($Channels -join ",")) {
+                    throw "The page must emit each feasible color once, spending at most one changed channel."
+                }
+            } finally {
+                $Raster.Dispose()
+            }
+            Test-Pixels (Join-Path $Page $Output.companion) 1 $BlackReceipt.Hash
+        }
+    }
+    if ($Distinct.Count -ne 7) { throw "The budget allows seven colors across both pages." }
+    Write-Output "short-exposure-cover with capture error pages=2 solutions=7"
 } finally {
     [Console]::OutputEncoding = $OldEncoding
     # Delete only the unique temporary tree created by this invocation.

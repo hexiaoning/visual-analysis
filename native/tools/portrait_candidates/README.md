@@ -55,6 +55,14 @@ $first = & $exe --short-exposure-cover .\source.png .\outputs 1 31 5 3 12
 
 投影命令将已有同尺寸提案夹到可行范围。能产生同一观测的提案逐像素保留。两条命令都输出每张候选对应的长曝光画面，并在写入前核对逐像素回放。枚举顺序按像素和值排列，相容光栅可以有噪声，逐像素覆盖本身不能判定人脸清晰度或人眼外观。参数及评测见[单图人像候选说明](../../../docs/portrait-candidate-set.md)。
 
+可加 `--capture-error gray max-channels`，允许有限数量的通道出现有限灰阶的观测误差。两个限制同时生效。参数放在枚举的张数后、上一页目录前，或放在投影的长曝光容差后、提案前。续跑须沿用同一限制。清单记录每张输出的最大灰阶误差和实际改变的通道数。此时完整集合由 `exact-lower.png`、`exact-upper.png`、`lower.png`、`upper.png` 和通道数上限共同定义。
+
+```powershell
+$first = & $exe --short-exposure-cover .\source.png .\outputs 1 31 5 3 12 --capture-error 2 256
+& $exe --short-exposure-cover .\source.png .\outputs 1 31 5 3 12 --capture-error 2 256 $first
+& $exe --short-exposure-project .\source.png .\outputs 1 31 5 --capture-error 2 256 .\candidate-a.png
+```
+
 ## 对多张候选做严格回放筛选
 
 `--select-by-replay` 对同一张糊图的首选和一个或多个原始备选进行比较。输入都在同一 512×512 对齐坐标下。近似备选的拟合权重须大于 0.50，回放误差须不高于首选，测得的脸部带通强度须至少为糊图的 1.20 倍、至多为首选的 1.40 倍，才可替换为单张。上限用于减少屏摄细纹重新进入单张结果的情况。没有合格替换时，沿用已有的五官差异和回放条件挑选第二张，同时要求它达到糊图的 1.20 倍带通强度。同一类备选中优先选回放误差最低的，误差相同时沿用参数顺序。没有合格备选时输出首选。

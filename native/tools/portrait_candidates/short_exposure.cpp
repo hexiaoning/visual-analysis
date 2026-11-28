@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <utility>
 
 namespace portrait_selection {
 namespace {
@@ -40,25 +41,38 @@ ShortExposureCamera::ShortExposureCamera(int short_weight, int long_weight, int 
             std::min(255 * total_weight_, ceil_divide((2 * level + 1) * total_weight_, 2) - 1)};
         const Interval allowed_long{std::max(0, level - companion_tolerance),
                                     std::min(255, level + companion_tolerance)};
-        // The unclipped quantization bin has at least long_weight integer sums.
-        // At 0 or 255 the clipped end is already a physical bound on both frames.
         sums_[level] = sum;
         long_values_[level] = allowed_long;
-        short_values_[level] = {
-            std::max(0, ceil_divide(sum.low - long_weight_ * allowed_long.high, short_weight_)),
-            std::min(255, floor_divide(sum.high - long_weight_ * allowed_long.low, short_weight_))};
     }
 }
 
-std::pair<cv::Mat, cv::Mat> ShortExposureCamera::bounds(const cv::Mat& observed) const {
+int ShortExposureCamera::render_level(int short_pixel, int long_pixel) const {
+    const int sum = short_weight_ * short_pixel + long_weight_ * long_pixel;
+    return (2 * sum + total_weight_) / (2 * total_weight_);
+}
+
+ShortExposureBounds ShortExposureCamera::bounds(const cv::Mat& observed, int capture_tolerance) const {
     check_image(observed);
+    if (capture_tolerance < 0 || capture_tolerance > 255)
+        throw std::invalid_argument("Capture tolerance must be between 0 and 255");
+    std::array<Interval, 256> short_values{};
+    for (int level = 0; level <= 255; ++level) {
+        // Adjacent quantization bins share a boundary. Integer sums spanning any
+        // interior bin contain at least long_weight_ consecutive values.
+        const int first = sums_[std::max(0, level - capture_tolerance)].low;
+        const int last = sums_[std::min(255, level + capture_tolerance)].high;
+        const auto companion = long_values_[level];
+        short_values[level] = {
+            std::max(0, ceil_divide(first - long_weight_ * companion.high, short_weight_)),
+            std::min(255, floor_divide(last - long_weight_ * companion.low, short_weight_))};
+    }
     cv::Mat low(observed.size(), CV_8UC3), high(observed.size(), CV_8UC3);
     for (int y = 0; y < observed.rows; ++y) {
         const auto* source = observed.ptr<unsigned char>(y);
         auto* lower = low.ptr<unsigned char>(y);
         auto* upper = high.ptr<unsigned char>(y);
         for (size_t i = 0; i < size_t(observed.cols) * 3; ++i) {
-            const auto limits = short_values_[source[i]];
+            const auto limits = short_values[source[i]];
             lower[i] = static_cast<unsigned char>(limits.low);
             upper[i] = static_cast<unsigned char>(limits.high);
         }
@@ -74,13 +88,15 @@ cv::Mat ShortExposureCamera::companion(const cv::Mat& observed, const cv::Mat& s
         const auto* known = short_frame.ptr<unsigned char>(y);
         auto* output = long_frame.ptr<unsigned char>(y);
         for (size_t i = 0; i < size_t(observed.cols) * 3; ++i) {
-            const auto sum = sums_[source[i]];
             const auto allowed = long_values_[source[i]];
+            // Incrementing the companion can move the rounded observation by
+            // at most one level. Every level between the endpoints is attainable.
+            const int closest = std::clamp(int(source[i]), render_level(known[i], allowed.low),
+                                           render_level(known[i], allowed.high));
+            const auto sum = sums_[closest];
             const auto contribution = short_weight_ * known[i];
             const int low = std::max(allowed.low, ceil_divide(sum.low - contribution, long_weight_));
             const int high = std::min(allowed.high, floor_divide(sum.high - contribution, long_weight_));
-            if (low > high)
-                throw std::invalid_argument("Short frame cannot produce the observation with this exposure model");
             output[i] = static_cast<unsigned char>(std::clamp(int(source[i]), low, high));
         }
     }
@@ -95,11 +111,123 @@ cv::Mat ShortExposureCamera::replay(const cv::Mat& short_frame, const cv::Mat& l
         const auto* long_pixels = long_frame.ptr<unsigned char>(y);
         auto* output = result.ptr<unsigned char>(y);
         for (size_t i = 0; i < size_t(short_frame.cols) * 3; ++i) {
-            const int sum = short_weight_ * short_pixels[i] + long_weight_ * long_pixels[i];
-            output[i] = static_cast<unsigned char>((2 * sum + total_weight_) / (2 * total_weight_));
+            output[i] = static_cast<unsigned char>(render_level(short_pixels[i], long_pixels[i]));
         }
     }
     return result;
+}
+
+ShortExposureCover::ShortExposureCover(const cv::Mat& observed, const ShortExposureCamera& camera,
+                                       int capture_tolerance, std::size_t channel_budget)
+    : observed_(observed.clone()), channel_budget_(channel_budget), exact_(camera.bounds(observed_)),
+      allowed_(channel_budget ? camera.bounds(observed_, capture_tolerance) : exact_) {}
+
+cv::Mat ShortExposureCover::project(const cv::Mat& proposal) const {
+    check_pair(observed_, proposal);
+    cv::Mat result;
+    cv::max(proposal, exact_.lower, result);
+    cv::min(result, exact_.upper, result);
+    if (!channel_budget_)
+        return result;
+    // A relaxed choice only consumes one allowed channel. Spend those choices
+    // where their independently attainable drop in squared error is largest.
+    struct Improvement { size_t offset; int value; unsigned char pixel; };
+    std::vector<Improvement> improvements;
+    const auto contiguous = proposal.isContinuous() ? proposal : proposal.clone();
+    for (size_t i = 0; i < result.total() * result.elemSize(); ++i) {
+        const int original = contiguous.data[i];
+        const int extremum = std::clamp(original, int(allowed_.lower.data[i]), int(allowed_.upper.data[i]));
+        const int before = original - result.data[i];
+        const int after = original - extremum;
+        const int gain = before * before - after * after;
+        if (gain > 0)
+            improvements.push_back({i, gain, static_cast<unsigned char>(extremum)});
+    }
+    if (channel_budget_ < improvements.size()) {
+        const auto middle = improvements.begin() + static_cast<std::ptrdiff_t>(channel_budget_);
+        std::nth_element(improvements.begin(), middle, improvements.end(), [](const auto& a, const auto& b) {
+            return a.value == b.value ? a.offset < b.offset : a.value > b.value;
+        });
+        improvements.resize(channel_budget_);
+    }
+    for (const auto& improvement : improvements)
+        result.data[improvement.offset] = improvement.pixel;
+    return result;
+}
+
+ShortExposureCover::CellRange ShortExposureCover::cell_range(size_t i, int width) const {
+    return {allowed_.lower.data[i] / width, allowed_.upper.data[i] / width,
+            exact_.lower.data[i] / width, exact_.upper.data[i] / width};
+}
+
+bool ShortExposureCover::requires_error(const CellRange& range, int digit) {
+    return digit < range.exact_first || digit > range.exact_last;
+}
+
+void ShortExposureCover::reset_suffix(cv::Mat& cursor, size_t start, int width, size_t allowance) const {
+    for (size_t i = start; i < cursor.total() * cursor.elemSize(); ++i) {
+        const auto range = cell_range(i, width);
+        const int least = allowance ? range.first : range.exact_first;
+        cursor.data[i] = static_cast<unsigned char>(least);
+        allowance -= requires_error(range, least);
+    }
+}
+
+cv::Mat ShortExposureCover::first_cell(int width) const {
+    cv::Mat cursor(observed_.size(), observed_.type());
+    reset_suffix(cursor, 0, width, channel_budget_);
+    return cursor;
+}
+
+void ShortExposureCover::validate_cell(const cv::Mat& cursor, int width) const {
+    check_pair(observed_, cursor);
+    if (!cursor.isContinuous())
+        throw std::invalid_argument("Expected a contiguous exposure page cursor");
+    size_t used = 0;
+    for (size_t i = 0; i < cursor.total() * cursor.elemSize(); ++i) {
+        const auto range = cell_range(i, width);
+        const int digit = cursor.data[i];
+        if (digit < range.first || digit > range.last)
+            throw std::invalid_argument("Exposure page cursor falls outside the feasible cells");
+        used += requires_error(range, digit);
+    }
+    if (used > channel_budget_)
+        throw std::invalid_argument("Exposure page cursor exceeds the capture error budget");
+}
+
+bool ShortExposureCover::advance_cell(cv::Mat& cursor, int width) const {
+    size_t used = 0;
+    const size_t channels = cursor.total() * cursor.elemSize();
+    for (size_t i = 0; i < channels; ++i)
+        used += requires_error(cell_range(i, width), cursor.data[i]);
+    for (size_t i = channels; i > 0; --i) {
+        const auto range = cell_range(i - 1, width);
+        const int digit = cursor.data[i - 1];
+        used -= requires_error(range, digit);
+        const bool can_relax = used < channel_budget_;
+        const int least = can_relax ? range.first : range.exact_first;
+        const int last = can_relax ? range.last : range.exact_last;
+        const int next = std::max(digit + 1, least);
+        if (next <= last) {
+            cursor.data[i - 1] = static_cast<unsigned char>(next);
+            reset_suffix(cursor, i, width, channel_budget_ - used - requires_error(range, next));
+            return true;
+        }
+    }
+    return false;
+}
+
+cv::Mat ShortExposureCover::representative(const cv::Mat& cursor, int width) const {
+    cv::Mat candidate(observed_.size(), observed_.type());
+    for (size_t i = 0; i < candidate.total() * candidate.elemSize(); ++i) {
+        const auto digit = cursor.data[i];
+        const auto& bounds = requires_error(cell_range(i, width), digit) ? allowed_ : exact_;
+        const int bin = digit * width;
+        const int lower = std::max(int(bounds.lower.data[i]), bin);
+        const int upper = std::min(int(bounds.upper.data[i]), bin + width - 1);
+        candidate.data[i] = static_cast<unsigned char>(std::clamp(int(observed_.data[i]), lower, upper));
+    }
+    return candidate;
 }
 
 } // namespace portrait_selection
