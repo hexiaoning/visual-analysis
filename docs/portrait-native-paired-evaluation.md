@@ -6095,3 +6095,31 @@ Windows C++、ONNX Runtime CPU 与 Intel UHD 630 的 DirectML 在同样三张输
 为减少屏纹返写，另在脸外小块检测重复窄频峰，只从反投影残差里抑制这些频率。已知周期对照的幅度由 0.0400 降至 0.00560，另一低频结构保留 0.07995。固定的 12 张有数字原帧的实拍屏摄中，11 张触发残差抑制。以此前联合求解成图为底，原底图、普通反投影和抑制屏纹后三路均为 0/12 清晰联合。以只调细节的冻结底图复验，三路均保留原有的斜拍 00250，仍为 1/12。第一张用户图的残差中被抑制部分的相对 RMS 为 57.6%，并排可见格纹减弱。第二张未检出稳定周期，第三张反光仍在。三张用户图的实际参考图缺失，格纹变化无法用于确认面部外观。[固定屏摄配对](<D:/Data/Build/visual-analysis-dev/portrait-warp-inverse-01/carrier-screen-scores.json>) · [第二种底图的复验](<D:/Data/Build/visual-analysis-dev/portrait-warp-inverse-01/carrier-alternate-scores.json>) · [用户图的残差抑制对照](<D:/Data/Build/visual-analysis-dev/portrait-warp-inverse-01/three-cases-carrier.png>)
 
 本轮调查把曝光回放改善和清晰覆盖分别验收。33 项仓库测试通过。完整求解仍为本机实验，交付版继续等待清晰度验收。
+
+
+### 保持分块曝光均值的五官边缘收窄
+
+以四张由同一糊图推出的反投影底图为起点。由结构张量估计局部边缘法向，再结合两个尺度的曲率符号和方向一致性，沿法向做六轮有界更新。对照以同一局部窗和近似相同的线性亮度 RMS 改变量做普通反锐化。两条约束分支以 4×4 和 8×8 采样单元为例，对每个位置的四时刻加权亮度做独立投影，投影前后的线性曝光均值逐单元相同。每个像素的允许范围受原图邻域亮度最小值、最大值与三通道可用范围限制，脸区窗外保持原像素。首先核对浮点约束，写出 8 位 PNG 后重新计算曝光差，并用既有拍摄近似回放过线。分块模型用来约束候选，真实相机的采样方式仍未知。[Shock 滤波原论文](https://epubs.siam.org/doi/10.1137/0727053) · [方向一致性方法](https://www.mia.uni-saarland.de/Publications/weickert-dagm03.pdf)
+
+四个已知位置的曲线边缘控制，原先宽度为 6.00 像素，直接收窄、4×4、8×8 约束后分别为 2.00、3.25、2.50 像素。相对已知锐边的 RMS 由 0.05744 分别降为 0.02667、0.03177、0.03017。未约束分支的曝光单元差最大为 0.03985，约束后最大值为 3.82×10⁻⁸。首轮仅做全局取值范围约束时出现过高低过冲，加邻域限制后同一控制通过，常量图与保护区保持不变。[曲线边缘和曝光约束控制](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shock-limited-01/controls.json>)
+
+在两张实拍和第三张用户图上，用 Windows C++ 比较同一份投影数据。4×4 模式 CPU 与 Intel UHD 630 OpenCL 的中位分别为 16.70、49.42 毫秒，8×8 分别为 15.47、294.18 毫秒。两设备相对研究实现的最大差为 1.43×10⁻⁷。GPU 计时确认明确执行投影内核，数据已入缓冲，完整成图不在计时范围。当前测试机上 CPU 路径更快。[原生设备对照](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shock-limited-01/native-projection-test.json>)
+
+开发组 10 张实拍的 40 份参考中，底图、直接收窄、4×4、8×8 和同幅反锐化分别通过 18、12、11、12、4 份配对，同时过清晰度的是 0、2、0、1、2。两份严格通过的参考此前均已覆盖。随后用相同参数生成 48 张留出实拍和三张样图的 816 张 PNG。四路各有 51 组通过既有回放。与 4×4 路线匹配的线性亮度改变量，普通反锐化的最大绝对差为 3.61×10⁻⁷。4×4 和 8×8 的最大浮点曝光差分别为 7.92×10⁻⁸、6.72×10⁻⁸。量化后每组曝光差 RMS 的中位为 4.15×10⁻⁵、3.92×10⁻⁵，最大单元偏差为 0.00205、0.00153。[开发评分](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shock-limited-01/development-scores.json>) · [留出评分及曝光实测](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shock-limited-01/held-scores.json>)
+
+| 留出路线 | 数值配对通过 | 同时过清晰度 |
+| --- | ---: | ---: |
+| 底图 | 60/192 | 0/192 |
+| 直接收窄 | 59/192 | 1/192 |
+| 4×4 保持曝光均值 | 50/192 | 0/192 |
+| 8×8 保持曝光均值 | 58/192 | 1/192 |
+| 同幅普通反锐化 | 30/192 | 1/192 |
+| 与历史候选库合并 | 128/192 | 1/192 |
+
+新增数值配对为 `rb-00009-0952` 的时刻 5，最弱部位细节响应 0.114。清晰联合新增为 `rb-00009-0382` 的时刻 7，数值配对此前已覆盖。直接收窄、8×8 与同幅反锐化均在同一原片上首次同时过线，最弱部位响应分别为 0.930、0.911、0.963。横纵偏移清晰参考半像素的九种组合中，三路的联合通过分别为 5、3、5，底图为 1。该例仍可见细小的唇形与眼睑差异，裁切边缘也有镜像内容。这里的结果用冻结的两项数值评分计数。同期通过配对的 52 份里，最佳最弱部位的逐图增量中位为 0.053。[留出原片的成图对照](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shock-limited-01/held-shock-comparison.png>) · [三种方案与清晰原片并排](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shock-limited-01/verified-sharp-match.png>) · [九种偏移的复核](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shock-limited-01/verified-sharp-matches.json>)
+
+三张用户图各提报四张候选给原生 Windows 选图，均无新增。按固定时刻对比，两种分块路线仍都保留第二张的暗眼区和第三张的反光，第一张仅有已有眼口轮廓的对比度变化。另在 12 张有数字原帧的真实屏摄上，用此前只调整细节和联合求解的两份底图作独立对照。八条新路线的清晰联合通过均为 0/12。只调细节的底图原有的斜拍 00250 仍给历史库保留 1/12。此轮核对了真实屏摄与软件合成控制，二者结论分开记录。[三张投影分支对比](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shock-limited-01/three-cases-projected.png>) · [Windows 原生留选](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shock-limited-01/windows-private-results.json>) · [屏摄独立评分](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shock-limited-01/screen-scores.json>)
+
+现有 Windows 选图在 48 张留出图上分别复跑追加和同外观替换。原展示共 1,040 张。追加法实际输出 41 张新图，其中一份参考有数值配对。替换法更换两张，两张均未形成通过配对的参考。两种方式的新增展示均为 0 份清晰联合匹配。新文件和候选逐像素一致。一组追加批次超时后只重跑了未完成的一张，其余按已有实际回执合并。[完整 Windows 筛选复核](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shock-limited-01/windows-held-verification.json>)
+
+对清晰联合新增例，三个候选相对现有首图的五官距离为 0.01079、0.01161、0.01103，均在追加半径以内。三个候选都通过同外观替换的局部细节提升判断，但会使原先分开的另一张图跨过粗轮廓分离半径，并且单帧四折回放至少一折超过 0.0006 的增量容差。将拍摄参数锁定到旧候选时，三者的单帧回放增量仍更高。相同输入的 8×8 四时刻曝光回放，两折的误差增量分别为 0.000508、0.000408，并继续通过整组回放。当前证据表明，单张候选的回放条件和同组时刻的曝光检验会给出不同筛选结果。33 项仓库测试通过，交付版仍待清晰度验收。[单帧替换条件核对](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shock-limited-01/strict-match-replay-probe.json>) · [四时刻曝光复核](<D:/Data/Build/visual-analysis-dev/portrait-exposure-shock-limited-01/exposure-family-audit.json>)
