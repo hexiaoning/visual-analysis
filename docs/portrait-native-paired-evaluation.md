@@ -6136,3 +6136,25 @@ Windows C++、ONNX Runtime CPU 与 Intel UHD 630 的 DirectML 在同样三张输
 三张用户样图中，整组曝光路线只在第三张替换了一张，保持 31 张的实验展示数量，四折的最大误差增量为 0.00000603。旧代表锚定路线三张均无替换。保留第三张的实际入选 PNG，独立将同组的另一时刻替换为错误的伴随画面，原候选因此未进入输出。三张均缺少对应清晰原片。第三张仍有屏幕反光和眼口软边。[第三张实际替换前后](<D:/Data/Build/visual-analysis-dev/portrait-exposure-selector-01/case-03-replaced.png>) · [三张原生回执](<D:/Data/Build/visual-analysis-dev/portrait-exposure-selector-01/private-selection.json>) · [更换同组时刻的对照](<D:/Data/Build/visual-analysis-dev/portrait-exposure-selector-01/phase-companion-control.json>)
 
 33 项仓库测试通过。公开五例的既有普通、拟合去重、纹理保护及覆盖回归通过。新入口核对了错误权重、重复索引、空修订组、非法尺寸和相对路径。最终原生构建在第三张样图和一张留出图上逐像素复现了实际选图。全部素材与研究产物保存在 D 盘 Data 目录。[原生输入检查](<D:/Data/Build/visual-analysis-dev/portrait-exposure-selector-01/native-input-checks.json>) · [最终构建复核](<D:/Data/Build/visual-analysis-dev/portrait-exposure-selector-01/final-native-checks.json>)
+
+
+### 用轻量超分生成独立的细节候选
+
+使用 Real-ESRGAN 作者公开的 `realesr-general-x4v3`。将 512 像素对齐输入用面积插值降至 128 像素，再由模型输出 512 像素。比较原糊图直接输入、四时刻底图逐张输入、逐张输入后只合入脸部高频亮度差三路。第三路在 8×8 单元内保持四时刻的线性光加权均值，成图量化后按既有方法检验模糊回放。历史候选全部保留。开发和留出候选清单各自冻结后再运行参考评分。留出组复用此前 48 张实拍，结果适用于同组对照。[作者实现与权重](https://github.com/xinntao/Real-ESRGAN/blob/master/inference_realesrgan.py) · [成图清单](<D:/Data/Build/visual-analysis-dev/portrait-adcsr-trial-01/compact-held-all-generated.json>)
+
+同一个 OpenVINO 图用 Windows C++ 在 i3-8100 和 Intel UHD 630 上各执行三张输入，含两张实拍和一张用户样图。预热后单张推理中位分别为 215.01 和 77.81 毫秒。GPU 每张记录到 34 个卷积操作执行。本次冷启动编译分别为 0.19 和 17.90 秒。三张输出的最大逐通道浮点差为 0.01843，逐图平均绝对差最大为 0.00072，输出约在 0–1 尺度。全组评分使用 CPU 图的实际 PNG。采样、PNG 写出、曝光投影及参考评分均在计时范围之外。[Windows 原生设备回执](<D:/Data/Build/visual-analysis-dev/portrait-adcsr-trial-01/compact-native-receipt.json>)
+
+| 生成方式 | 开发配对 / 同时清晰（40 份） | 留出配对 / 同时清晰（192 份） |
+| --- | ---: | ---: |
+| 原糊图直出 | 8 / 0 | 37 / 0 |
+| 四时刻逐张直出 | 11 / 1 | 58 / 0 |
+| 合入受曝光约束的高频亮度差 | 15 / 0 | 60 / 0 |
+
+开发组两条四时刻路线各通过 10/10 组回放，留出实拍和三张用户图合计各通过 51/51 组回放。留出候选与历史库合并后，数值配对从 128/192 到 130/192，高清联合保持 1/192。新增两份数值配对来自受约束路线，最弱部位细节响应分别为 0.161 和 0.727，验收线为 0.9104。逐时刻直出的最佳留出匹配响应为 0.854。12 张有数字原帧的实拍屏摄上三条路线均没有新增配对，原候选的高清联合为 1/12。[开发逐份评分](<D:/Data/Build/visual-analysis-dev/portrait-adcsr-trial-01/compact-development-all-scored.json>) · [留出逐份评分](<D:/Data/Build/visual-analysis-dev/portrait-adcsr-trial-01/compact-held-all-scored.json>) · [实拍屏摄评分](<D:/Data/Build/visual-analysis-dev/portrait-adcsr-trial-01/compact-screen-scored.json>)
+
+三张用户图每张保存九份实验成图。并排图可见第一张的直接超分仍有条纹，第二张去掉了一部分屏纹但保留眼区暗带，第三张的反光和眼口模糊仍在。用户图无对应清晰原片可核验外观。两份新增数值配对也保存了原片并排。当前证据仍未达到交付验收，本轮模型未接入应用。33 项仓库测试及 56 项子测试通过。[三张用户图并排](<D:/Data/Build/visual-analysis-dev/portrait-adcsr-trial-01/compact-three-user-cases.png>) · [留出原片并排](<D:/Data/Build/visual-analysis-dev/portrait-adcsr-trial-01/compact-held-comparison.png>)
+
+
+两份新增各用原片横纵偏移 −0.5、0、+0.5 像素的九种组合复核，分别有 5/9 保留数值配对，两份的高清联合均为 0/9。开发、留出及屏拍共独立解码和验证 765 份 PNG。其中重复的 12 份是每张屏拍跨两路复用的原图直出。OpenVINO FP16 权重为 2,426,684 字节。[位置微调复核](<D:/Data/Build/visual-analysis-dev/portrait-adcsr-trial-01/compact-offset-review.json>) · [成图及权重完整性](<D:/Data/Build/visual-analysis-dev/portrait-adcsr-trial-01/compact-integrity.json>)
+
+另用 CVPR 2025 的 AdcSR 和作者公开的网络、解码器权重做了一个离线 CPU 探针。第一张用户图的原糊图裁切直接生成 512 像素图，模型加载约 179 秒，单张推理及 PNG 写出约 420 秒。这是在构建机以 PyTorch 初次运行的墙钟时间，含内存映射的读取开销。图中鼻口轮廓更锐利，屏幕网格也变成清楚的交叉线。该探针仅覆盖一张用户图，未取得配对组成绩或原生 GPU 数据。[AdcSR 论文](https://openaccess.thecvf.com/content/CVPR2025/html/Chen_Adversarial_Diffusion_Compression_for_Real-World_Image_Super-Resolution_CVPR_2025_paper.html) · [首例并排](<D:/Data/Build/visual-analysis-dev/portrait-adcsr-trial-01/adcsr-probe-comparison.png>) · [本机探针回执](<D:/Data/Build/visual-analysis-dev/portrait-adcsr-trial-01/adcsr-probe-local.json>)
