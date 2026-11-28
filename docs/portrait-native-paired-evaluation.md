@@ -6314,3 +6314,15 @@ Windows 原生增加 `--capture-error`，同时约束灰阶误差和可超出精
 再用清晰原片比较修改范围。回贴四小窗 RGB 频带、四小窗完整 RGB 和较大的中央脸区，实际分别有 1、3、24 份高清联合通过，而且这些通过项都满足既有曝光回放检查。扩大范围的控制利用了原片真实的周围结构、明暗及颜色，当前实验无法从这组干预单独归因到某种细节。[真实局部和中央区域对照](<D:/Data/Build/visual-analysis-dev/portrait-region-bank-01/rgb-paired-controls.png>)
 
 据此另跑一次单图中央脸区组合。使用相同中央软窗，在每张同源候选及五档平移间，按糊图回放或回放约束内的细节响应排序。对窗边做有限颜色对齐，确认软窗之外与底图逐像素相同。冻结 36 张成图后评测，三份配对通过全部在历史覆盖内，高清联合仍为零。三张用户图的中央复合图依然可见原有模糊或反光。本轮三个盲生成系列共输出 108 张，整块复合扩大了可替换区域，现有同源候选仍缺少恢复原片所需的细节。33 项仓库测试和 56 项子测试通过。[单图中央区域评分](<D:/Data/Build/visual-analysis-dev/portrait-region-bank-01/center-results.json>) · [三张用户图的中央区域组合](<D:/Data/Build/visual-analysis-dev/portrait-region-bank-01/center-private-review.png>)
+
+### 按集合覆盖训练整块脸部预测器
+
+用 6 组拍摄序列的 98 张真实曝光图及其各 4 张短曝光参考训练，另用 2 组拍摄序列的 10 张图选择参数。48 张既有留出实拍按拍摄序列隔离，本轮未参与训练。每张糊图的推理输入由该图和它的已有时间候选构成。模型在同一中央脸区同时预测四个 RGB 残差。训练让每份清晰参考从四个输出中取最接近的匹配，也让每个输出有梯度，并约束有符号边缘及细节差异。另从既有序列模型继续训练，单独比较改变损失的效果。开发组的集合误差从已有底图的 0.029357 降至 0.028470，约 3.02%。续训的同架构对照由 0.028886 最多降至 0.028713，约 0.60%。[从头训练及 ONNX 校验](<D:/Data/Build/visual-analysis-dev/portrait-whole-center-recall-01/training.json>) · [同架构续训对照](<D:/Data/Build/visual-analysis-dev/portrait-whole-center-recall-01/warm-training.json>)
+
+在 512 像素成图上选定新模型 0.65 残差权重，原序列模型使用 1.0。开发组共有 40 份清晰参考，新模型独立通过 21 份数值配对、2 份高清联合，原序列模型为 21、0 份，底图为 16、1 份。各模型从真实单图推理产生的四张结果接受同一个曝光回放模型检查，开发组均通过。Windows 11 的 OpenVINO 运行记录确认新模型使用 Intel UHD 630，15 次暖态模型推理的 CPU 与 GPU 中位用时为 37.63、25.05 毫秒，最大输出差为 9.09×10⁻⁷。耗时仅覆盖模型推理，选留出参数后复测。[开发组逐份评分](<D:/Data/Build/visual-analysis-dev/portrait-whole-center-recall-01/dev-scores.json>) · [CPU 与 GPU 实际设备记录](<D:/Data/Build/visual-analysis-dev/portrait-whole-center-recall-01/fresh-devices.json>)
+
+在 48 张留出实拍与 3 张用户图上，新旧方案各生成 204 张 PNG，逐张解码复核后封存。两路均有 51/51 组通过固定的四时刻近似回放。对 192 份真实短曝光参考，新模型独立配对 48 份，原序列预测器为 47 份，未经调整的底图为 38 份，三路的高清联合均为 0。与历史候选库合并后仍为 133/192 数值配对、2/192 高清联合。这批图片曾用于此前的留出评估，以上按同一基准作横向比较。[冻结成图索引](<D:/Data/Build/visual-analysis-dev/portrait-whole-center-recall-01/held-generated.json>) · [192 份参考的逐份评分](<D:/Data/Build/visual-analysis-dev/portrait-whole-center-recall-01/held-scores.json>)
+
+三张用户图的新候选与各自底图在脸区内的平均 RGB 绝对差为 1.02–3.27 灰阶。每张输入的四个候选中，最接近一对的平均像素差分别由 4.85、10.57、6.25 变为 4.38、8.80、4.64 灰阶。成图中第二张仍有眼部暗带和屏纹，第三张的眼口仍模糊。用户图缺少清晰原片，无法对真人外观做实证比较。[原图、底图和新版候选并排](<D:/Data/Build/visual-analysis-dev/portrait-whole-center-recall-01/private-preview.png>) · [逐张像素差与回放记录](<D:/Data/Build/visual-analysis-dev/portrait-whole-center-recall-01/private-deltas.json>)
+
+Windows 原生选择器对三张用户图核对并保留了既有的 10、22、41 张输出，没有追加本轮候选。逐张核对了索引和输出像素。新模型留在离线试验，33 项仓库测试和 56 项子测试通过。[原生筛选回执](<D:/Data/Build/visual-analysis-dev/portrait-whole-center-recall-01/native-display.json>)
