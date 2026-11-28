@@ -6031,3 +6031,19 @@ Windows 11 的 C++ 地标工具在相同九张输入上对比 CPU 和 Intel UHD 
 七份新增数值匹配的最弱五官区域响应在 0.178 至 0.857，均低于 0.9104。将其清晰参考作九种横纵半像素位置复核，逐份有 5、9、4、6、6、5、9 次满足旧配对，高清联合均为零。并排可见部分眼睑、唇形和眼镜仍偏软，少数裁切的边缘含镜像填充。[新增数值匹配的位置复核](<D:/Data/Build/visual-analysis-dev/portrait-coupled-replay-opt-01/novel-match-audit.json>) · [七份候选与真实短曝光的对照](<D:/Data/Build/visual-analysis-dev/portrait-coupled-replay-opt-01/new-reference-comparison.png>)
 
 Windows 原生筛选以 51 张输入实际核对 204 张提报图和所有入选 PNG。48 张留出实拍的展示数量由 999 到 1,040 张，旧配对展示覆盖由 79/192 到 81/192。新展示命中的两份参考此前已在历史候选库中得到匹配，展示高清联合覆盖仍是 0/192。用户三张分别增加 0、0、2 张，与早期预览一致，第三张两份仍有反光和相近的眼口轮廓。实验未达到交付清晰度。33 项仓库测试通过。[Windows 原生覆盖与回执](<D:/Data/Build/visual-analysis-dev/portrait-coupled-replay-opt-01/windows-summary.json>) · [用户三张图的实际对比](<D:/Data/Build/visual-analysis-dev/portrait-coupled-replay-opt-01/three-case-joint-analysis.png>)
+
+### 固定五官位置后保留成图细节
+
+沿用上一轮中心及另一初始状态的联合拟合，逐张重建原先的形变、亮度修正和曝光权重。每一张旧候选重建后均与前次 PNG 逐像素一致。保持同一张起始图与同一采样位置，比较量化推迟到最后的双线性、限幅三次和限幅 Lanczos。三次与 Lanczos 的外推被限制在四个邻点的取值范围再加至多 0.0075。另一组仅对相邻尺度方向一致、正负两侧均单调的亮度轮廓沿法向修整，限制改变量并保留窗外像素。所有候选仍用原曝光参数复核整组回放，之后才按同一门槛读清晰原片。[三次卷积推导](https://doi.org/10.1109/TASSP.1981.1163711)
+
+用频率与位置均已知的图形核对，固定半像素位移的高频控制中，双线性、三次和 Lanczos 的有符号细节响应分别为 0.620、0.920 和 0.983。对应的像素 RMS 误差为 0.03362、0.00821、0.00641。零位移的三路输出均逐像素保留；实测外推未超过 0.0075。沿法向修整在已知单一边缘把 10% 至 90% 的位置宽从 5.60 缩至 4.79 个像素，明暗中点移动 0.013 个像素，该对照没有反向轮廓或常量图变化。[已知曲线和边缘控制](<D:/Data/Build/visual-analysis-dev/portrait-detail-transport-01/render-controls.json>)
+
+10 张实拍开发图的 40 份参考中，旧成图与三种插值分别通过 13 份旧配对，两档边缘修整分别为 14 份。旧成图和五路新图各有 2 份同时达到清晰度门槛，都是已覆盖参考。只推迟量化时脸区绝对灰阶变化的逐图中位为 0.039，限幅三次为 0.118，较强的边缘修整为 0.269。按固定开发规则选择三次插值与较强的边缘修整进入独立留出比较。[开发逐候选评分](<D:/Data/Build/visual-analysis-dev/portrait-detail-transport-01/development-scores.json>)
+
+用户三张图各提报四张新成图给 Windows 原生筛选，已逐像素核验实际入选文件。三张分别追加 1、0、1 张。第一张新增图与同位置旧图的外观接近，第三张入选图仍有明显反光和眼口软边。每张取变化最大的较清晰同位置对照，中央脸区的平均绝对改变量分别为 1.01、0.80、0.74 灰阶。样图缺清晰原片，不能将这些灰阶变化当作人像外观确认。[用户三张图成图和实际入选](<D:/Data/Build/visual-analysis-dev/portrait-detail-transport-01/three-case-transport.png>) · [Windows 选图回执](<D:/Data/Build/visual-analysis-dev/portrait-detail-transport-01/sample-selection.json>)
+
+两张留出实拍和第三张用户图用同一源图、同一位移核对 Windows C++ 采样。CPU 路径使用三线程 OpenCV 及局部限幅，GPU 路径显式执行 Intel OpenCL 内核。三次插值的中位耗时为 CPU 30.83、GPU 4.18 毫秒，Lanczos 为 38.35、5.46 毫秒。GPU 输入缓冲已就绪，计时包含内核完成，不含图像传入传出。两种结果与 CPU 的最大浮点差分别为 2.38×10⁻⁷、5.36×10⁻⁷。这里测量采样与限幅，不含整套成图。[Windows CPU 和 GPU 复核](<D:/Data/Build/visual-analysis-dev/portrait-detail-transport-01/native-sampling-test.json>)
+
+独立留出和三张用户图共冻结 2,444 张。204 组限幅三次全部过回放，204 组边缘修整通过 203 组。320 份开发中的旧成图逐候选评分均与上一轮一致，留出复用已核验逐像素一致的旧图评分。旧成图、限幅三次和边缘修整独立满足旧配对的参考数为 94、90、84/192。唯一新增旧配对为 `rb-00009-0866` 的第 3 份，位置微移后九种中有五种满足旧配对，细节最大为 0.675。旧候选库覆盖从 122 到 123/192，三路及其并集同时满足清晰度的均为 0/192。[独立留出的逐份评分](<D:/Data/Build/visual-analysis-dev/portrait-detail-transport-01/held-scores.json>)
+
+在旧、新成图都通过旧配对的 89 份参考中，最弱五官区域的最佳有符号细节响应中位从 0.572 到 0.582。逐份增量中位为 0.0114，最大 0.0539。新候选最高为 0.9066，仍低于 0.9104。并排可见重新采样略保留了部分边缘，眼口、镜框及被反光挡住的细节仍有差距。当前实拍证据显示，采样损失只占已测清晰度差距的一部分。原生选图核对范围为三张用户样图。本轮未达到交付验收，33 项仓库测试通过。[同位置细节差距核对](<D:/Data/Build/visual-analysis-dev/portrait-detail-transport-01/transport-detail-audit.json>) · [留出原片并排图](<D:/Data/Build/visual-analysis-dev/portrait-detail-transport-01/short-exposure-comparison.png>)
