@@ -6326,3 +6326,17 @@ Windows 原生增加 `--capture-error`，同时约束灰阶误差和可超出精
 三张用户图的新候选与各自底图在脸区内的平均 RGB 绝对差为 1.02–3.27 灰阶。每张输入的四个候选中，最接近一对的平均像素差分别由 4.85、10.57、6.25 变为 4.38、8.80、4.64 灰阶。成图中第二张仍有眼部暗带和屏纹，第三张的眼口仍模糊。用户图缺少清晰原片，无法对真人外观做实证比较。[原图、底图和新版候选并排](<D:/Data/Build/visual-analysis-dev/portrait-whole-center-recall-01/private-preview.png>) · [逐张像素差与回放记录](<D:/Data/Build/visual-analysis-dev/portrait-whole-center-recall-01/private-deltas.json>)
 
 Windows 原生选择器对三张用户图核对并保留了既有的 10、22、41 张输出，没有追加本轮候选。逐张核对了索引和输出像素。新模型留在离线试验，33 项仓库测试和 56 项子测试通过。[原生筛选回执](<D:/Data/Build/visual-analysis-dev/portrait-whole-center-recall-01/native-display.json>)
+
+### 由单张糊图估计局部细节幅度区间
+
+用六个拍摄组的 98 张真实曝光和对应短曝光帧估计双眼、鼻、嘴在两个亮度频带所需的幅度。输入特征只取单张糊图和其四张已有候选的局部频带、低频差和频带差。以低频匹配训练帧与候选时刻，做正则回归。再逐拍摄组留出，拟合八个频带幅度共同残差的首个主方向。成图比较固定的逐部位增益、按输入预测的增益，以及沿主方向放大或减小的两档。训练阶段的原片只用于学习。10 张开发图上，条件模型的平均绝对对数幅度误差为 0.1080，固定增益为 0.1339，降幅约 19.3%。六次留一拍摄组中有五次改善。开发组 320 个单部位频带值中，190 个落在该轴两端的逐坐标范围内。这个数值衡量幅度校准，不能换算为外观覆盖或真人相似概率。[校准和逐组误差](<D:/Data/Build/visual-analysis-dev/portrait-detail-amplitude-set-01/calibration.json>)
+
+校正以线性光三个通道共享偏移输出。各 8×8 块内同时约束四张候选的平均亮度，限制每个像素的色域并保持脸区窗外像素。输出后在 8 位 PNG 上重新核对曝光及外观。用同一组实拍候选测 Windows C++ 三尺度高斯频带。11 次暖态的中位值为 CPU 32.83 毫秒、Intel UHD 630 OpenCL 数据已驻留 25.52 毫秒、含上传回读 36.12 毫秒。OpenCL 卷积运行成功，CPU 与 GPU 的最大输出差为 1.49×10⁻⁷。此处只计频带运算。[设备及实际耗时](<D:/Data/Build/visual-analysis-dev/portrait-detail-amplitude-set-01/amplitude-device.txt>)
+
+在开发组的 40 份清晰参考上，底图、固定版、中间估计、沿主方向放大、沿主方向减小的配对数依次为 16、16、15、15、17，高清联合分别为 1、2、2、2、2。三种条件配置的并集与减小档一致。按开发组锁定减小档，在 48 张隔离实拍及 3 张用户图上和固定版各生成 204 张候选。两路均有 51/51 组通过四时刻近似回放，逐个输入内的四张无相同 PNG。线性块均值的最大改变量在量化前为 2.44×10⁻⁵，8 位 PNG 解码后为 2.88×10⁻⁴。[开发逐份评分](<D:/Data/Build/visual-analysis-dev/portrait-detail-amplitude-set-01/dev-scores.json>) · [冻结输出与亮度复核](<D:/Data/Build/visual-analysis-dev/portrait-detail-amplitude-set-01/held-render-integrity.json>)
+
+另对底图已通过外观配对的 38 份留出参考，用清晰原片辅助诊断。在评分频带内拆出两项，用 0.625–3.82 倍范围内任意独立正增益及既有逐部位平移，求有符号投影的乐观上界。4 份即使在该上界下仍达不到最弱部位的清晰度门槛。最弱项主要位于双眼和嘴。其余 34 份的上界允许过线。这只说明幅度仍可能影响该指标，计算中可以按清晰原片逐部位选增益，也没有要求实际回放或最终成图通过。 [幅度上界逐份记录](<D:/Data/Build/visual-analysis-dev/portrait-detail-amplitude-set-01/reference-amplitude-ceiling.json>)
+
+留出组 192 份参考中，底图、固定增益、条件增益分别配对 38、39、37 份，三路高清联合均为 0。各自与历史库合并仍为 133/192 数值配对、2/192 高清联合。虽然模型更准确地估计了开发集的平均幅度，实际成图未得到历史库缺失的清晰五官。三张用户图的条件版在相同脸区相对底图平均只改 0.61、2.16、0.11 RGB 灰阶，第二张的暗带和屏纹、第三张的眼口模糊仍清楚可见。三张缺少原片，无法用原片验证外观。[实拍逐份评分](<D:/Data/Build/visual-analysis-dev/portrait-detail-amplitude-set-01/held-scores.json>) · [三张用户图并排](<D:/Data/Build/visual-analysis-dev/portrait-detail-amplitude-set-01/private-preview.png>)
+
+Windows 原生选择器保留三张用户图既有的 10、22、41 张输出，本轮无追加。逐张核对了回执索引与输出像素。此方案保留为实验，33 项仓库测试及 56 项子测试通过。[原生筛选回执](<D:/Data/Build/visual-analysis-dev/portrait-detail-amplitude-set-01/native-display.json>)
