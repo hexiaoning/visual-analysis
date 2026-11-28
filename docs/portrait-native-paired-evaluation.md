@@ -5887,3 +5887,23 @@ Windows 原生选择在 51 张输入上追加 18 张，48 张配对实拍实际�
 ### 清晰度独立复核
 
 配对通过仍可能保留明显模糊。用清晰参考的细频带作为方向，分别量度两眼、鼻和嘴对应位置的同向细节幅度。在 128 像素特征图内允许各区作一像素的局部补偿，以减少对齐误差对幅度的影响。在开发图上冻结最弱区域门槛 0.9104。40 张作轻微平移的清晰对照有 36 张通过，40 张加高斯模糊的对照均未通过。11 个可能新增的展示数值匹配中没有通过者。唯一新增的历史全集匹配在两眼、鼻、嘴的同向细节幅度约为参考的 56%、27%、36%、16%，对照图中眼口仍然模糊。此项用于审核配对结果，需有清晰参考，未将其用作单张用户图片的置信度。试验未达到高清覆盖验收，未接入交付应用。仓库 33 项测试通过。[细节复核逐区域记录](<D:/Data/Build/visual-analysis-dev/portrait-expanded-exposure-motion-01/sharp-edge-check.json>) · [新增数值匹配与真实短曝光对照](<D:/Data/Build/visual-analysis-dev/portrait-expanded-exposure-motion-01/novel-sequence-matches.png>)
+
+### 从实拍清晰帧学习五官细节
+
+从按视频隔离的 98 组拟合和 10 组开发曝光读取同次的四张 256 像素清晰亮度图。输入是单张糊图和由其生成的七帧起始序列。网络从 128 像素特征一次给四个时刻输出 256 像素亮度。训练枚举四份预测与参考的 24 种分配，监督带符号亮度频带、亮暗梯度和误差最大的五官部位。两路从相同的 100 步配对预训练出发，各训练 200 步并以同一开发误差选权重。额外的一路用 32 像素清晰实拍五官块训练判别器，输入仅含高频亮度和梯度。判别器只参与训练。频带分别建模的思路见 WaveFace，实际训练为本地实现。[实拍数据清单](<D:/Data/Build/visual-analysis-dev/portrait-oriented-detail-01/data.json>) · [训练与导出回执](<D:/Data/Build/visual-analysis-dev/portrait-oriented-detail-01/training.json>) · [WaveFace 论文](https://openaccess.thecvf.com/content/CVPR2024/html/Miao_WaveFace_Authentic_Face_Restoration_with_Efficient_Frequency_Recovery_CVPR_2024_paper.html)
+
+原时间序列、只用配对监督、再加清晰块判别约束，开发误差分别为 0.042422、0.041951、0.042084。两个导出模型和训练权重的最大浮点差均为 5.96×10⁻⁸。512 像素成图把模型预测的亮度差加回同一时刻的彩色底图。四张结果使用线性光平均，沿用共同曝光参数进行两个空间折的回放校验，再写出并逐像素核对候选。
+
+在 40 份独立开发参考上，原始序列符合原配对规则 16 份，其中 1 份同时通过冻结的四部位细节门槛。只用配对监督为 20 份、其中 0 份通过细节门槛，加入清晰块约束为 20 份、其中 2 份通过。两路按同一规则选全强度用于留出组。开发参考不参与生成。旧门槛的数值匹配和新增清晰要求分别计数。[开发候选冻结](<D:/Data/Build/visual-analysis-dev/portrait-oriented-detail-01/development-generated.json>) · [开发选参](<D:/Data/Build/visual-analysis-dev/portrait-oriented-detail-01/development-scores.json>)
+
+在 Windows 11 上，同一 C++ OpenVINO 工具用本地 ONNX 为两组模型各生成 51 张输入的四帧输出。全部生成为 GPU.0，运行图把卷积标为 GPU 实现。三张代表图每图四帧的中位推理用时，只用配对监督为 CPU 13.26 毫秒、Intel UHD 630 GPU 6.46 毫秒，加入清晰块约束为 CPU 6.77 毫秒、GPU 6.26 毫秒。最大 CPU 与 GPU 浮点差分别为 1.19×10⁻⁷、8.94×10⁻⁸。同图重复 GPU 推理的张量逐值相同。两路留出和样图共生成 612 张，包括 204 张原始序列对照。[原生 CPU 与 GPU 回执](<D:/Data/Build/visual-analysis-dev/portrait-oriented-detail-01/devices.json>) · [冻结的留出与样图输出](<D:/Data/Build/visual-analysis-dev/portrait-oriented-detail-01/held-generated.json>)
+
+同一批 192 份短曝光参考上，二次复核历史配对结果。历史候选全集的 105 份匹配中逐候选核对细节 1,962 次，历史实际展示的 78 份匹配中核对 109 次。同一旧配对和四部位细节门槛共同达到的均为 0 份。0.9104 的细节门槛在留出参考的同图、轻微平移和加高斯模糊三组控制中各通过 192、155、0 份。任一区的真实边缘未达到门槛即失败，较远的背景纹理难以补偿。该门槛对小位移仍敏感，因此按独立检测记录，并结合并排图判断。[历史对照复查](<D:/Data/Build/visual-analysis-dev/portrait-oriented-detail-01/previous-quality.json>) · [留出门槛控制](<D:/Data/Build/visual-analysis-dev/portrait-oriented-detail-01/gate-controls.json>)
+
+原始序列、只配对监督、加入清晰块约束三路在留出实拍中独立达到旧配对规则的分别为 38、45、43 份，均没有补到此前历史全集未匹配的参考。三路同时通过旧配对及四部位细节门槛的均为 0 份。0.75 仅用于诊断旧匹配中的细节水平，只配对监督为 0 份，加入清晰块为 2 份。目视对照中眼睑和唇线仍比真实短曝光软，侧脸的发丝位置和发际线也有差异。[留出逐候选评分](<D:/Data/Build/visual-analysis-dev/portrait-oriented-detail-01/held-scores.json>) · [实拍原片并排对照](<D:/Data/Build/visual-analysis-dev/portrait-oriented-detail-01/held-visual.png>)
+
+为区分学习结果与一般锐化，按每张候选相对其序列底图的 RGB 均方根改变量，生成同幅度的高斯反锐化对照。量化后的幅度最大绝对差为 8.18×10⁻⁶。两路学习分支为 45、43 份旧配对通过，等幅锐化为 14、15 份，四路共同达到清晰度门槛的数量均为 0。学习改动保住较多旧配对，仍没有可计入高清覆盖的新参考。[等幅锐化逐图对照](<D:/Data/Build/visual-analysis-dev/portrait-oriented-detail-01/unsharp-control.json>)
+
+另外使用此前固定的 12 个不同来源的 CoC 屏拍，含六张强屏纹和六张斜拍。用本地 C++ GPU 生成原序列与两个模型的 144 张候选，按屏拍原有的配对规则和这轮同一个细节门槛评分。此前首图满足配对规则 12/12，达到细节门槛 0/12。原序列和两种新模型都只有斜拍 00250 同时过两项，在真实数字帧横纵各移半个像素的九种位置中均通过八次。该例要保留的相似边缘已经在序列底图中，目视仍有曝光、头发细纹和暗部的差异。[屏拍来源及盲生成](<D:/Data/Build/visual-analysis-dev/portrait-oriented-detail-01/screen-generated.json>) · [独立屏拍评分](<D:/Data/Build/visual-analysis-dev/portrait-oriented-detail-01/screen-scores.json>) · [斜拍例原帧对照](<D:/Data/Build/visual-analysis-dev/portrait-oriented-detail-01/screen-pass-comparison.png>) · [CoC 公开数据](https://zenodo.org/records/23150212)
+
+Windows 原生工具核对 51 份筛选回执及新增的 PNG 像素。留出实拍展示 841 张到 844 张，配对覆盖仍为 78/192，候选全集仍为 105/192，二者的同时达标覆盖均为 0/192。用户三张图均没有新增原生入选候选。实际拼图里第二张仍有眼区暗带和屏纹，第三张眼口仍偏软且有屏幕反光。三张没有清晰原片用于核验。此次训练和原生 GPU 推理保留在本地实验，未修改交付模型。33 项仓库测试通过。[原生合并回执](<D:/Data/Build/visual-analysis-dev/portrait-oriented-detail-01/comparison.json>) · [三张样图对比](<D:/Data/Build/visual-analysis-dev/portrait-oriented-detail-01/three-cases.png>)
