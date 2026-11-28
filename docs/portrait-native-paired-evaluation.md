@@ -5935,3 +5935,27 @@ Windows 11 的 C++ 模型调用在两张实拍和第三张用户图上比较 CPU
 逐像素核对 51 份 Windows 原生筛选回执。留出实拍展示增加 70 张，由 844 到 914，但旧配对和高清联合覆盖均无增加。候选库的旧配对覆盖仍为 105/192，实际展示仍为 78/192，二者的高清联合通过仍为 0/192。并排对照的通过旧配对者仍看得到镜框、下颌或眼口残留的模糊。[Windows 实际覆盖回执](<D:/Data/Build/visual-analysis-dev/portrait-natural-face-flow-01/windows-final.json>) · [实际生成候选与清晰原片](<D:/Data/Build/visual-analysis-dev/portrait-natural-face-flow-01/real-candidate-comparison.png>)
 
 三张用户输入的实验筛选分别追加 0、0、2 张。第三张的两张新增图，在中心脸区的每通道平均绝对差约 4.02 个灰阶。并排目视主要为细小的明暗和颗粒变化，眼口仍然模糊，五官没有明显的不同形状。前两张仍可见屏纹或眼区暗带。三张没有对应清晰原片，无法核验真人外观。实验未接入交付版。33 项仓库测试通过。[三张样图原图、试验与筛选对照](<D:/Data/Build/visual-analysis-dev/portrait-natural-face-flow-01/three-cases.png>)
+
+### 眼睑、嘴形与头部位移的多时刻回放
+
+从每张模糊输入读取两个此前仅由同图生成的起点，分别是固定首选和局部补全图。用本地 HR-noSA 提取眼、鼻、嘴的位置。按眼角和嘴角所在方向定义两眼开合、嘴部开合、嘴角变化及头部横纵运动。穷举单一动作和联合动作，在光学验证后挑三个方向不同的方案。每组以五个时刻生成图像，在 2.2 次幂近似下按七种光照积分权重计算观察。两端各自保有非零曝光权重。用起点和糊图的脸外区域固定相机参数，再用脸内两组空间位置核对同一曝光方案的亮度与梯度。筛选后的两端图以 512 像素重新生成、量化和复核。渲染逆映射两端的最小雅可比行列式达到 0.54 才出图。[开发图的原生点位](<D:/Data/Build/visual-analysis-dev/portrait-articulated-replay-01/development-geometry.json>)
+
+Windows 11 的 C++ 地标工具在相同九张输入上对比 CPU 和 Intel UHD 630 DirectML。实际中位数为 1,347.19 和 261.75 毫秒，原生运行日志确认 DirectML 执行，最大坐标差为 0.00121 像素。后续点位均使用 DirectML。另计时 512 像素形变，同机 CPU 11.88 毫秒，OpenCL 26.79 毫秒，包含上传与回读，浮点输出最大差 2.98×10⁻⁸。形变使用实验中较快的 CPU。[地标设备和执行日志](<D:/Data/Build/visual-analysis-dev/portrait-articulated-replay-01/landmark-devices.json>) · [形变设备对照](<D:/Data/Build/visual-analysis-dev/portrait-articulated-replay-01/synthetic-controls.json>)
+
+对六张独立开发起点模拟运动、选定曝光权重并加入 1.08 像素额外光学模糊。已知清晰起点和模拟糊图一起用于控制试验。先锁定三组提案，随后与实际合成用的两个端点对照。六个最佳提案的整幅 8 位灰阶平均绝对误差在 0 到 0.54 之间，两个逐像素复现。两端的时间方向本身可交换。图从左到右为模拟糊图、两张已知端点、两张候选端点。[六组模拟控制](<D:/Data/Build/visual-analysis-dev/portrait-articulated-replay-01/synthetic-comparison.png>)
+
+共核对 61 个输入的 183 份点位推理和 183 条 DirectML 图执行记录，先完成的开发坐标与最后整批坐标逐项相同。10 张开发图含 40 份短曝光参考。固定首选和局部补全起点自身分别通过 14、2 份旧配对。用 0.74 的名义幅度，形变候选独立通过 14、17 份，分别补到相应起点未覆盖的 4、16 份，两路各与自己的起点合并后均为 18/40。两种起点、两档幅度的高清联合通过均为 0。开发后冻结两路 0.74。[完整原生点位结果](<D:/Data/Build/visual-analysis-dev/portrait-articulated-replay-01/source-geometry.json>) · [开发评分与固定幅度](<D:/Data/Build/visual-analysis-dev/portrait-articulated-replay-01/development-scores.json>)
+
+从三个留出视频各按固定散列取四段长曝光。每段提供一张真实短曝光作诊断起点，只给另外三个时刻评分。真实起点单独匹配 7/36，经过盲选形变匹配 18/36，两者的高清联合通过均为 0/36。同一组真实起点另用各目标短曝光来估计双向稠密光流，只移动真实起点自带的像素。在 36 份参考中，直接形变和双向一致性保护均有 18 份同时通过配对、清晰度和整组曝光回放。回放由四个已知时刻加一个中心线性光插值构成。目标光流用到了清晰参考，这组对照检验能否表达真实时刻的变化，不参与盲生成计数。[真实起点诊断](<D:/Data/Build/visual-analysis-dev/portrait-articulated-replay-01/genuine-anchor-control.json>) · [目标光流诊断](<D:/Data/Build/visual-analysis-dev/portrait-articulated-replay-01/target-warp-control.json>)
+
+51 张留出和用户输入共得到 306 组、612 张候选。实际全分辨率逆映射的最小雅可比值为 0.54080。306 组使用均匀曝光积分时也满足同一像素和梯度门槛，分别在一组像素拟合权重再到另一组评估时也全部通过。不同权重在此实验改变了提案的排序，可行组数没有增加。两路每组端点间的整图平均逐通道绝对差，中位数为 0.922 和 1.537 灰阶。各自六张候选的脸区中频两两差异，相对同图四张真实短曝光的中位比例为 49.5% 和 57.7%。[光学与多样性回执](<D:/Data/Build/visual-analysis-dev/portrait-articulated-replay-01/profile-audit.json>)
+
+48 张真实留出输入含 192 份清晰参考。两路形变候选分别独立匹配 31 和 16 份，并集 43 份。补全起点路线在原候选库未匹配的参考中找回两份，均为头部位移。九种参考半像素位置的旧匹配通过数为 8、7。两张在标称位置的最弱部位细节响应为 0.363、0.322，照片对照仍能看到眼睑和眼口模糊。总体高清联合通过为 0/192。[留出逐图配对](<D:/Data/Build/visual-analysis-dev/portrait-articulated-replay-01/held-scores.json>) · [新增数值匹配的偏移复核](<D:/Data/Build/visual-analysis-dev/portrait-articulated-replay-01/new-match-audit.json>) · [新增数值匹配与原片](<D:/Data/Build/visual-analysis-dev/portrait-articulated-replay-01/new-numeric-matches.png>)
+
+另在同一 12 张留出图和三张用户样图上，复用由原糊图生成的 MaDENN 镜像图作更清楚的起点，只允许含眼或嘴部变化的方向，保持幅度和回放门槛。共得到 90 张候选。起点和形变在 48 份真实参考中分别匹配 1、7 份，高清通过均为 0。用户第一张可见两种嘴部开合，第二张仍有明显眼部暗带，第三张保留反光和软眼缘。三张用户样图缺清晰原片，细节的实际准确度无从校验。[较清晰起点的实拍及样图评分](<D:/Data/Build/visual-analysis-dev/portrait-articulated-replay-01/clear-anchor-results.json>) · [三个样图与两端候选](<D:/Data/Build/visual-analysis-dev/portrait-articulated-replay-01/clear-anchor-cases.png>)
+
+另用相同的 DirectML 点位模型实际重测三张样图中展示的两端。在补充的 MaDENN 图上，第一张两端的嘴部开合差为 6.57 个对齐像素，第二张图像右眼的开合测得差 4.10 像素，第三张嘴部为 7.63 像素。第二张被暗带遮住，第三张有高亮反光，点位只描述生成图。在独立的三张原生筛选复查中，只有第二张追加了一张嘴部候选，第一、三张均未追加。[较清晰候选的独立点位与原生筛选](<D:/Data/Build/visual-analysis-dev/portrait-articulated-replay-01/clear-case-review.json>)
+
+第一张样图的六张 MaDENN 形变试验，原生单图回放误差范围为 0.02303–0.02579，低于旧展示最好误差 0.01832 加 0.028 的容差。距旧图最近的五官带通距离为 0.04549–0.05345，高于 0.025 的小半径。原生未进入逐对关键点检查。按筛选实现，剩余筛选条件是候选细频不低于拍摄图。原图有密集屏纹，肉眼清晰度与未经去纹修正的细频下限出现了分歧。[细频门槛的筛选实现](../native/tools/portrait_candidates/appearance_cover.cpp)
+
+主试验的 51 张图全部完成 Windows 原生回执和新增 PNG 的逐像素核对。留出实拍展示增加 61 张，由 914 到 975。全部候选的旧配对覆盖由 105/192 到 107/192，实际展示仍为 78/192，两个口径的高清联合覆盖均为 0/192。主试验三张用户样图各追加 0、1、1 张。第一张最明显的一组试验端点嘴部开合差为 8.90 像素，仍带明显屏纹，原生未追加。实验未接入交付版。33 项仓库测试通过。[主试验原生覆盖](<D:/Data/Build/visual-analysis-dev/portrait-articulated-replay-01/actual-results.json>) · [主试验三张样图](<D:/Data/Build/visual-analysis-dev/portrait-articulated-replay-01/three-cases.png>)
