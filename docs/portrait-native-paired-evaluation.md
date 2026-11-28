@@ -5765,3 +5765,27 @@ Windows 原生诊断增加 `--swap-prefix`。候选若无法同时满足清晰�
 在两套展示全部冻结后才核对留出短曝光。两条路线均无新增或丢失的逐帧匹配。用上轮清晰参考辅助复核原因。满足细频、形状和原有覆盖约束的 9 个替换机会中，纯回放提名保住 0 个，覆盖提名保住 1 个，实际替换保住 0 个。唯一进入覆盖提名的 `rb-00009-0583` 是 `motion-2-3`。它相对能替换的 `roi/madenn` 降低了回放误差，但加权候选覆盖得分变差，因此没有选入。这里只用参考定位失败环节。[原生选图与清晰配对](<D:/Data/Build/visual-analysis-dev/portrait-blind-swap-01/held-paired.json>) · [参考辅助提名容量](<D:/Data/Build/visual-analysis-dev/portrait-blind-swap-01/nomination-capacity.json>)
 
 用户前两张的展示没有替换。第三张在两套规则下各换一份备选。普通覆盖排序的新图有更清楚的局部眼口线条，但眼口仍有重影和反光，和较小替换距离路线的成图差异明显。加距离限制后的版本与被替换图目视接近，未能解决原有模糊。三张缺少同帧清晰原片，无法比较真实外观。替换规则保留在研究评测中。33 项仓库测试、五组原有 Windows 原生回归，以及三个实拍预筛对照通过。[普通覆盖排序对照](<D:/Data/Build/visual-analysis-dev/portrait-blind-swap-01/user-cases.png>) · [加距离限制的对照](<D:/Data/Build/visual-analysis-dev/portrait-blind-swap-01/guard-user-cases.png>)
+
+### 扩充实拍曝光样本并学习五官细节的多种状态
+
+从 RB2V 原始归档在六个既有拟合视频中各抽取 12 个额外曝光，按源帧号与旧样本及本批其他样本间隔至少 16 帧。每次读取一张模糊图和四张同步短曝光，360 个归档成员全部通过 CRC 校验。沿用同一张模糊图的原生人脸对齐参数变换短曝光参考，70 组通过，2 组人脸检测分数低于 0.35。训练规模从 28 组增加到 98 组，新增的是同一批视频内的时间样本。开发集仍用另外两个视频的 10 组，验收仍使用三个留出视频的 48 组。[RB2V 采集论文](https://openaccess.thecvf.com/content/CVPR2023/html/Pham_HyperCUT_Video_Sequence_From_a_Single_Blurry_Image_Using_Unsupervised_Ordering_CVPR_2023_paper.html) · [对齐和输入哈希](<D:/Data/Build/visual-analysis-dev/portrait-expanded-short-state-01/aligned-extra.json>)
+
+在 96×96 对齐灰度图上提取局部亮度频带及坐标，用轻量卷积网络估计四种有正负号的眼、鼻、口亮度变化。每个像素的四个值均值为零。训练对四个预测和四张短曝光的 24 种对应关系求最小加权误差，同时约束梯度和像素间的状态方差。两套数据使用同一模型、初始随机种子、批量和 300 步预算。扩充前后，先前冻结的开发集目标值分别为 0.060106 和 0.057080，下降 5.03%。四个状态全置零时为 0.063348。六近邻对照依据模糊图的频带和低频亮度对齐多状态并平均，在自己的加权绝对偏差上，28 和 98 组训练数据分别为 0.181855 和 0.192686，置零对照为 0.126302。[原训练集模型回执](<D:/Data/Build/visual-analysis-dev/portrait-expanded-short-state-01/original-training.json>) · [扩充模型回执](<D:/Data/Build/visual-analysis-dev/portrait-expanded-short-state-01/expanded-training.json>) · [近邻对照](<D:/Data/Build/visual-analysis-dev/portrait-expanded-short-state-01/kernel-training.json>)
+
+为每个模糊输入沿用两张由该图生成的清晰底图。每套数据的模型各给每张底图生成四种状态。四状态逐像素同权平均在整数量化后精确等于底图的 RGB 编码值，按 2.2 次幂转到线性域后再折算回灰阶，所有像素与通道的差值绝对值限制到 2.5/255 以内。基于原有底图的约束统一用于两种训练规模。实拍候选生成和原生展示先冻结，再用清晰参考评价。
+
+两套卷积权重均导出 48,548 字节的 ONNX，ONNX Runtime 与训练模型在同一验证张量上的最大误差低于 3.0×10⁻⁷。在 Windows 11 的 CPU 及 Intel UHD 630 上，用 OpenVINO 运行 10 张开发输入及 3 张用户输入。扩充模型的中位推理时间分别为 2.13 和 1.87 毫秒，原规模模型分别为 1.07 和 2.35 毫秒。此次计时包含该张量推理，候选渲染和选图另计。运行图确认卷积和池化由 GPU 执行，CPU 与 GPU 最大差为 5.96×10⁻⁷。使用固定的同一模糊输入替代不同图后，扩充模型的输出平均改变 0.04331，其输出绝对值平均为 0.03852，表明模型确实响应输入差异。[Windows CPU/GPU 回执](<D:/Data/Build/visual-analysis-dev/portrait-expanded-short-state-01/ov-timing.json>)
+
+每种训练规模在 48 张留出实拍上各生成 384 张，共与同一批 192 张短曝光参考对照。两种训练规模的新候选各匹配 6 份参考，其中 5 份旧展示已有匹配，另 1 份原有全库已有匹配，旧展示遗漏。与既有全库取并集后仍为 104/192。扩充的数据降低了训练目标在开发集上的误差。在留出实拍中没有补到新的参考外观。[全量候选配对回执](<D:/Data/Build/visual-analysis-dev/portrait-expanded-short-state-01/signed-bank-scores.json>)
+
+两套卷积模型都在 61 张输入上通过四状态逐像素查验。扩充模型的任一线性域换算差值小于 2.5 灰阶，平均为 0.0080 灰阶。同一底图的状态两两比较，脸中央平均差 1.39 灰阶，原规模为 1.19 灰阶。98 组近邻对照生成的平均差为 4.48 灰阶，覆盖判断限于这批卷积模型的完整验收。[候选和曝光约束](<D:/Data/Build/visual-analysis-dev/portrait-expanded-short-state-01/generation.json>)
+
+| 48 张留出实拍 | 短曝光匹配 | 外观组分配 | 覆盖全部观测外观组的输入 | 展示图数 |
+| --- | ---: | ---: | ---: | ---: |
+| 固定展示 | 74/192 | 56/180 | 3/48 | 783 |
+| 原训练规模卷积候选 | 74/192 | 56/180 | 3/48 | 786 |
+| 扩充训练规模卷积候选 | 74/192 | 56/180 | 3/48 | 786 |
+
+两套模型在 61 张输入上共取得 122 份 Windows 原生选图回执，追加输出逐像素核对通过。每种训练规模在留出实拍上各追加 3 张，覆盖未增加。旧展示遗漏的参考是 `rb-00009-0006` 的第 3 张短曝光。扩充版的匹配候选回放误差为 0.00657，最接近的既有展示候选五官带通距离为 0.02391，低于 0.025 的追加下限。[原生回执与逐图配对](<D:/Data/Build/visual-analysis-dev/portrait-expanded-short-state-01/signed-validation.json>)
+
+在三张用户图上，扩充版均未获准追加。原规模模型有一张候选通过了第二张图的追加门槛。并排检查扩充版同一底图上相差最大的两张，变化主要集中在眼口的明暗和边缘，原图缺失的五官结构仍不明确。三张均缺少清晰原片，无法核验生成的外观。本轮结果保留为研究评测。33 项仓库测试通过。[三张用户图与试验候选的对照](<D:/Data/Build/visual-analysis-dev/portrait-expanded-short-state-01/user-comparison.png>)
