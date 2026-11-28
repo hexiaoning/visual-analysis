@@ -6218,3 +6218,32 @@ Windows C++ 共轭梯度求解通过卷积伴随内积及零修正检查。人�
 在上一轮的实际输出上补测细部候选。51 张输入中有 188 个备选落在粗距离 0.025 以内，其中 2 个未过来源回放或细频要求。余下 186 个用细部规则检查，17 个通过，按每图至多两张和两两差异约束实际导出 10 张。最后用七档试验角度逐档重新拟合平移。复用开发组冻结的 0.271 门槛，原先在留出对照中误报的 4 个轻微整脸旋转均被排除，两档局部形变的检出仍为 7/12、11/12。该转角复核应用于已导出的十张，剔除其中两张，原候选保持不变。[重新平移配准后的控制结果](<D:/Data/Build/visual-analysis-dev/portrait-fine-appearance-audit-01/calibration-joint-alignment.json>) · [细部提名回执](<D:/Data/Build/visual-analysis-dev/portrait-fine-appearance-audit-01/bounded-full-selection.json>) · [最终实验子集](<D:/Data/Build/visual-analysis-dev/portrait-fine-appearance-audit-01/joint-full-selection.json>)
 
 剩余八张包含六张留出实拍和第一、二张用户样例各一张。实际文件复核补到五份数值配对，与原生展示合计 92/192。高清联合仍为 0/192。三张用户图均无清晰原片，新增两张仍缺少足够的清晰五官。以上变化是在既有评估队列上的回顾性试验。33 项仓库测试及 56 项子测试通过，本轮评测未接入应用。[细部候选最终评分](<D:/Data/Build/visual-analysis-dev/portrait-fine-appearance-audit-01/joint-full-scores.json>) · [输入、已展示图和补充候选并排](<D:/Data/Build/visual-analysis-dev/portrait-fine-appearance-audit-01/retained-supplemental-comparison.png>)
+
+
+### 从相同时刻的多模型结果学习局部频域融合
+
+以同一糊图生成的四个曝光时刻为底图。每个时刻各取 MaDENN、轻量 Real-ESRGAN 及保持曝光均值的边缘修整作为输入项。先以双眼、鼻、口的中频亮度对齐局部窗，平移限于横纵各三像素。用 128 像素窗去掉局部均值，再分析六个半径区间和四个方向的复数频谱。每个方向和频带共同拟合底图增益及三份差分系数，保留它们之间的协方差。训练使用 10 张实拍长曝光及其 40 份清晰原片，按拍摄组逐组留出决定正则强度。对照包括按幅度做固定加权、将学习校正限制于底图原有相位，以及去掉轻量超分输入后重新拟合。四时刻分别生成，回放检查使用实际 8 位 PNG。这些输入项均来自同一张糊图。频域加权和真实连拍的背景见原始工作。[Fourier Burst Accumulation](https://openaccess.thecvf.com/content_cvpr_2015/papers/Delbracio_Burst_Deblurring_Removing_2015_CVPR_paper.pdf) · [手持多帧超分](https://arxiv.org/abs/1905.03277) · [已冻结频带权重](<D:/Data/Build/visual-analysis-dev/portrait-window-frequency-fit-01/model.json>)
+
+已知系数的控制误差最大为 0.000115，单精度频域转回的最大误差为 7.16×10⁻⁷，相同常量输入的修正量为零。开发组按拍摄组验证的归一化频域误差为 2.551。Windows C++ 对两张实拍及第三张用户图的频带合成作独立核对，CPU 和 Intel UHD 630 OpenCL 的逐窗中位耗时约 0.128、0.808 毫秒，系数差不超过 3.73×10⁻⁹，CPU 逆变换与参考实现最大差不超过 2.80×10⁻⁹。这里只计已准备好的复数系数合成。[数学控制](<D:/Data/Build/visual-analysis-dev/portrait-window-frequency-fit-01/controls.json>) · [Windows 原生设备复核](<D:/Data/Build/visual-analysis-dev/portrait-window-frequency-fit-01/native-frequency-test.txt>)
+
+另以 192 份留出清晰参考作诊断。对每份参考先取低频位置最接近的原时刻，再允许每个局部频带的系数直接由原片决定。单独调整底图幅度、允许相位变化的多输入融合、限制在原相位、额外引入原糊图四种方法，未解释的频域 RMS 中位分别为初始残差的 92.0%、81.5%、87.2%、77.9%。其中残余低于 80% 的分别是 5、70、13、125 份。这衡量所用输入项按本方法组合的上限，原片参与了诊断的选时刻及拟合。[参考辅助诊断](<D:/Data/Build/visual-analysis-dev/portrait-window-frequency-fit-01/reference-assisted-span.json>)
+
+追加一组只从原糊图读取局部频带的系数，共同拟合五个输入项，使用相同的开发拍摄分组。这个模型按拍摄组留出的频域误差为 2.425。两条实际成图路线分别直接应用该拟合，及把它相对四项模型新增的修正按曝光比例减去加权均值，限制修改前后的四时刻线性曝光变化。两条路线仍按原回放条件检查量化成图。[纳入原糊图的频带权重](<D:/Data/Build/visual-analysis-dev/portrait-window-frequency-fit-01/observed-model.json>)
+
+
+在 51 张留出及用户输入的量化 PNG 上，以四项模型的成图作为曝光对照。直接纳入原糊图的线性曝光变化 RMS 逐图中位为 0.000140，减去加权均值后为 0.000075，最大逐点变化分别为 0.04111 和 0.00478。扣除加权均值的浮点校验误差最大为 4.30×10⁻⁹。两组的最终量化曝光仍可能受取整和截断影响。[实际文件曝光变化](<D:/Data/Build/visual-analysis-dev/portrait-window-frequency-fit-01/quantized-exposure-balance.json>)
+
+三张用户图各保留六路四时刻成图。逐时刻与对应旧底图作实际细部比较，72 个候选的结构差异值均低于既有门槛 0.271，最高为 0.225。第二张的屏纹和眼区暗带、第三张的反光和眼口模糊仍在。三张均缺少对应清晰原片。[逐图细部比较](<D:/Data/Build/visual-analysis-dev/portrait-window-frequency-fit-01/private-appearance-audit.json>) · [加入原糊图前后](<D:/Data/Build/visual-analysis-dev/portrait-window-frequency-fit-01/private-frequency-variants.png>)
+
+
+| 成图方法 | 开发配对 / 高清联合（40 份） | 留出配对 / 高清联合（192 份） |
+| --- | ---: | ---: |
+| 原四时刻底图 | 18 / 0 | 60 / 0 |
+| 固定频率幅度加权 | 16 / 2 | 62 / 0 |
+| 学习权重并保留原相位 | 15 / 0 | 56 / 0 |
+| 学习复数频带修正 | 16 / 0 | 57 / 0 |
+| 去掉轻量超分输入后重拟合 | 15 / 0 | 55 / 0 |
+| 额外引入原糊图 | 20 / 0 | 58 / 0 |
+| 引入原糊图并平衡曝光 | 17 / 0 | 56 / 0 |
+
+六路在 48 张留出实拍和三张用户图上共生成 1,224 张，分别按两组清单核对解码像素及散列。六路各有 51/51 组通过四时刻回放。复数频带路线的绝对 RGB 灰阶改变量中位为 0.060，直接纳入原图路线为 0.074。合并历史库后，数值配对和高清联合仍为 133/192、2/192。六路均没有可为原生展示新增高清联合匹配的候选。开发组上的两份高清联合未在留出组复现。33 项仓库测试及 56 项子测试通过，成图保留为离线实验。[开发组基础路线](<D:/Data/Build/visual-analysis-dev/portrait-window-frequency-fit-01/development-scores.json>) · [开发组原糊图路线](<D:/Data/Build/visual-analysis-dev/portrait-window-frequency-fit-01/development-observed-scores.json>) · [留出组基础路线](<D:/Data/Build/visual-analysis-dev/portrait-window-frequency-fit-01/held-scores.json>) · [留出组原糊图路线](<D:/Data/Build/visual-analysis-dev/portrait-window-frequency-fit-01/held-observed-scores.json>) · [留出并集](<D:/Data/Build/visual-analysis-dev/portrait-window-frequency-fit-01/combined-holdout.json>)
