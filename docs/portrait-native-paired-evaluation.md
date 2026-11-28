@@ -6195,3 +6195,8 @@ Windows C++ 共轭梯度求解通过卷积伴随内积及零修正检查。人�
 
 
 先在新增高清数值配对的实拍输入和三张用户图上复核原生输出。用四时刻曝光验证的同外观替换均无改变。按外观分离与回放门槛追加时，三张用户图分别增加 1、2、2 张实验成图，新增高清数值配对对应实拍仍无追加。用户图缺少清晰原片，现阶段无法确认真人外观。33 项仓库测试及 56 项子测试通过，应用未接入。[四张原生替换回执](<D:/Data/Build/visual-analysis-dev/portrait-local-fold-motion-01/strict-native-refinement.json>)
+
+
+全体留出清晰度评分中，两份可能由本轮追加获得的高清联合均集中在 `rb-00009-0382`，分别为时刻 5 和 7，端点路线没有额外高清联合。该输入的原生追加回执无新增，最强新候选到既有展示最近的五官带通距离为 0.00950，低于追加要求的 0.025。保留既有展示的基线为 0/192 高清联合，因此当前追加路线的高清联合展示仍为 0/192。这一结论逐一核对了所有可能改变该项计数的输入。三张用户图真正新增的五张均为端点方案，已逐像素核对输出文件，眼区暗带、反光及模糊仍在。[实拍可能命中与实际展示](<D:/Data/Build/visual-analysis-dev/portrait-local-fold-motion-01/native-joint-bound.json>) · [原生重点输入回执](<D:/Data/Build/visual-analysis-dev/portrait-local-fold-motion-01/native-priority-results.json>) · [三张实际追加图](<D:/Data/Build/visual-analysis-dev/portrait-local-fold-motion-01/actual-user-display.png>)
+
+另外用 12 张有数字原帧的实拍屏摄，分别在保留频带和联合曝光两种底图上重复分区反卷积。四种方法各有 24/24 组通过回放，没有新候选通过配对或高清联合，原候选库仍覆盖 1/12。[真实屏摄评分](<D:/Data/Build/visual-analysis-dev/portrait-local-fold-motion-01/screen-scores.json>) · [Windows 求解器源码](<D:/Data/Build/visual-analysis-dev/portrait-local-fold-motion-01/local_solver.cpp>)
